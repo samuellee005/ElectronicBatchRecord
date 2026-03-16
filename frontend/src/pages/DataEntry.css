@@ -1,0 +1,1005 @@
+.data-entry-page {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0 24px 40px;
+}
+
+/* ── Header ─────────────────────────────────────────────── */
+.de-header {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+  padding: 20px 28px;
+  border-radius: 12px;
+  margin-bottom: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  box-shadow: 0 4px 16px rgba(102, 126, 234, 0.35);
+}
+
+.de-header h1 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.de-header-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* ── Buttons ────────────────────────────────────────────── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s, opacity 0.2s, transform 0.1s;
+}
+
+.btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-save {
+  background: #fff;
+  color: #667eea;
+}
+
+.btn-save:hover:not(:disabled) {
+  background: #f0f0ff;
+}
+
+.btn-complete {
+  background: #28a745;
+  color: #fff;
+}
+
+.btn-complete:hover:not(:disabled) {
+  background: #218838;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+}
+
+.btn-primary:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+/* ── Cards ──────────────────────────────────────────────── */
+.de-card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 20px 24px;
+  margin-bottom: 20px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+  border: 1px solid #eee;
+}
+
+.de-card h2 {
+  margin: 0 0 6px;
+  font-size: 1.15rem;
+  color: #333;
+}
+
+.de-card p {
+  margin: 4px 0;
+  font-size: 0.92rem;
+  color: #555;
+}
+
+/* ── Batch-creation panel ───────────────────────────────── */
+.batch-create-panel {
+  max-width: 520px;
+  margin: 40px auto;
+}
+
+.batch-create-panel h2 {
+  margin-bottom: 16px;
+}
+
+.batch-create-panel .form-group {
+  margin-bottom: 14px;
+}
+
+.batch-create-panel label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 4px;
+  font-size: 0.9rem;
+  color: #444;
+}
+
+.batch-create-panel input,
+.batch-create-panel textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  box-sizing: border-box;
+}
+
+.batch-create-panel input:focus,
+.batch-create-panel textarea:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15);
+}
+
+.batch-create-panel .btn {
+  margin-top: 8px;
+  width: 100%;
+  justify-content: center;
+}
+
+/* ── Combined-form note ─────────────────────────────────── */
+.combined-note {
+  margin-top: 12px;
+  padding: 12px 16px;
+  background: #e8e8ff;
+  border-radius: 6px;
+  border-left: 4px solid #667eea;
+  font-size: 0.9rem;
+  color: #444;
+}
+
+.combined-note strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+/* ── Layout: single column (form info → stages → PDF → save) ── */
+.de-layout {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+  flex-wrap: nowrap;
+}
+
+.de-layout-single {
+  flex-direction: column;
+  max-width: 100%;
+}
+
+/* Form info + Stages: 50/50 on one row */
+.de-form-and-stages-row {
+  display: flex;
+  gap: 24px;
+  width: 100%;
+  margin-bottom: 24px;
+}
+
+.de-form-and-stages-row .de-form-info,
+.de-form-and-stages-row .stages-panel {
+  flex: 1;
+  min-width: 0;
+}
+
+.de-form-info {
+  width: 100%;
+  max-width: 100%;
+}
+
+/* Toolbar above PDF: pagination center, zoom right */
+.de-pdf-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 12px;
+  padding: 8px 0;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  align-self: stretch;
+}
+
+.de-pdf-toolbar-spacer {
+  flex: 1;
+  min-width: 0;
+}
+
+.de-pdf-toolbar-center {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: center;
+}
+
+.de-pdf-toolbar-right {
+  flex: 1;
+  display: flex;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.de-pdf-pagination {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.de-pdf-pagination button {
+  padding: 8px 16px;
+  border: 1px solid #667eea;
+  background: #fff;
+  color: #667eea;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.de-pdf-pagination button:hover:not(:disabled) {
+  background: #667eea;
+  color: #fff;
+}
+
+.de-pdf-pagination button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.de-pdf-pagination span {
+  margin: 0 8px;
+  font-size: 0.9rem;
+  color: #555;
+}
+
+/* ── PDF overlays (zoom top-right, pagination top/bottom center) ── */
+.de-pdf-area .pdf-canvas-wrapper {
+  position: relative;
+}
+
+.de-pdf-area .pdf-overlay {
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+}
+
+.de-pdf-area .pdf-overlay-zoom .de-zoom-controls,
+.de-zoom-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  border: 1px solid #eee;
+}
+
+.de-zoom-controls button {
+  padding: 6px 12px;
+  border: 1px solid #ddd;
+  background: #fff;
+  border-radius: 6px;
+  font-size: 1rem;
+  cursor: pointer;
+  min-width: 36px;
+}
+
+.de-zoom-controls button:hover {
+  background: #f5f5f5;
+  border-color: #667eea;
+}
+
+.de-zoom-controls span {
+  padding: 0 10px;
+  font-size: 0.9rem;
+  color: #555;
+  min-width: 52px;
+  text-align: center;
+}
+
+.de-pdf-area .pdf-overlay-pagination-top .pdf-pagination,
+.de-pdf-area .pdf-overlay-pagination-bottom .pdf-pagination {
+  padding: 8px 16px;
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 8px;
+  margin: 0;
+}
+
+/* ── Stage panel ────────────────────────────────────────── */
+.stages-panel h3 {
+  margin: 0 0 14px;
+  font-size: 1rem;
+  color: #333;
+}
+
+.stage-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-radius: 8px;
+  margin-bottom: 8px;
+  border-left: 4px solid #ccc;
+  background: #fafafa;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.stage-item.completed {
+  border-left-color: #28a745;
+  background: #f0faf3;
+}
+
+.stage-item.current {
+  border-left-color: #667eea;
+  background: #f0f0ff;
+}
+
+.stage-item.locked {
+  border-left-color: #dc3545;
+  background: #fdf0f0;
+}
+
+.stage-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.stage-name {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: #333;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stage-order {
+  font-size: 0.78rem;
+  color: #888;
+  margin-top: 2px;
+}
+
+.stage-status {
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+  margin-left: 8px;
+}
+
+.stage-status.completed { color: #28a745; }
+.stage-status.current   { color: #667eea; }
+.stage-status.locked    { color: #dc3545; }
+
+/* ── PDF + corrections panel (off-page right) ────────────────────────────── */
+.de-pdf-and-corrections {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 20px;
+  width: 100%;
+  max-width: 100%;
+}
+
+.de-pdf-area {
+  flex: 1;
+  min-width: 0;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.de-pdf-area .pdf-viewer-wrapper {
+  max-width: 100%;
+}
+
+/* Corrections panel: outside the page, right side; ref numbers match overlay badges */
+.de-corrections-panel {
+  flex-shrink: 0;
+  width: 280px;
+  max-height: 70vh;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 10px;
+  padding: 14px 16px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+}
+
+.de-corrections-panel-title {
+  margin: 0 0 6px;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #333;
+}
+
+.de-corrections-panel-hint {
+  margin: 0 0 12px;
+  font-size: 0.75rem;
+  color: #666;
+}
+
+.de-corrections-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.de-correction-block {
+  padding: 10px 12px;
+  background: #f8f9fa;
+  border: 1px solid #eee;
+  border-radius: 8px;
+  border-left: 3px solid #667eea;
+}
+
+.de-correction-block-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.de-correction-ref {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  background: #667eea;
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 700;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.de-correction-label {
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: #333;
+}
+
+.de-correction-current {
+  font-size: 0.8rem;
+  color: #555;
+  margin-left: auto;
+}
+
+.de-correction-history {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 0.78rem;
+  color: #555;
+}
+
+.de-correction-history li {
+  margin-bottom: 4px;
+}
+
+.de-correction-old {
+  text-decoration: line-through;
+  color: #999;
+}
+
+.de-correction-arrow {
+  color: #999;
+  margin: 0 4px;
+}
+
+.de-correction-new {
+  color: #0d6efd;
+  font-weight: 500;
+}
+
+.de-correction-meta {
+  color: #666;
+  font-style: italic;
+  margin-left: 4px;
+}
+
+/* Ref badge on overlay: matches panel number */
+.overlay-field-ref-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  margin-left: 6px;
+  background: #667eea;
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* ── Overlay field wrappers ─────────────────────────────── */
+.overlay-field {
+  position: absolute;
+  box-sizing: border-box;
+  z-index: 2;
+}
+
+.overlay-field.locked {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.overlay-field-label {
+  position: absolute;
+  top: -16px;
+  left: 0;
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: #555;
+  white-space: nowrap;
+  pointer-events: none;
+  line-height: 1;
+}
+
+.overlay-field-label .required-marker {
+  color: #dc3545;
+  margin-left: 2px;
+}
+
+/* Audit: timestamp, locked value, Edit, corrections ──────────────────────── */
+.overlay-field-audit {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.75rem;
+  color: #555;
+}
+
+/* Two-column layout: initial input/value left, correction segments column right */
+.overlay-field-audit-with-corrections {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.overlay-field-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.overlay-field-correction-column {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex-shrink: 0;
+  max-width: 55%;
+}
+
+.overlay-field-timestamp {
+  font-size: 0.65rem;
+  color: #888;
+}
+
+.overlay-field-timestamp-inline {
+  display: block;
+  margin-top: 2px;
+}
+
+.overlay-field-value-readonly {
+  padding: 4px 6px;
+  background: #f9f9f9;
+  border: 1px solid #eee;
+  border-radius: 4px;
+  min-height: 24px;
+}
+
+.overlay-field-locked .overlay-field-edit-btn {
+  margin-top: 6px;
+  padding: 4px 10px;
+  font-size: 0.75rem;
+  border: 1px solid #667eea;
+  background: #fff;
+  color: #667eea;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.overlay-field-locked .overlay-field-edit-btn:hover {
+  background: #667eea;
+  color: #fff;
+}
+
+/* Input container: wraps input + timestamp + submit so submit can sit bottom-right */
+.overlay-field-input-container {
+  position: relative;
+  width: 100%;
+  min-height: 28px;
+  padding-right: 58px; /* space for Submit button so it doesn't overlap input */
+}
+
+/* Submit button: inside input container, bottom right */
+.overlay-field-submit-btn {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  margin: 0;
+  padding: 4px 10px;
+  font-size: 0.75rem;
+  border: 1px solid #28a745;
+  background: #fff;
+  color: #28a745;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.overlay-field-submit-btn:hover {
+  background: #28a745;
+  color: #fff;
+}
+
+.overlay-field-strikethrough {
+  text-decoration: line-through;
+  color: #999;
+  margin-right: 6px;
+}
+
+/* Correction column: segments stack vertically on the right of the initial input */
+
+/* Each past correction is one segment in the row */
+.overlay-field-correction-segment {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #f5f5f5;
+  border: 1px solid #e8e8e8;
+}
+
+.overlay-field-correction-old {
+  text-decoration: line-through;
+  color: #999;
+}
+
+.overlay-field-correction-arrow {
+  color: #999;
+  font-size: 0.65rem;
+  flex-shrink: 0;
+}
+
+.overlay-field-correction-new {
+  color: #0d6efd;
+  font-weight: 500;
+}
+
+.overlay-field-correction-meta {
+  color: #666;
+  font-style: italic;
+  font-size: 0.65rem;
+  white-space: nowrap;
+}
+
+.overlay-field-correction-editor .overlay-field-audit {
+  width: 100%;
+}
+
+/* Current correction-in-progress: sits in left column (overlay-field-main) */
+.overlay-field-main .overlay-field-correction-new-entry {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: #f0f4ff;
+  border: 1px solid #c7d2fe;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.overlay-field-correction-row {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.overlay-field-correction-row .overlay-field-correction-original {
+  flex-shrink: 0;
+  text-decoration: line-through;
+  color: #999;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.overlay-field-correction-row .overlay-field-correction-input-wrap {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.overlay-field-correction-input-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.overlay-field-correction-row .overlay-field-correction-input {
+  min-width: 120px;
+}
+
+.overlay-field-correction-meta-inline {
+  flex-basis: 100%;
+  font-size: 0.65rem;
+  margin-top: 2px;
+}
+
+.overlay-field-correction-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px 6px;
+  font-size: 0.8rem;
+  border: 1px solid #667eea;
+  border-radius: 4px;
+}
+
+.overlay-field-correction-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.overlay-field-correction-save {
+  padding: 4px 10px;
+  font-size: 0.75rem;
+  border: none;
+  background: #28a745;
+  color: #fff;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.overlay-field-correction-save:hover {
+  background: #218838;
+}
+
+.overlay-field-correction-cancel {
+  padding: 4px 10px;
+  font-size: 0.75rem;
+  border: 1px solid #ccc;
+  background: #fff;
+  color: #555;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.overlay-field-correction-cancel:hover {
+  background: #f5f5f5;
+}
+
+/* ── Inputs inside overlay fields ───────────────────────── */
+.overlay-field input[type="text"],
+.overlay-field input[type="date"],
+.overlay-field input[type="number"],
+.overlay-field textarea,
+.overlay-field select {
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-size: 0.8rem;
+  background: #fff;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.overlay-field input:focus,
+.overlay-field textarea:focus,
+.overlay-field select:focus {
+  border-color: #667eea;
+  box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.18);
+}
+
+.overlay-field textarea {
+  resize: none;
+}
+
+/* number + unit wrapper */
+.unit-input-group {
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+}
+
+.unit-input-group input {
+  flex: 1;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.unit-display {
+  display: flex;
+  align-items: center;
+  padding: 0 6px;
+  background: #f0f0f0;
+  border: 1px solid #ccc;
+  border-left: none;
+  border-radius: 0 4px 4px 0;
+  font-size: 0.75rem;
+  color: #666;
+  white-space: nowrap;
+}
+
+/* checkbox */
+.overlay-checkbox-wrap {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  gap: 6px;
+}
+
+.overlay-checkbox-wrap input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: #667eea;
+}
+
+.overlay-checkbox-wrap span {
+  font-size: 0.8rem;
+  color: #333;
+}
+
+/* ── Signature pad ──────────────────────────────────────── */
+.sig-container {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+}
+
+.sig-canvas-wrap {
+  flex: 1;
+  position: relative;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: #fff;
+  cursor: crosshair;
+  overflow: hidden;
+  min-height: 40px;
+}
+
+.sig-canvas-wrap.disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.sig-canvas-wrap canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+.sig-controls {
+  display: flex;
+  gap: 5px;
+  margin-top: 3px;
+}
+
+.sig-clear-btn {
+  padding: 2px 8px;
+  font-size: 0.7rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+  color: #555;
+}
+
+.sig-clear-btn:hover:not(:disabled) {
+  background: #f5f5f5;
+}
+
+.sig-clear-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Save / complete bottom section ─────────────────────── */
+.de-save-section {
+  margin-top: 24px;
+  width: 100%;
+  max-width: 900px;
+}
+
+.de-save-section .de-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.de-save-section .de-card p {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.de-save-actions {
+  display: flex;
+  gap: 10px;
+}
+
+/* ── Error / loading states ─────────────────────────────── */
+.de-error {
+  background: #fff3f3;
+  color: #c62828;
+  padding: 16px 20px;
+  border-radius: 8px;
+  border-left: 4px solid #dc3545;
+}
+
+.de-loading {
+  text-align: center;
+  padding: 60px 20px;
+  color: #999;
+  font-size: 1rem;
+}
+
+/* ── Pagination (top + bottom) in data entry ────────────── */
+.de-pdf-area .pdf-pagination {
+  padding: 8px 0;
+}
+
+.de-pdf-area .pdf-pagination button {
+  padding: 8px 16px;
+  border: 1px solid #667eea;
+  background: #fff;
+  color: #667eea;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.de-pdf-area .pdf-pagination button:hover:not(:disabled) {
+  background: #667eea;
+  color: #fff;
+}
+
+.de-pdf-area .pdf-pagination button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.de-pdf-area .pdf-pagination span {
+  margin: 0 12px;
+  font-size: 0.9rem;
+  color: #555;
+}
+
+/* ── Responsive ─────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .de-layout-single {
+    width: 100%;
+  }
+}

@@ -1,0 +1,32 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  background: #f0f2f5;
+  min-height: 100vh;
+  color: #1a1a1a;
+}
+
+a { color: #667eea; text-decoration: none; }
+a:hover { color: #764ba2; text-decoration: underline; }
+
+.main { max-width: 1200px; margin: 0 auto; padding: 32px 20px; }
+.page-title { font-size: 1.75rem; color: #1a1a1a; margin-bottom: 24px; }
+
+.btn {
+  display: inline-block;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+  text-decoration: none;
+  font-family: inherit;
+}
+.btn-primary { background: #667eea; color: white; }
+.btn-primary:hover { background: #5568d3; }
+.btn-success { background: #28a745; color: white; }
+.btn-success:hover { background: #218838; }
+.btn-success:disabled { background: #ccc; cursor: not-allowed; }
+
+.error-message { color: #721c24; background: #f8d7da; padding: 12px; border-radius: 6px; margin: 12px 0; }

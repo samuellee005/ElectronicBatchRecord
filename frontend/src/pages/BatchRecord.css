@@ -1,0 +1,22 @@
+.page-subtitle { color: #666; font-size: 1rem; margin-bottom: 24px; }
+.batch-record-page .table-toolbar { margin-bottom: 16px; }
+.search-box { flex: 1; min-width: 200px; padding: 10px 16px; border: 1px solid #ddd; border-radius: 8px; font-size: 0.95rem; }
+.search-box:focus { outline: none; border-color: #667eea; }
+.batch-table-wrapper { overflow-x: auto; border-radius: 8px; border: 1px solid #e0e0e0; background: #fff; }
+.batch-table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
+.batch-table th, .batch-table td { padding: 12px 16px; text-align: left; border-bottom: 1px solid #eee; }
+.batch-table th { background: #f5f5f5; font-weight: 600; color: #444; }
+.batch-table tbody tr:hover { background: #f8f9fa; }
+.batch-table .actions-cell a { display: inline-block; padding: 6px 12px; margin-right: 6px; border-radius: 6px; font-size: 0.85rem; font-weight: 500; text-decoration: none; }
+.batch-table .actions-cell a.resume-link { background: #28a745; color: white; }
+.batch-table .actions-cell a.resume-link:hover { background: #218838; color: white; }
+.batch-table .actions-cell a.view-link { background: #667eea; color: white; }
+.batch-table .actions-cell a.view-link:hover { background: #5568d3; color: white; }
+.placeholder-box { background: #fff; border-radius: 12px; padding: 40px; text-align: center; color: #999; border: 1px solid #e0e0e0; }
+.placeholder-box a { color: #667eea; font-weight: 500; }
+.placeholder-box p + p { margin-top: 8px; }
+
+.commonly-used-section { margin-bottom: 32px; }
+.commonly-used-section:last-of-type { margin-bottom: 0; }
+.commonly-used-heading { font-size: 1.1rem; color: #333; margin: 0 0 12px; font-weight: 600; }
+.commonly-used-section .table-toolbar { margin-bottom: 12px; }

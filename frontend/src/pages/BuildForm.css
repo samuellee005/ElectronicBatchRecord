@@ -1,0 +1,5 @@
+.build-form-page .form-section { margin-bottom: 24px; }
+.build-form-page .form-section h2 { font-size: 1rem; margin-bottom: 8px; color: #444; }
+.build-form-page .pdf-list { list-style: none; }
+.build-form-page .pdf-list li { padding: 6px 0; }
+.build-form-page .form-input, .build-form-page .form-select { padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; min-width: 200px; }
