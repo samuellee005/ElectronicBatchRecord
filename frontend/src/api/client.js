@@ -45,13 +45,33 @@ export async function createBatchRecord(body) {
   return request('/includes/create-batch-record.php', { method: 'POST', body: JSON.stringify(body) })
 }
 
-export async function listBatchRecords(status) {
-  const q = status ? `?status=${encodeURIComponent(status)}` : ''
-  return request(`/includes/list-batch-records.php${q}`)
+export async function listBatchRecords(status, createdBy) {
+  const params = new URLSearchParams()
+  if (status) params.set('status', status)
+  if (createdBy) params.set('createdBy', createdBy)
+  const qs = params.toString()
+  return request(`/includes/list-batch-records.php${qs ? `?${qs}` : ''}`)
 }
 
 export async function updateBatchRecord(body) {
   return request('/includes/update-batch-record.php', { method: 'POST', body: JSON.stringify(body) })
+}
+
+export async function getBatchRecord(batchId) {
+  return request(`/includes/get-batch-record.php?batchId=${encodeURIComponent(batchId)}`)
+}
+
+/** @param {{ q: string; scope?: 'both' | 'batch_title' | 'form_name' }} params */
+export async function searchData(params) {
+  const q = new URLSearchParams()
+  q.set('q', params.q || '')
+  q.set('scope', params.scope || 'both')
+  return request(`/includes/search-data.php?${q.toString()}`)
+}
+
+/** Returns the URL to download a completed batch as PDF (use as link href; opens in same tab for download). */
+export function getDownloadBatchPdfUrl(batchId) {
+  return `/includes/download-batch-pdf.php?batchId=${encodeURIComponent(batchId)}`
 }
 
 // Templates / PDFs
@@ -68,6 +88,19 @@ export async function mergePdfs(pdfFiles) {
 
 export async function testGhostscript() {
   return request('/includes/test-ghostscript.php')
+}
+
+/** @returns {Promise<{ success: boolean, users: Array<{ id: string, displayName: string, active: boolean }> }>} */
+export async function listActiveUsers(all = false) {
+  const q = all ? '?all=1' : ''
+  return request(`/includes/list-active-users.php${q}`)
+}
+
+export async function saveActiveUsers(users) {
+  return request('/includes/save-active-users.php', {
+    method: 'POST',
+    body: JSON.stringify({ users }),
+  })
 }
 
 /**

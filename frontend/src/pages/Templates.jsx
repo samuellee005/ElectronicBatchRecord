@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react"
 import { Link } from "react-router-dom"
-import { DocumentTextIcon, PlusCircleIcon } from '@heroicons/react/24/outline'
 import { listPdfs } from "../api/client"
 import "./Templates.css"
 
@@ -34,20 +33,20 @@ export default function Templates() {
           <input type="text" className="search-box" placeholder="Search" value={search} onChange={(e) => setSearch(e.target.value)} />
           <div className="templates-table-wrapper">
             <table className="templates-table">
-              <thead><tr><th>Actions</th><th>Name</th><th>Size</th></tr></thead>
+              <thead><tr><th>Name</th><th>Size</th><th>Actions</th></tr></thead>
               <tbody>
                 {filtered.map((p) => (
                   <tr key={p.name}>
-                    <td className="actions-cell">
-                      <Link to={"/templates/view?file=" + encodeURIComponent(p.name)} className="action-icon view-icon" title="View">
-                        <DocumentTextIcon className="action-svg" />
-                      </Link>
-                      <Link to={"/forms/builder?file=" + encodeURIComponent(p.name)} className="action-icon build-icon" title="Create">
-                        <PlusCircleIcon className="action-svg" />
-                      </Link>
-                    </td>
                     <td>{p.display_name || p.name}</td>
                     <td>{fmt(p.size || 0)}</td>
+                    <td className="actions-cell">
+                      <Link to={"/templates/view?file=" + encodeURIComponent(p.name)} className="tpl-btn tpl-btn-view">
+                        View
+                      </Link>
+                      <Link to={"/forms/builder?file=" + encodeURIComponent(p.name)} className="tpl-btn tpl-btn-create">
+                        Create form
+                      </Link>
+                    </td>
                   </tr>
                 ))}
               </tbody>

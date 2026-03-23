@@ -75,6 +75,11 @@ export default function FormsList() {
                 <td><code>{form.pdfFile}</code></td>
                 <td className="actions-cell">
                   <Link to={'/forms/entry?form=' + encodeURIComponent(form.id)} className="use-link">Use</Link>
+                  {form.pdfFile && (
+                    <Link to={`/forms/builder?file=${encodeURIComponent(form.pdfFile)}&formId=${encodeURIComponent(form.id)}`} className="view-form-link">
+                      View form
+                    </Link>
+                  )}
                   <button type="button" className="audit-btn" onClick={() => setAuditForm(form)}>Audit</button>
                 </td>
               </tr>

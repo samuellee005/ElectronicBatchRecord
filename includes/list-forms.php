@@ -25,11 +25,15 @@ foreach ($formFiles as $formFile) {
             'description' => $formData['description'] ?? '',
             'pdfFile' => $formData['pdfFile'] ?? '',
             'fieldCount' => count($formData['fields'] ?? []),
-            'version' => $formData['version'] ?? 1,
+            'version' => round(floatval($formData['version'] ?? 1), 1),
             'isLatest' => $formData['isLatest'] ?? true,
+            'isCombined' => isset($formData['isCombined']) && $formData['isCombined'] === true,
+            'sourceFormIds' => $formData['sourceFormIds'] ?? [],
             'createdAt' => $formData['createdAt'] ?? '',
             'updatedAt' => $formData['updatedAt'] ?? '',
-            'filename' => basename($formFile)
+            'filename' => basename($formFile),
+            'createdBy' => $formData['createdBy'] ?? null,
+            'updatedBy' => $formData['updatedBy'] ?? null
         ];
     }
 }
@@ -44,15 +48,15 @@ foreach ($forms as $form) {
     $groupedForms[$key][] = $form;
 }
 
-// Sort forms within each group by version (newest first)
+// Sort forms within each group by version (highest version first = newest). Compare as decimals.
 foreach ($groupedForms as $key => $group) {
     usort($groupedForms[$key], function($a, $b) {
-        $versionA = $a['version'] ?? 1;
-        $versionB = $b['version'] ?? 1;
-        if ($versionA === $versionB) {
-            return strtotime($b['updatedAt']) - strtotime($a['updatedAt']);
+        $versionA = round(floatval($a['version'] ?? 1), 1);
+        $versionB = round(floatval($b['version'] ?? 1), 1);
+        if (abs($versionA - $versionB) < 0.01) {
+            return strtotime($b['updatedAt'] ?? '') - strtotime($a['updatedAt'] ?? '');
         }
-        return $versionB - $versionA;
+        return $versionB <=> $versionA; // higher version first
     });
 }
 
@@ -62,6 +66,18 @@ usort($groupedForms, function($a, $b) {
     $latestB = $b[0]['updatedAt'] ?? $b[0]['createdAt'] ?? '';
     return strtotime($latestB) - strtotime($latestA);
 });
+
+// Latest = highest version in each group (first after sort)
+$latestIds = [];
+foreach ($groupedForms as $group) {
+    if (!empty($group)) {
+        $latestIds[] = $group[0]['id'];
+    }
+}
+foreach ($forms as &$form) {
+    $form['isLatest'] = in_array($form['id'], $latestIds, true);
+}
+unset($form);
 
 echo json_encode([
     'success' => true,

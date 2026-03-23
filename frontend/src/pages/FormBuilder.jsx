@@ -10,6 +10,10 @@ import {
   DocumentTextIcon,
   ChevronUpDownIcon,
   CheckIcon,
+  ClockIcon,
+  StopCircleIcon,
+  Squares2X2Icon,
+  UserGroupIcon,
 } from '@heroicons/react/24/outline'
 import PdfViewer from '../components/PdfViewer'
 import { listForms, loadFormById, saveForm } from '../api/client'
@@ -23,6 +27,10 @@ const COMPONENT_TYPES = [
   { type: 'textarea', Icon: DocumentTextIcon, name: 'Text Area' },
   { type: 'dropdown', Icon: ChevronUpDownIcon, name: 'Dropdown' },
   { type: 'checkbox', Icon: CheckIcon, name: 'Checkbox' },
+  { type: 'time', Icon: ClockIcon, name: 'Time Entry' },
+  { type: 'radio', Icon: StopCircleIcon, name: 'Radio Group' },
+  { type: 'multiselect', Icon: Squares2X2Icon, name: 'Multi Select' },
+  { type: 'collaborator', Icon: UserGroupIcon, name: 'Collaborator Entry' },
 ]
 
 const DEFAULT_CONFIGS = {
@@ -33,6 +41,15 @@ const DEFAULT_CONFIGS = {
   textarea: { width: 300, height: 100, label: 'Text Area', placeholder: 'Enter text' },
   dropdown: { width: 200, height: 35, label: 'Dropdown Field', options: ['Option 1', 'Option 2'] },
   checkbox: { width: 150, height: 30, label: 'Checkbox Field' },
+  time: { width: 220, height: 42, label: 'Time', placeholder: 'HH:MM' },
+  radio: { width: 280, height: 100, label: 'Radio Group', options: ['Option A', 'Option B', 'Option C'] },
+  multiselect: { width: 280, height: 120, label: 'Multi select', options: ['Item 1', 'Item 2', 'Item 3'] },
+  collaborator: {
+    width: 320,
+    height: 140,
+    label: 'Collaborators',
+    helpText: 'Designate primary analyst and secondary reviewer from Active Users.',
+  },
 }
 
 const UNIT_OPTIONS = ['', 'kg', 'g', 'mg', 'L', 'mL', '\u00B0C', '\u00B0F', '%', 'ppm', 'pH']
@@ -87,6 +104,7 @@ export default function FormBuilder() {
   const [saveCreateNewVersion, setSaveCreateNewVersion] = useState(false)
   const [saving, setSaving] = useState(false)
   const [componentsPanelCollapsed, setComponentsPanelCollapsed] = useState(false)
+  const [propertiesPanelCollapsed, setPropertiesPanelCollapsed] = useState(false)
 
   // Drag/resize state via refs to avoid re-renders during drag
   const dragState = useRef({ active: false, fieldId: null, offsetX: 0, offsetY: 0 })
@@ -773,15 +791,39 @@ export default function FormBuilder() {
           )}
         </div>
 
-        {/* Properties Panel - only visible when a field is selected */}
+        {/* Properties Panel - only visible when a field is selected; collapsible like components */}
         {selectedField && (
-          <div className="fb-properties-panel">
-            <h2>Properties</h2>
-            <PropertiesForm
-              field={selectedField}
-              existingStages={existingStages}
-              onUpdate={(updates) => updateField(selectedField.id, updates)}
-            />
+          <div
+            className={`fb-properties-panel ${propertiesPanelCollapsed ? 'fb-properties-panel-collapsed' : ''}`}
+          >
+            <button
+              type="button"
+              className="fb-properties-panel-toggle"
+              onClick={() => setPropertiesPanelCollapsed((c) => !c)}
+              title={propertiesPanelCollapsed ? 'Expand properties' : 'Collapse properties'}
+              aria-label={propertiesPanelCollapsed ? 'Expand properties' : 'Collapse properties'}
+            >
+              <span className="fb-properties-panel-toggle-line">
+                <span className="fb-properties-panel-toggle-label">
+                  {propertiesPanelCollapsed ? 'Properties' : ''}
+                </span>
+                {propertiesPanelCollapsed ? (
+                  <ChevronDoubleLeftIcon className="fb-properties-panel-toggle-chevron" />
+                ) : (
+                  <ChevronDoubleRightIcon className="fb-properties-panel-toggle-chevron" />
+                )}
+              </span>
+            </button>
+            {!propertiesPanelCollapsed && (
+              <div className="fb-properties-panel-content">
+                <h2 className="fb-properties-panel-title">Properties</h2>
+                <PropertiesForm
+                  field={selectedField}
+                  existingStages={existingStages}
+                  onUpdate={(updates) => updateField(selectedField.id, updates)}
+                />
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -1131,6 +1173,49 @@ function FieldPreview({ field }) {
           <input type="checkbox" className="fb-field-input" disabled />
         </div>
       )
+    case 'time':
+      return (
+        <div style={{ ...containerStyle, gap: 6 }}>
+          <input type="time" className="fb-field-input" disabled style={{ flex: 1 }} />
+          <button type="button" className="fb-field-now-btn" disabled>Now</button>
+        </div>
+      )
+    case 'radio':
+      return (
+        <div style={{ ...containerStyle, flexDirection: 'column', alignItems: 'stretch', gap: 4, overflowY: 'auto' }}>
+          {(field.options || ['A', 'B']).slice(0, 4).map((opt, i) => (
+            <label key={i} className="fb-preview-radio">
+              <input type="radio" disabled /> {opt}
+            </label>
+          ))}
+        </div>
+      )
+    case 'multiselect':
+      return (
+        <div style={{ ...containerStyle, flexDirection: 'column', alignItems: 'stretch', gap: 4, overflowY: 'auto' }}>
+          {(field.options || []).slice(0, 4).map((opt, i) => (
+            <label key={i} className="fb-preview-radio">
+              <input type="checkbox" disabled /> {opt}
+            </label>
+          ))}
+        </div>
+      )
+    case 'collaborator':
+      return (
+        <div style={{ ...containerStyle, flexDirection: 'column', alignItems: 'stretch', gap: 6, fontSize: '0.75rem' }}>
+          <div className="fb-collab-preview-row">
+            <span>Primary</span>
+            <select className="fb-field-input" disabled><option>—</option></select>
+          </div>
+          <div className="fb-collab-preview-row">
+            <span>Reviewer</span>
+            <select className="fb-field-input" disabled><option>—</option></select>
+          </div>
+          <label className="fb-preview-radio">
+            <input type="checkbox" disabled /> Reviewer records all entry
+          </label>
+        </div>
+      )
     default:
       return <div style={containerStyle} />
   }
@@ -1320,7 +1405,7 @@ function PropertiesForm({ field, existingStages, onUpdate }) {
         </div>
       )}
 
-      {field.type === 'dropdown' && (
+      {(field.type === 'dropdown' || field.type === 'radio' || field.type === 'multiselect') && (
         <div className="fb-form-group">
           <label>Options (one per line):</label>
           <textarea
@@ -1329,6 +1414,33 @@ function PropertiesForm({ field, existingStages, onUpdate }) {
               onUpdate({ options: e.target.value.split('\n').filter((o) => o.trim()) })
             }
           />
+        </div>
+      )}
+
+      {field.type === 'time' && (
+        <div className="fb-form-group">
+          <label>Placeholder:</label>
+          <input
+            type="text"
+            value={field.placeholder || ''}
+            onChange={(e) => onUpdate({ placeholder: e.target.value })}
+            placeholder="e.g. HH:MM"
+          />
+        </div>
+      )}
+
+      {field.type === 'collaborator' && (
+        <div className="fb-form-group">
+          <label>Help text (shown on form):</label>
+          <textarea
+            rows={2}
+            value={field.helpText || ''}
+            onChange={(e) => onUpdate({ helpText: e.target.value })}
+            placeholder="Optional instructions for analysts"
+          />
+          <small className="fb-hint">
+            Manage users under <strong>Active Users</strong> in the nav.
+          </small>
         </div>
       )}
     </div>

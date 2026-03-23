@@ -12,6 +12,8 @@
 .batch-table .actions-cell a.resume-link:hover { background: #218838; color: white; }
 .batch-table .actions-cell a.view-link { background: #667eea; color: white; }
 .batch-table .actions-cell a.view-link:hover { background: #5568d3; color: white; }
+.batch-table .actions-cell a.view-form-link { background: #667eea; color: white; }
+.batch-table .actions-cell a.view-form-link:hover { background: #5568d3; color: white; }
 .placeholder-box { background: #fff; border-radius: 12px; padding: 40px; text-align: center; color: #999; border: 1px solid #e0e0e0; }
 .placeholder-box a { color: #667eea; font-weight: 500; }
 .placeholder-box p + p { margin-top: 8px; }

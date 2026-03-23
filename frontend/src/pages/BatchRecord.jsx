@@ -110,6 +110,11 @@ export default function BatchRecord() {
                       <td>v{f.version ?? 1}{f.isLatest ? ' (latest)' : ''}</td>
                       <td className="actions-cell">
                         <Link to={`/forms/entry?form=${encodeURIComponent(f.id)}`} className="resume-link">Use</Link>
+                        {f.pdfFile && (
+                          <Link to={`/forms/builder?file=${encodeURIComponent(f.pdfFile)}&formId=${encodeURIComponent(f.id)}`} className="view-form-link">
+                            View form
+                          </Link>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -153,6 +158,11 @@ export default function BatchRecord() {
                       <td>{formatDate(r.openedAt)}</td>
                       <td className="actions-cell">
                         <Link to={`/forms/entry?form=${encodeURIComponent(r.formId)}`} className="resume-link">Use</Link>
+                        {r.pdfFile && (
+                          <Link to={`/forms/builder?file=${encodeURIComponent(r.pdfFile)}&formId=${encodeURIComponent(r.formId)}`} className="view-form-link">
+                            View form
+                          </Link>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -207,6 +217,11 @@ export default function BatchRecord() {
                     >
                       {status === 'in_progress' ? 'Resume' : 'View'}
                     </Link>
+                    {r.pdfFile && r.formId && (
+                      <Link to={`/forms/builder?file=${encodeURIComponent(r.pdfFile)}&formId=${encodeURIComponent(r.formId)}`} className="view-form-link">
+                        View form
+                      </Link>
+                    )}
                   </td>
                 </tr>
               ))}

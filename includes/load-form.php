@@ -45,10 +45,11 @@ foreach ($forms as $formFile) {
 }
 
 if ($latestForm) {
-    // Ensure version and isLatest properties exist for backward compatibility
+    // Ensure version and isLatest properties exist; normalize version to one decimal (e.g. 1.2 not 1.2000000000000002)
     if (!isset($latestForm['version'])) {
-        $latestForm['version'] = 1;
+        $latestForm['version'] = 1.0;
     }
+    $latestForm['version'] = round(floatval($latestForm['version']), 1);
     if (!isset($latestForm['isLatest'])) {
         $latestForm['isLatest'] = true;
     }

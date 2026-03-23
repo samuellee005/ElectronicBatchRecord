@@ -9,6 +9,8 @@ import DataEntry from './pages/DataEntry'
 import Templates from './pages/Templates'
 import UploadTemplate from './pages/UploadTemplate'
 import ViewTemplate from './pages/ViewTemplate'
+import DataSearch from './pages/DataSearch'
+import ActiveUsers from './pages/ActiveUsers'
 
 function Layout({ children }) {
   return (
@@ -25,6 +27,8 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Layout><Dashboard /></Layout>} />
         <Route path="/forms" element={<Layout><FormsList /></Layout>} />
+        <Route path="/data-search" element={<Layout><DataSearch /></Layout>} />
+        <Route path="/active-users" element={<Layout><ActiveUsers /></Layout>} />
         <Route path="/forms/build" element={<Layout><BuildForm /></Layout>} />
         <Route path="/forms/builder" element={<Layout><FormBuilder /></Layout>} />
         <Route path="/forms/entry" element={<Layout><DataEntry /></Layout>} />

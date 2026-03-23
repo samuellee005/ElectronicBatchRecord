@@ -32,10 +32,11 @@ foreach ($forms as $formFile) {
 }
 
 if ($foundForm) {
-    // Ensure version and isLatest properties exist for backward compatibility
+    // Ensure version and isLatest properties exist; normalize version to one decimal (e.g. 1.2 not 1.2000000000000002)
     if (!isset($foundForm['version'])) {
-        $foundForm['version'] = 1;
+        $foundForm['version'] = 1.0;
     }
+    $foundForm['version'] = round(floatval($foundForm['version']), 1);
     if (!isset($foundForm['isLatest'])) {
         $foundForm['isLatest'] = true;
     }

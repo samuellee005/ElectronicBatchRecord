@@ -1,0 +1,13 @@
+{
+    "id": "batch_69b1d3ee0d014",
+    "formId": "form_69b1ce7ba0591",
+    "formName": "Test Form",
+    "title": "test",
+    "description": "test5",
+    "status": "in_progress",
+    "createdAt": "2026-03-11T13:43:26-07:00",
+    "updatedAt": "2026-03-11T13:43:26-07:00",
+    "completedAt": null,
+    "createdBy": "",
+    "lastEntryId": null
+}

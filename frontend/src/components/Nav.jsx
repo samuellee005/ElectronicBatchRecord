@@ -11,6 +11,8 @@ export default function Nav() {
     if (match === 'batch') return location.pathname === '/batch'
     if (match === 'templates') return location.pathname.startsWith('/templates')
     if (match === 'forms') return location.pathname.startsWith('/forms') && !location.pathname.startsWith('/forms/build')
+    if (match === 'data-search') return location.pathname === '/data-search'
+    if (match === 'active-users') return location.pathname === '/active-users'
     if (match === 'home') return location.pathname === '/'
     return false
   }
@@ -64,6 +66,12 @@ export default function Nav() {
         </li>
         <li className={isActive(null, 'forms') ? 'active' : ''}>
           <Link to="/forms">Batch Record Forms</Link>
+        </li>
+        <li className={isActive(null, 'data-search') ? 'active' : ''}>
+          <Link to="/data-search">Data Search</Link>
+        </li>
+        <li className={isActive(null, 'active-users') ? 'active' : ''}>
+          <Link to="/active-users">Active Users</Link>
         </li>
       </ul>
     </nav>
