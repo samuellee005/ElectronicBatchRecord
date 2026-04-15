@@ -12,10 +12,11 @@ function buildExcelFilename(query) {
 function downloadSearchResultsExcel(results, columns, query) {
   if (!results.length) return
   const origin = typeof window !== 'undefined' ? window.location.origin : ''
-  const headers = ['Batch title', 'Form', 'Status', ...columns, 'Batch ID', 'Open link']
+  const headers = ['Batch number', 'Batch title', 'Form', 'Status', ...columns, 'Open link']
   const dataRows = results.map((row) => {
     const openUrl = `${origin}/forms/entry?form=${encodeURIComponent(row.formId)}&batch=${encodeURIComponent(row.batchId)}`
     return [
+      row.batchId ?? '',
       row.title ?? '',
       row.formName ?? '',
       row.status === 'completed' ? 'Completed' : 'In progress',
@@ -23,7 +24,6 @@ function downloadSearchResultsExcel(results, columns, query) {
         const v = row.fieldValues?.[col]
         return v != null && String(v).trim() !== '' ? String(v) : ''
       }),
-      row.batchId ?? '',
       openUrl,
     ]
   })
@@ -79,6 +79,7 @@ export default function DataSearch() {
   )
 
   const fixedCols = [
+    { key: 'batchId', label: 'Batch number' },
     { key: 'title', label: 'Batch title' },
     { key: 'formName', label: 'Form' },
     { key: 'status', label: 'Status' },
@@ -158,6 +159,9 @@ export default function DataSearch() {
             <tbody>
               {results.map((row) => (
                 <tr key={row.batchId}>
+                  <td className="data-search-td-fixed data-search-td-batch-number">
+                    <code>{row.batchId || '—'}</code>
+                  </td>
                   <td className="data-search-td-fixed">{row.title || '—'}</td>
                   <td className="data-search-td-fixed">{row.formName || '—'}</td>
                   <td className="data-search-td-fixed">

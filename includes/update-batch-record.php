@@ -3,6 +3,7 @@
  * Update batch record (e.g. set status to completed, or update lastEntryId on data save)
  */
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/batch-record.php';
 
 header('Content-Type: application/json');
 
@@ -32,6 +33,8 @@ if (!$record) {
     echo json_encode(['success' => false, 'message' => 'Invalid batch record']);
     exit;
 }
+
+$record = ebr_batch_record_ensure_batch_id($record);
 
 $now = date('c');
 $record['updatedAt'] = $now;

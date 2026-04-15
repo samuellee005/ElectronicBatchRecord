@@ -1,7 +1,7 @@
 .data-entry-page {
-  max-width: 1400px;
+  max-width: 100%;
   margin: 0 auto;
-  padding: 0 24px 40px;
+  padding: 0 0 40px;
 }
 
 /* ── Header ─────────────────────────────────────────────── */
@@ -29,6 +29,81 @@
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+/* Batch ID + title (screen chrome; hidden in print — see @media print) */
+.de-batch-meta {
+  background: #f8f9fc;
+  border: 1px solid #e2e6f0;
+  border-radius: 10px;
+  padding: 12px 18px;
+  margin: -8px 0 20px;
+  box-sizing: border-box;
+}
+
+.de-batch-meta-loading {
+  margin: 0 0 8px;
+  font-size: 0.88rem;
+  color: #666;
+}
+
+.de-batch-meta-title {
+  margin: 0 0 10px;
+  font-size: 0.92rem;
+  color: #333;
+  line-height: 1.4;
+}
+
+.de-batch-meta-title strong {
+  color: #444;
+  margin-right: 6px;
+}
+
+.de-batch-meta-id-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+}
+
+.de-batch-meta-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #667eea;
+}
+
+.de-batch-id {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-size: 0.85rem;
+  color: #1a1a1a;
+  background: #fff;
+  border: 1px solid #dde1e8;
+  border-radius: 6px;
+  padding: 6px 10px;
+  word-break: break-all;
+}
+
+.de-batch-id-copy {
+  flex-shrink: 0;
+  padding: 6px 14px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #555;
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.de-batch-id-copy:hover {
+  background: #f3f4f6;
+  border-color: #667eea;
+  color: #333;
 }
 
 /* ── Buttons ────────────────────────────────────────────── */
@@ -208,37 +283,6 @@
   max-width: 100%;
 }
 
-/* Toolbar above PDF: pagination center, zoom right */
-.de-pdf-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-bottom: 12px;
-  padding: 8px 0;
-  width: 100%;
-  max-width: 100%;
-  box-sizing: border-box;
-  align-self: stretch;
-}
-
-.de-pdf-toolbar-spacer {
-  flex: 1;
-  min-width: 0;
-}
-
-.de-pdf-toolbar-center {
-  flex: 0 0 auto;
-  display: flex;
-  justify-content: center;
-}
-
-.de-pdf-toolbar-right {
-  flex: 1;
-  display: flex;
-  justify-content: flex-end;
-  min-width: 0;
-}
-
 .de-pdf-pagination {
   display: flex;
   align-items: center;
@@ -309,12 +353,19 @@
   border-color: #667eea;
 }
 
+.de-zoom-controls .pdf-zoom-controls-percent,
 .de-zoom-controls span {
   padding: 0 10px;
   font-size: 0.9rem;
   color: #555;
   min-width: 52px;
   text-align: center;
+}
+
+.de-zoom-controls .pdf-zoom-controls-input {
+  min-width: 52px;
+  padding: 4px 8px;
+  font-size: 0.9rem;
 }
 
 .de-pdf-area .pdf-overlay-pagination-top .pdf-pagination,
@@ -390,10 +441,18 @@
 .stage-status.current   { color: #667eea; }
 .stage-status.locked    { color: #dc3545; }
 
-/* ── PDF row: page + corrections flush right (panel height tracks page via JS) ── */
+/* ── PDF row: page + corrections aside (individual cards; column height capped, not full bleed) ── */
 .de-pdf-and-corrections {
   width: 100%;
   max-width: 100%;
+}
+
+.de-pdf-page-and-corrections {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 14px;
+  flex-shrink: 0;
 }
 
 .de-pdf-area {
@@ -411,15 +470,444 @@
   overflow-y: visible;
   display: flex;
   justify-content: center;
-  padding-bottom: 8px;
+  padding-bottom: 4px;
 }
 
-.de-pdf-page-and-corrections {
+/* Field detail panel — base card chrome (positioning via --margin) */
+.de-field-detail-panel {
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 10px;
+  padding: 0;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+}
+
+/* Fixed in the viewport margin: does not sit in the PDF row, so the page stays full width.
+   Vertical position is usually set inline (aligned to the selected overlay field). */
+.de-field-detail-panel.de-field-detail-panel--margin {
+  position: fixed;
+  z-index: 200;
+  top: 96px;
+  bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+  right: max(12px, env(safe-area-inset-right, 0px));
+  width: min(300px, calc(100vw - 24px));
+  max-height: none;
   display: flex;
-  flex-direction: row;
+  flex-direction: column;
+  box-shadow: 0 4px 28px rgba(0, 0, 0, 0.14);
+  transform-origin: center center;
+}
+
+.de-field-detail-panel.de-field-detail-panel--margin .de-field-detail-panel-body {
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.de-field-detail-panel-header {
+  display: flex;
   align-items: flex-start;
-  gap: 14px;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid #eee;
+  position: sticky;
+  top: 0;
+  background: #fff;
+  z-index: 1;
+}
+
+.de-field-detail-panel-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #222;
+  line-height: 1.35;
+}
+
+.de-field-detail-panel-close {
   flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 8px;
+  background: #f0f0f5;
+  color: #444;
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.de-field-detail-panel-close:hover {
+  background: #e4e4ec;
+  color: #111;
+}
+
+.de-field-detail-panel-body {
+  padding: 12px 16px 16px;
+}
+
+.de-field-panel-stage-lock {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  background: #fff8e6;
+  border: 1px solid #f0c040;
+  border-radius: 8px;
+  font-size: 0.88rem;
+  color: #5c4a00;
+  line-height: 1.4;
+}
+
+.de-field-panel-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.de-field-panel-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  background: #eef0fb;
+  color: #4a5090;
+}
+
+.de-field-panel-badge-req {
+  background: #fff0f0;
+  color: #b00020;
+}
+
+.de-field-panel-badge-stage {
+  background: #e8f4f8;
+  color: #0d5c7a;
+}
+
+.de-field-panel-hint {
+  margin: 0 0 8px;
+  font-size: 0.85rem;
+  color: #555;
+  line-height: 1.45;
+}
+
+.de-field-panel-k {
+  font-weight: 600;
+  color: #444;
+}
+
+.de-field-panel-section-title {
+  margin: 14px 0 8px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #333;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.de-field-panel-input,
+.de-field-panel-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-family: inherit;
+}
+
+.de-field-panel-textarea {
+  resize: vertical;
+  min-height: 72px;
+}
+
+.de-field-panel-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.de-field-panel-multiselect {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.de-field-panel-collab .overlay-collab-label {
+  font-size: 0.82rem;
+}
+
+.de-field-panel-table {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+/* Data table in field panel: show row/column titles from form definition */
+.overlay-table-with-labels {
+  min-width: min(100%, 520px);
+}
+
+.overlay-table-with-labels .overlay-table-col-rowlabels {
+  width: 96px;
+  min-width: 72px;
+}
+
+.overlay-table-with-labels .overlay-table-label-corner {
+  background: #eef0fb;
+  color: #4a5090;
+  font-size: 0.65rem;
+  font-weight: 600;
+  width: 96px;
+  min-width: 72px;
+}
+
+.overlay-table-with-labels .overlay-table-col-header,
+.overlay-table-with-labels .overlay-table-row-header {
+  background: linear-gradient(180deg, #f4f6fc 0%, #e8ebf5 100%);
+  color: #2a2f4a;
+  font-weight: 600;
+  font-size: 0.72rem;
+  padding: 6px 8px;
+  text-align: left;
+  line-height: 1.25;
+  vertical-align: middle;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+}
+
+.overlay-table-with-labels .overlay-table-row-header {
+  background: linear-gradient(90deg, #f4f6fc 0%, #ebeefa 100%);
+  white-space: normal;
+  word-break: break-word;
+}
+
+.overlay-table-with-labels tbody td {
+  padding: 0;
+}
+
+.de-field-panel-readonly-value {
+  padding: 10px 12px;
+  background: #f8f9fa;
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  color: #222;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.de-field-panel-sig-preview {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 4px;
+}
+
+/* Locked / submitted checkbox: drawn box (same as overlay); native clipped for a11y only */
+.de-checkbox-readonly {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+  gap: 0;
+}
+
+.de-checkbox-readonly input[type='checkbox'] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+  cursor: default;
+}
+
+.de-checkbox-readonly input[type='checkbox']:disabled {
+  opacity: 1;
+}
+
+.de-field-panel-checkbox-readonly {
+  padding: 4px 0;
+}
+
+.de-correction-checkbox {
+  vertical-align: middle;
+}
+
+/*
+ * Drawn box + checkmark (native checkbox hidden/clipped).
+ * Screen matches overlay 18px control; print avoids [ ] / widget text from PDF engines.
+ */
+.de-checkbox-print-visual {
+  box-sizing: border-box;
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  min-height: 18px;
+  border: 2px solid #1a1a1a;
+  border-radius: 3px;
+  background: #fff;
+  vertical-align: middle;
+  flex-shrink: 0;
+  position: relative;
+  display: inline-block;
+  pointer-events: none;
+}
+
+/* Multiselect: keep native on screen; sibling box only for print (see JSX). */
+.de-checkbox-print-visual--print-only {
+  display: none !important;
+}
+
+.de-checkbox-print-visual--checked::after {
+  content: '';
+  display: block;
+  position: absolute;
+  left: 5px;
+  top: 1px;
+  width: 5px;
+  height: 10px;
+  border: solid #1a1a1a;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+  box-sizing: border-box;
+}
+
+.de-signature-correction-wrap {
+  display: inline;
+  vertical-align: baseline;
+}
+
+/* Screen-only controls; print uses .de-signature-correction-print-fallback (see @media print) */
+.de-signature-correction-print-fallback {
+  display: none !important;
+}
+
+/* Revealed only in @media print under html.de-data-entry-print-host */
+.de-signature-correction-print-img {
+  display: block;
+  max-height: 72px;
+  max-width: 220px;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border-radius: 4px;
+}
+
+.de-signature-correction-print-caption {
+  font-size: 0.72rem;
+  color: #555;
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+/* Strikethrough “from” value — don’t strike signature thumbnails; strike the link label only */
+.de-correction-old:has(.de-signature-correction-wrap) {
+  text-decoration: none;
+}
+
+.de-correction-old:has(.de-signature-correction-wrap) .de-signature-correction-interactive {
+  text-decoration: line-through;
+}
+
+.de-signature-correction-link {
+  font-size: inherit;
+  font-weight: 500;
+  color: #0d6efd;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  white-space: nowrap;
+}
+
+.de-signature-correction-link:hover {
+  color: #0a58ca;
+}
+
+button.de-signature-correction-link {
+  font: inherit;
+  font-family: inherit;
+  line-height: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  text-align: inherit;
+}
+
+.de-signature-correction-empty {
+  color: #888;
+}
+
+/* Locked / read-only signature on canvas — avoid rendering data URL as link-like text */
+.de-signature-readonly-img {
+  max-width: 100%;
+  max-height: 72px;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  display: block;
+  vertical-align: middle;
+  border-radius: 4px;
+}
+
+.overlay-field-value-readonly--compact .de-signature-readonly-img {
+  max-height: 56px;
+}
+
+.overlay-field-correction-original-sig.de-signature-readonly-img {
+  max-height: 96px;
+}
+
+.de-field-panel-audit {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid #eee;
+}
+
+.de-field-panel-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-bottom: 6px;
+  font-size: 0.82rem;
+}
+
+.de-field-panel-v {
+  color: #222;
+  word-break: break-word;
+}
+
+.de-field-panel-correction-list {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-size: 0.8rem;
+  color: #555;
+}
+
+.de-field-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.de-field-panel-submit {
+  width: 100%;
+  justify-content: center;
 }
 
 .de-pdf-area .pdf-viewer-wrapper {
@@ -440,17 +928,18 @@
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
 }
 
-/* Beside PDF page: same styling, scrolls internally, height capped to match page */
+/* Beside PDF: scrollable column capped to ~page height; inner blocks stay individual cards */
 .de-corrections-panel-aside {
   flex-shrink: 0;
   width: 272px;
-  overflow-y: auto;
   overflow-x: hidden;
+  overflow-y: auto;
   background: #fff;
   border: 1px solid #e0e0e0;
   border-radius: 10px;
   padding: 12px 14px;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+  box-sizing: border-box;
   align-self: flex-start;
 }
 
@@ -474,11 +963,24 @@
 }
 
 .de-correction-block {
-  padding: 10px 12px;
+  position: relative;
+  padding: 10px 12px 10px 14px;
   background: #f8f9fa;
-  border: 1px solid #eee;
-  border-radius: 8px;
-  border-left: 3px solid #667eea;
+  border: 1px solid #e9e9ec;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.de-correction-block::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: #667eea;
+  border-radius: 10px 0 0 10px;
 }
 
 .de-correction-block-header {
@@ -563,6 +1065,316 @@
   font-weight: 700;
   border-radius: 50%;
   flex-shrink: 0;
+}
+
+/* Compact overlay: PDF shows input only; label / submit live in the side panel */
+.overlay-field.overlay-field--compact {
+  display: flex;
+  flex-direction: column;
+  cursor: pointer;
+  min-height: 0;
+  overflow: hidden;
+  box-sizing: border-box;
+  background: transparent;
+  box-shadow: none;
+}
+
+.overlay-field.overlay-field--compact.locked {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+/* Inset highlight so selection does not look larger than the designed field box */
+.overlay-field--panel-active {
+  outline: 2px solid #667eea;
+  outline-offset: -2px;
+  box-shadow: inset 0 0 0 1px rgba(102, 126, 234, 0.35);
+  border-radius: 4px;
+}
+
+/*
+ * Compact field: one relative box filling the overlay — controls are position:absolute
+ * so they cannot extend past the PDF field (flex-end + height:auto was still overflowing).
+ */
+.overlay-field-input-container--compact {
+  position: relative;
+  padding-right: 0;
+  flex: 1 1 0;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  max-height: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+  border-radius: 4px;
+  background: transparent;
+  /* Inherited from .overlay-field when --field-input-font-size is set (Form Builder) */
+  font-size: var(--field-input-font-size, 0.8rem);
+}
+
+/* Visible frame on the PDF for every field (empty, filled, or submitted) — stripped in @media print */
+.overlay-field.overlay-field--compact .overlay-field-input-container--compact {
+  box-shadow: inset 0 0 0 1px rgba(102, 126, 234, 0.38);
+}
+
+.overlay-field.overlay-field--compact .overlay-field-input-container--compact:focus-within {
+  box-shadow: inset 0 0 0 1px rgba(102, 126, 234, 0.52);
+  background: transparent;
+}
+
+/* Editable & still empty: stronger frame (submitted / locked omit overlay-field--compact-empty) */
+.overlay-field.overlay-field--compact.overlay-field--compact-empty .overlay-field-input-container--compact {
+  box-shadow: inset 0 0 0 2px rgba(102, 126, 234, 0.55);
+}
+
+.overlay-field.overlay-field--compact.overlay-field--compact-empty .overlay-field-input-container--compact:focus-within {
+  box-shadow: inset 0 0 0 2px rgba(102, 126, 234, 0.78);
+  background: transparent;
+}
+
+.overlay-field-input-container--compact > .unit-input-group,
+.overlay-field-input-container--compact > .overlay-time-row,
+.overlay-field-input-container--compact > input,
+.overlay-field-input-container--compact > .overlay-textarea-stack,
+.overlay-field-input-container--compact > select,
+.overlay-field-input-container--compact > .overlay-table-scroll,
+.overlay-field-input-container--compact > .sig-container,
+.overlay-field-input-container--compact > .overlay-checkbox-wrap,
+.overlay-field-input-container--compact > .overlay-radio-group,
+.overlay-field-input-container--compact > .overlay-multiselect-group,
+.overlay-field-input-container--compact > .overlay-collaborator {
+  position: absolute;
+  left: 0;
+  right: 0;
+  width: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  box-sizing: border-box;
+  margin: 0;
+}
+
+/*
+ * Text-like controls: anchor to bottom of frame so placeholder/value align with submitted text
+ * (readonly uses flex-end + center). Height is content-sized up to max-height so controls stay in frame.
+ * Checkbox: keep full-height box, centered control.
+ */
+.overlay-field-input-container--compact > .overlay-checkbox-wrap {
+  top: 0;
+  bottom: 0;
+  height: auto;
+  min-height: 0;
+}
+
+.overlay-field-input-container--compact > input,
+.overlay-field-input-container--compact > select,
+.overlay-field-input-container--compact > .unit-input-group,
+.overlay-field-input-container--compact > .overlay-time-row {
+  top: auto;
+  bottom: 0;
+  height: auto;
+  min-height: 0;
+  max-height: 100%;
+}
+
+/*
+ * Textarea stack: bottom-align the control in the PDF box (textarea paints lines from the top of its own
+ * box, so we shrink-wrap that box and push it to the bottom via flex — same idea in print via mirror).
+ */
+.overlay-field-input-container--compact > .overlay-textarea-stack {
+  top: auto;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: stretch;
+  min-height: 0;
+}
+
+.overlay-textarea-stack > textarea {
+  position: relative;
+  flex: 0 1 auto;
+  align-self: stretch;
+  min-height: 0;
+  max-height: 100%;
+}
+
+.overlay-textarea-print-mirror {
+  display: none;
+}
+
+/* Tall lists: fill the box and scroll */
+.overlay-field-input-container--compact > .overlay-radio-group,
+.overlay-field-input-container--compact > .overlay-multiselect-group {
+  top: 0;
+  bottom: 0;
+  overflow-y: auto;
+  justify-content: flex-start;
+}
+
+.overlay-field-input-container--compact > .overlay-table-scroll,
+.overlay-field-input-container--compact > .sig-container,
+.overlay-field-input-container--compact > .overlay-collaborator {
+  top: 0;
+  bottom: 0;
+  overflow: auto;
+}
+
+.overlay-field-input-container--compact > .overlay-collab-block-hint {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  margin: 0;
+  padding: 2px 4px;
+  max-height: 45%;
+  overflow: hidden;
+}
+
+.overlay-field-input-container--compact > .overlay-field-locked-inner {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.overlay-field-input-container--compact > span.overlay-field-value-readonly--compact {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  max-height: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+/* Multi-line text: column + flex-end pushes the text block to the bottom (row flex-end is unreliable when text wraps) */
+.overlay-field-input-container--compact > span.overlay-field-value-readonly--textarea {
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  white-space: pre-wrap;
+  word-break: break-word;
+  text-align: center;
+}
+
+/* Checkbox read-only: center in the box (not bottom-aligned like line text) */
+.overlay-field-input-container--compact > span.de-checkbox-readonly.overlay-field-value-readonly--compact {
+  align-items: center;
+}
+
+.overlay-field-input-container--compact > img.overlay-field-value-readonly--compact {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  max-height: 100%;
+  max-width: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  object-position: center bottom;
+}
+
+.overlay-field-locked-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
+  max-height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  align-items: flex-end;
+  box-sizing: border-box;
+}
+
+.overlay-field-ref-badge--compact {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  margin: 0;
+  z-index: 1;
+}
+
+.overlay-field-value-readonly--compact {
+  font-size: inherit;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+  width: 100%;
+  max-width: 100%;
+  text-shadow:
+    0 0 4px rgba(255, 255, 255, 0.9),
+    0 0 8px rgba(255, 255, 255, 0.75);
+  color: #1a1a1a;
+}
+
+.overlay-field--compact .overlay-collaborator {
+  background: transparent;
+}
+
+.overlay-field--compact .overlay-collab-label select {
+  background: transparent !important;
+  background-image: none !important;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.overlay-field--compact .de-checkbox-readonly {
+  width: 100%;
+  justify-content: center;
+}
+
+.overlay-field--compact .de-signature-readonly-img {
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.overlay-checkbox-wrap--compact {
+  justify-content: center;
+}
+
+.overlay-field--compact .overlay-radio-group,
+.overlay-field--compact .overlay-multiselect-group {
+  align-items: center;
+}
+
+.overlay-field--compact .overlay-radio-label {
+  justify-content: center;
+  width: 100%;
+}
+
+.overlay-field--compact .overlay-time-row {
+  justify-content: center;
+  align-items: flex-end;
+  height: auto;
+  max-height: 100%;
+  flex: 0 1 auto;
+}
+
+.overlay-field--compact .overlay-collaborator--compact {
+  align-items: center;
+}
+
+.overlay-field--compact .overlay-collab-label {
+  align-items: center;
+  text-align: center;
+}
+
+.overlay-field--compact .overlay-table-input {
+  text-align: center;
+}
+
+.overlay-collaborator--compact {
+  gap: 6px;
+  font-size: inherit;
+}
+
+.overlay-collaborator--compact .overlay-collab-label {
+  gap: 2px;
 }
 
 /* ── Overlay field wrappers ─────────────────────────────── */
@@ -737,6 +1549,12 @@
   color: #555;
 }
 
+.overlay-field-audit-table {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
 /* Two-column layout: initial input/value left, correction segments column right */
 .overlay-field-audit-with-corrections {
   flex-direction: row;
@@ -776,6 +1594,16 @@
   border: 1px solid #eee;
   border-radius: 4px;
   min-height: 24px;
+}
+
+/* PDF overlay (compact): wins over rule above — submitted/locked values must not use the gray “card” */
+.overlay-field-value-readonly.overlay-field-value-readonly--compact {
+  background: transparent !important;
+  border: none;
+  padding: 0;
+  min-height: 0;
+  box-shadow: none;
+  border-radius: 0;
 }
 
 /* Locked field: title row with Edit top-right (above value stack) */
@@ -853,6 +1681,18 @@
   padding-right: 58px; /* space for Submit button so it doesn't overlap input */
 }
 
+/*
+ * Compact overlay (batch entry on PDF): must match .fb-field / Form Builder size.
+ * This selector comes AFTER the base .overlay-field-input-container so it wins the cascade —
+ * otherwise min-height: 28px and padding-right: 58px inflate small fields when clicked.
+ */
+.overlay-field-input-container.overlay-field-input-container--compact {
+  min-height: 0;
+  height: 100%;
+  padding-right: 0;
+  box-sizing: border-box;
+}
+
 /* Submit button: inside input container, bottom right */
 .overlay-field-submit-btn {
   position: absolute;
@@ -888,7 +1728,7 @@
   gap: 4px;
   flex-shrink: 0;
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: 8px;
   background: #f5f5f5;
   border: 1px solid #e8e8e8;
 }
@@ -928,7 +1768,7 @@
   align-items: center;
   gap: 6px;
   padding: 6px 8px;
-  border-radius: 4px;
+  border-radius: 10px;
   background: #f0f4ff;
   border: 1px solid #c7d2fe;
   width: 100%;
@@ -949,6 +1789,19 @@
   max-width: 120px;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.overlay-field-correction-original--table {
+  max-width: none;
+  flex: 1 1 45%;
+  min-width: 0;
+  overflow: auto;
+  text-decoration: none;
+  color: #444;
+}
+
+.overlay-field-correction-original--table .overlay-table-scroll-readonly {
+  max-height: min(50vh, 280px);
 }
 
 .overlay-field-correction-row .overlay-field-correction-input-wrap {
@@ -1019,12 +1872,12 @@
   background: #f5f5f5;
 }
 
-/* ── Inputs inside overlay fields ───────────────────────── */
-.overlay-field input[type="text"],
-.overlay-field input[type="date"],
-.overlay-field input[type="number"],
-.overlay-field textarea,
-.overlay-field select {
+/* ── Inputs inside overlay fields (correction editor only — compact PDF overlays use rules below) ───────────────────────── */
+.overlay-field:not(.overlay-field--compact) input[type='text'],
+.overlay-field:not(.overlay-field--compact) input[type='date'],
+.overlay-field:not(.overlay-field--compact) input[type='number'],
+.overlay-field:not(.overlay-field--compact) textarea,
+.overlay-field:not(.overlay-field--compact) select {
   width: 100%;
   height: 100%;
   box-sizing: border-box;
@@ -1037,11 +1890,132 @@
   transition: border-color 0.15s;
 }
 
-.overlay-field input:focus,
-.overlay-field textarea:focus,
-.overlay-field select:focus {
+.overlay-field:not(.overlay-field--compact) input:focus,
+.overlay-field:not(.overlay-field--compact) textarea:focus,
+.overlay-field:not(.overlay-field--compact) select:focus {
   border-color: #667eea;
   box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.18);
+}
+
+/*
+ * Compact overlay on PDF: no second “card” — transparent fill, no border; the field box is the PDF frame.
+ */
+.overlay-field.overlay-field--compact input[type='text'],
+.overlay-field.overlay-field--compact input[type='date'],
+.overlay-field.overlay-field--compact input[type='number'],
+.overlay-field.overlay-field--compact input[type='time'],
+.overlay-field.overlay-field--compact select,
+.overlay-field.overlay-field--compact textarea {
+  height: auto;
+  min-height: 0;
+  max-height: 100%;
+  padding: 0 2px;
+  line-height: 1.15;
+  font-size: inherit;
+  text-align: center;
+  color: #1a1a1a;
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0;
+  outline: none;
+  box-shadow: none !important;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color-scheme: light;
+}
+
+.overlay-field.overlay-field--compact select {
+  background-color: transparent !important;
+  background-image: none !important;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.overlay-field.overlay-field--compact textarea {
+  overflow-y: auto;
+  text-overflow: clip;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.overlay-field.overlay-field--compact input[type='number'] {
+  -moz-appearance: textfield;
+}
+
+.overlay-field.overlay-field--compact input[type='number']::-webkit-outer-spin-button,
+.overlay-field.overlay-field--compact input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.overlay-field.overlay-field--compact input::placeholder,
+.overlay-field.overlay-field--compact textarea::placeholder {
+  text-align: center;
+  color: rgba(0, 0, 0, 0.42);
+  opacity: 1;
+}
+
+.overlay-field.overlay-field--compact.overlay-field--compact-empty input::placeholder,
+.overlay-field.overlay-field--compact.overlay-field--compact-empty textarea::placeholder {
+  color: rgba(0, 0, 0, 0.58);
+  font-weight: 600;
+}
+
+.overlay-field.overlay-field--compact.overlay-field--compact-empty select {
+  color: rgba(0, 0, 0, 0.52);
+  font-weight: 600;
+}
+
+.overlay-field.overlay-field--compact input:-webkit-autofill,
+.overlay-field.overlay-field--compact input:-webkit-autofill:hover,
+.overlay-field.overlay-field--compact input:-webkit-autofill:focus,
+.overlay-field.overlay-field--compact textarea:-webkit-autofill,
+.overlay-field.overlay-field--compact textarea:-webkit-autofill:hover,
+.overlay-field.overlay-field--compact textarea:-webkit-autofill:focus {
+  -webkit-text-fill-color: #1a1a1a;
+  box-shadow: 0 0 0 1000px transparent inset !important;
+  transition: background-color 5000s ease-in-out 0s;
+}
+
+.overlay-field.overlay-field--compact select:-webkit-autofill,
+.overlay-field.overlay-field--compact select:-webkit-autofill:hover,
+.overlay-field.overlay-field--compact select:-webkit-autofill:focus {
+  -webkit-text-fill-color: #1a1a1a;
+  box-shadow: 0 0 0 1000px transparent inset !important;
+}
+
+.overlay-field.overlay-field--compact input:focus,
+.overlay-field.overlay-field--compact textarea:focus,
+.overlay-field.overlay-field--compact select:focus {
+  outline: none;
+  box-shadow: none !important;
+}
+
+.overlay-field--compact .sig-container {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: transparent;
+  overflow: hidden;
+}
+
+.overlay-field--compact .sig-canvas-wrap {
+  flex: 1;
+  min-height: 0;
+  background: transparent;
+  border: 1px dashed rgba(102, 126, 234, 0.35);
+}
+
+.overlay-field.overlay-field--compact.overlay-field--compact-empty .sig-canvas-wrap {
+  border-width: 2px;
+  border-style: dashed;
+  border-color: rgba(102, 126, 234, 0.78);
+}
+
+/* Base .sig-canvas-wrap uses min-height: 40px — that can overflow tiny PDF boxes */
+.overlay-field--compact .sig-controls {
+  margin-top: 0;
+  flex-shrink: 0;
 }
 
 .overlay-field textarea {
@@ -1053,6 +2027,14 @@
   display: flex;
   align-items: stretch;
   height: 100%;
+}
+
+.overlay-field--compact .unit-input-group {
+  min-height: 0;
+  max-height: 100%;
+  height: auto;
+  width: 100%;
+  align-items: flex-end;
 }
 
 .unit-input-group input {
@@ -1072,6 +2054,106 @@
   font-size: 0.75rem;
   color: #666;
   white-space: nowrap;
+}
+
+.overlay-field--compact .unit-display {
+  align-items: flex-end;
+  background: transparent !important;
+  border: none;
+  border-left: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 0;
+  color: #333;
+}
+
+/* Time + Now row: strip opaque chrome so the PDF shows through */
+.overlay-field--compact .overlay-time-row input[type='time'] {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 2px;
+  border-radius: 0;
+}
+
+.overlay-field--compact .overlay-time-now-btn {
+  background: rgba(255, 255, 255, 0.25);
+  border: 1px solid rgba(102, 126, 234, 0.35);
+  color: #444;
+}
+
+.overlay-field--compact .overlay-time-now-btn:hover:not(:disabled) {
+  background: rgba(102, 126, 234, 0.12);
+}
+
+/* Table overlay on PDF: no gray panel behind cells */
+.overlay-field--compact .overlay-table-scroll {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  /* Match Form Builder: table fills field frame (avoid min(70vh,420px) cap on overlay) */
+  max-height: none !important;
+  height: 100%;
+  min-height: 0;
+  box-sizing: border-box;
+}
+
+.overlay-field--compact .overlay-table-scroll .overlay-table {
+  height: 100%;
+}
+
+/* Match Form Builder: table text uses field input font (see .fb-field .fb-table-preview { font-size: inherit }) */
+.overlay-field--compact .overlay-field-input-container--compact .overlay-table {
+  font-size: inherit;
+}
+
+/* Percent row heights match canvas only if cell content has no extra min-height (inputs default ~1.25em). */
+.overlay-field--compact .overlay-table-data-only tbody {
+  height: 100%;
+}
+
+.overlay-field--compact .overlay-table-data-only td {
+  overflow: hidden;
+}
+
+.overlay-field--compact .overlay-table-data-only .overlay-table-input,
+.overlay-field--compact .overlay-table-data-only .overlay-table-readonly {
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: none !important;
+  border-radius: 0 !important;
+  line-height: 1.15;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+  box-sizing: border-box !important;
+}
+
+.overlay-field--compact .overlay-table-data-only .overlay-table-input:focus {
+  box-shadow: inset 0 0 0 1px rgba(102, 126, 234, 0.45) !important;
+}
+
+.overlay-field--compact .overlay-table-input {
+  background: transparent !important;
+  border: 1px solid rgba(0, 0, 0, 0.12) !important;
+  box-shadow: none !important;
+}
+
+.overlay-field--compact .overlay-table-input:focus {
+  border-color: rgba(102, 126, 234, 0.55) !important;
+  box-shadow: inset 0 0 0 1px rgba(102, 126, 234, 0.25) !important;
+}
+
+.overlay-field--compact .overlay-table-input:disabled {
+  background: transparent !important;
+  color: #333;
+}
+
+.overlay-field--compact .overlay-table-readonly {
+  background: transparent !important;
+  color: #222;
+}
+
+.overlay-field--compact .sig-clear-btn {
+  background: rgba(255, 255, 255, 0.35);
+  border: 1px solid rgba(0, 0, 0, 0.12);
 }
 
 /* checkbox */
@@ -1152,9 +2234,33 @@
   accent-color: #667eea;
 }
 
+/* Compact PDF checkbox: .de-checkbox-print-visual is the visible box; input on top for clicks */
+.overlay-field-input-container--compact > .overlay-checkbox-wrap {
+  position: relative;
+}
+
+.overlay-field-input-container--compact > .overlay-checkbox-wrap input[type='checkbox'] {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
 .overlay-checkbox-wrap span {
   font-size: 0.8rem;
   color: #333;
+}
+
+.overlay-checkbox-wrap span.de-checkbox-print-visual {
+  font-size: 0;
+  line-height: 0;
 }
 
 /* ── Signature pad ──────────────────────────────────────── */
@@ -1218,7 +2324,7 @@
 .de-save-section {
   margin-top: 24px;
   width: 100%;
-  max-width: 900px;
+  max-width: min(1200px, 100%);
 }
 
 .de-save-section .de-card {
@@ -1280,10 +2386,15 @@
   cursor: not-allowed;
 }
 
-.de-pdf-area .pdf-pagination span {
+/* Plain "Page x of y" between buttons — not the scrubber caption */
+.de-pdf-area .pdf-pagination > span {
   margin: 0 12px;
   font-size: 0.9rem;
   color: #555;
+}
+
+.de-pdf-area .pdf-pagination .pdf-page-scrubber-caption {
+  margin: 0;
 }
 
 .de-collab-banner {
@@ -1359,6 +2470,80 @@
   font-size: 0.72rem;
   color: #667eea;
   margin-top: 4px;
+}
+
+.overlay-table-scroll {
+  width: 100%;
+  max-height: min(70vh, 420px);
+  overflow: auto;
+  border-radius: 6px;
+  border: 1px solid #e0e0e0;
+  background: #fafafa;
+}
+
+.overlay-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+  background: transparent;
+}
+
+.overlay-table th,
+.overlay-table td {
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  padding: 0;
+  vertical-align: middle;
+}
+
+.overlay-table-data-only td {
+  padding: 0;
+  height: 100%;
+}
+
+.overlay-table-input {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  height: 100%;
+  min-height: 1.25em;
+  padding: 2px 4px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  border-radius: 2px;
+  font-size: inherit;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.overlay-table-input:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
+}
+
+.overlay-table-input:disabled {
+  background: #f5f5f5;
+  color: #555;
+}
+
+.overlay-table-readonly {
+  display: block;
+  cursor: default;
+  user-select: text;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: rgba(249, 249, 249, 0.95);
+  color: #333;
+}
+
+.overlay-table-scroll-readonly {
+  max-height: min(70vh, 420px);
+}
+
+.overlay-table-empty {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #a00;
 }
 
 .de-modal-overlay {
@@ -1458,6 +2643,531 @@
 .de-modal-check input {
   margin-top: 4px;
   accent-color: #667eea;
+}
+
+.de-pdf-preview-modal {
+  max-width: min(960px, 96vw);
+  width: 100%;
+  max-height: min(90vh, 900px);
+  display: flex;
+  flex-direction: column;
+}
+
+.de-pdf-preview-status {
+  margin: 0 0 10px;
+  font-size: 0.9rem;
+  color: #555;
+}
+
+.de-pdf-preview-error {
+  margin: 0 0 10px;
+  font-size: 0.9rem;
+  color: #b00020;
+}
+
+.de-pdf-preview-iframe {
+  width: 100%;
+  flex: 1;
+  min-height: min(70vh, 640px);
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  background: #525659;
+}
+
+/*
+ * Browser “Print” / Save as PDF: remove interactive field frames so only the template PDF + values print.
+ * Server export (download-batch-pdf.php) draws on the PDF directly and never includes these UI borders.
+ */
+@media print {
+  /*
+   * Shell layout only while Data Entry is mounted (html class from DataEntry.jsx).
+   * Avoids global index.css print rules that affected every page / looked “misaligned” in preview.
+   */
+  html.de-data-entry-print-host .de-batch-meta {
+    display: none !important;
+  }
+
+  html.de-data-entry-print-host .app-nav {
+    display: none !important;
+  }
+
+  html.de-data-entry-print-host .app-shell {
+    display: block !important;
+    min-height: 0 !important;
+  }
+
+  html.de-data-entry-print-host .main,
+  html.de-data-entry-print-host .main.main--wide {
+    max-width: none !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 8px 12px !important;
+  }
+
+  html.de-data-entry-print-host body {
+    background: #fff !important;
+  }
+
+  /* Clipping ancestors often drop overlay fields in print; keep PDF + overlay layer together */
+  html.de-data-entry-print-host .data-entry-page {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  html.de-data-entry-print-host .overlay-layer {
+    overflow: visible !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  html.de-data-entry-print-host .overlay-field.overlay-field--compact {
+    overflow: visible !important;
+  }
+
+  html.de-data-entry-print-host .overlay-field-input-container--compact {
+    overflow: visible !important;
+  }
+
+  html.de-data-entry-print-host .pdf-canvas-wrapper {
+    display: block !important;
+    overflow: visible !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  html.de-data-entry-print-host .pdf-page-container {
+    overflow: visible !important;
+  }
+
+  html.de-data-entry-print-host .react-pdf__Page,
+  html.de-data-entry-print-host .react-pdf__Document {
+    overflow: visible !important;
+  }
+
+  /* Match on-screen compact overlay: value centered, anchored to bottom of the field box */
+  html.de-data-entry-print-host .overlay-field-input-container--compact > span.overlay-field-value-readonly--compact {
+    align-items: flex-end !important;
+    justify-content: center !important;
+    text-align: center !important;
+  }
+
+  html.de-data-entry-print-host .overlay-field-input-container--compact > span.overlay-field-value-readonly--textarea {
+    flex-direction: column !important;
+    justify-content: flex-end !important;
+    align-items: center !important;
+    white-space: pre-wrap !important;
+    word-break: break-word !important;
+    text-overflow: clip !important;
+    text-align: center !important;
+  }
+
+  /* Locked checkbox: center in box (same as direct-child readonly rule on screen) */
+  .overlay-field-input-container--compact .overlay-field-locked-inner:has(.de-checkbox-readonly) {
+    align-items: center !important;
+    justify-content: center !important;
+  }
+
+  /* Editable checkbox on PDF: centered like screen */
+  .overlay-field-input-container--compact > .overlay-checkbox-wrap {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    top: 0 !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    height: auto !important;
+  }
+
+  /*
+   * Remove native checkbox from print output (many engines draw “[ ]” / widget text).
+   * .de-checkbox-print-visual is the box; use .de-checkbox-print-visual--print-only for multiselect.
+   */
+  html.de-data-entry-print-host .de-checkbox-readonly input[type='checkbox'],
+  html.de-data-entry-print-host .overlay-field-input-container--compact > .overlay-checkbox-wrap input[type='checkbox'],
+  html.de-data-entry-print-host .overlay-multiselect-group .overlay-radio-label > input[type='checkbox'] {
+    display: none !important;
+    appearance: none !important;
+    -webkit-appearance: none !important;
+    position: absolute !important;
+    left: -99999px !important;
+    width: 0 !important;
+    height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    opacity: 0 !important;
+    visibility: hidden !important;
+    clip: rect(0, 0, 0, 0) !important;
+    clip-path: inset(50%) !important;
+    pointer-events: none !important;
+  }
+
+  html.de-data-entry-print-host .de-checkbox-print-visual {
+    display: inline-block !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Text-like controls (not textarea): absolute bottom anchor */
+  .overlay-field-input-container--compact > input,
+  .overlay-field-input-container--compact > select,
+  .overlay-field-input-container--compact > .unit-input-group,
+  .overlay-field-input-container--compact > .overlay-time-row {
+    position: absolute !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    top: auto !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    max-height: 100% !important;
+    box-sizing: border-box !important;
+    text-align: center !important;
+  }
+
+  /*
+   * Editable textarea: hide native control in print — it often expands to full height so text sits at the top
+   * of the box. The mirror duplicates the value with flex bottom-align (see .overlay-textarea-print-mirror).
+   */
+  html.de-data-entry-print-host .overlay-field-input-container--compact.overlay-field-input-container--textarea .overlay-textarea-stack {
+    top: 0 !important;
+    bottom: 0 !important;
+    height: 100% !important;
+    max-height: 100% !important;
+    justify-content: flex-end !important;
+  }
+
+  html.de-data-entry-print-host .overlay-field-input-container--compact.overlay-field-input-container--textarea .overlay-textarea-stack > textarea {
+    display: none !important;
+  }
+
+  html.de-data-entry-print-host .overlay-field-input-container--compact.overlay-field-input-container--textarea .overlay-textarea-print-mirror {
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: flex-end !important;
+    align-items: center !important;
+    flex: 1 1 auto !important;
+    width: 100% !important;
+    min-height: 0 !important;
+    max-height: 100% !important;
+    box-sizing: border-box !important;
+    padding: 0 2px !important;
+    overflow: hidden !important;
+    white-space: pre-wrap !important;
+    word-break: break-word !important;
+    text-align: center !important;
+    font: inherit !important;
+    line-height: 1.15 !important;
+    color: #1a1a1a !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .overlay-field.overlay-field--compact .overlay-field-input-container--compact {
+    box-shadow: none !important;
+  }
+
+  .overlay-field--panel-active {
+    outline: none !important;
+    box-shadow: none !important;
+  }
+
+  .overlay-field.overlay-field--compact .sig-canvas-wrap {
+    border: none !important;
+    box-shadow: none !important;
+  }
+
+  .overlay-field--compact .overlay-table-input,
+  .overlay-field--compact .overlay-table-input:focus {
+    border: none !important;
+    box-shadow: none !important;
+  }
+
+  /*
+   * PDF overlay data tables: print as real tables (scroll max-height on screen clips print otherwise).
+   */
+  html.de-data-entry-print-host .overlay-field--compact .overlay-table-scroll {
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  html.de-data-entry-print-host .overlay-field--compact .overlay-table {
+    border-collapse: collapse !important;
+  }
+
+  html.de-data-entry-print-host .overlay-field--compact .overlay-table,
+  html.de-data-entry-print-host .overlay-field--compact .overlay-table th,
+  html.de-data-entry-print-host .overlay-field--compact .overlay-table td {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .overlay-field--compact .unit-display {
+    border: none !important;
+  }
+
+  .overlay-field--compact .overlay-time-now-btn {
+    border: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+
+  .overlay-field--compact .sig-clear-btn {
+    border: none !important;
+    background: transparent !important;
+  }
+
+  .pdf-viewer-toolbar-row {
+    display: none !important;
+  }
+
+  .pdf-viewer-wrapper .pdf-pagination {
+    display: none !important;
+  }
+
+  /* Floating field panel is screen-only; avoid overlapping the PDF in print */
+  .de-field-detail-panel.de-field-detail-panel--margin {
+    display: none !important;
+  }
+
+  /*
+   * Stack PDF then corrections for print: a fixed-width aside beside a wide canvas
+   * often exceeds the printable width and clips the column off-screen.
+   */
+  .de-pdf-page-and-corrections {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 16px !important;
+    flex-wrap: nowrap !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  .de-pdf-viewport {
+    overflow: visible !important;
+    max-width: 100% !important;
+  }
+
+  .de-pdf-area {
+    max-width: 100% !important;
+    overflow: visible !important;
+  }
+
+  .de-pdf-area .pdf-viewer-wrapper {
+    max-width: 100% !important;
+    overflow: visible !important;
+  }
+
+  .de-pdf-area .pdf-canvas-wrapper {
+    box-shadow: none !important;
+    max-width: 100% !important;
+  }
+
+  .de-pdf-area .pdf-page-container {
+    max-width: 100% !important;
+  }
+
+  /*
+   * Corrections column + cards: mirror .de-corrections-panel-aside / .de-correction-block on screen.
+   * print-color-adjust keeps purple badge, card fill, and accent stripe when “Background graphics” is on.
+   */
+  .de-corrections-panel-aside,
+  .de-correction-block,
+  .de-correction-block::before,
+  .de-correction-ref,
+  .overlay-field-ref-badge,
+  .overlay-field-ref-badge--compact {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .de-corrections-panel-aside .de-checkbox-readonly {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    vertical-align: middle !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .de-corrections-panel-aside {
+    max-height: none !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    flex-shrink: 0 !important;
+    box-sizing: border-box !important;
+    overflow: visible !important;
+    background: #fff !important;
+    border: 1px solid #e0e0e0 !important;
+    border-radius: 10px !important;
+    padding: 12px 14px !important;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06) !important;
+  }
+
+  .de-corrections-panel-title {
+    margin: 0 0 6px !important;
+    font-size: 1rem !important;
+    font-weight: 600 !important;
+    color: #333 !important;
+  }
+
+  .de-corrections-panel-hint {
+    margin: 0 0 12px !important;
+    font-size: 0.75rem !important;
+    color: #666 !important;
+    line-height: 1.4 !important;
+  }
+
+  .de-corrections-list {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 12px !important;
+  }
+
+  .de-correction-block {
+    position: relative !important;
+    padding: 10px 12px 10px 14px !important;
+    background: #f8f9fa !important;
+    border: 1px solid #e9e9ec !important;
+    border-radius: 10px !important;
+    overflow: hidden !important;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04) !important;
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+
+  .de-correction-block::before {
+    background: #667eea !important;
+  }
+
+  .de-correction-block-header {
+    display: flex !important;
+    align-items: center !important;
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+    margin-bottom: 6px !important;
+  }
+
+  .de-correction-ref {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    min-width: 22px !important;
+    height: 22px !important;
+    padding: 0 6px !important;
+    background: #667eea !important;
+    color: #fff !important;
+    font-size: 0.8rem !important;
+    font-weight: 700 !important;
+    border-radius: 50% !important;
+    flex-shrink: 0 !important;
+  }
+
+  .de-correction-label {
+    font-weight: 600 !important;
+    font-size: 0.85rem !important;
+    color: #333 !important;
+  }
+
+  .de-correction-current {
+    font-size: 0.8rem !important;
+    color: #555 !important;
+    margin-left: auto !important;
+  }
+
+  .de-correction-history {
+    margin: 0 !important;
+    padding-left: 18px !important;
+    font-size: 0.78rem !important;
+    color: #555 !important;
+  }
+
+  .de-correction-history li {
+    margin-bottom: 4px !important;
+  }
+
+  .de-correction-old {
+    text-decoration: line-through !important;
+    color: #999 !important;
+  }
+
+  .de-correction-arrow {
+    color: #999 !important;
+    margin: 0 4px !important;
+  }
+
+  .de-correction-new {
+    color: #0d6efd !important;
+    font-weight: 500 !important;
+  }
+
+  .de-correction-meta {
+    color: #666 !important;
+    font-style: italic !important;
+    margin-left: 4px !important;
+  }
+
+  /* Avoid printing raw hrefs after links (file paths, data: URLs, etc.) — show link text only */
+  .de-corrections-panel-aside a[href]::after,
+  .de-corrections-panel-aside a[href]::before {
+    content: none !important;
+  }
+
+  /* Signature “links”: plain label only in print — no <a href>, <button>, or leaked URLs */
+  html.de-data-entry-print-host .de-corrections-panel-aside .de-signature-correction-interactive {
+    display: none !important;
+  }
+
+  html.de-data-entry-print-host .de-corrections-panel-aside .de-signature-correction-print-fallback {
+    display: inline-flex !important;
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 4px !important;
+    max-width: 100% !important;
+    vertical-align: middle !important;
+    color: inherit !important;
+    font-weight: 400 !important;
+    text-decoration: none !important;
+    text-underline-offset: unset !important;
+  }
+
+  html.de-data-entry-print-host .de-corrections-panel-aside .de-signature-correction-print-img {
+    max-height: 72px !important;
+    max-width: min(220px, 100%) !important;
+    width: auto !important;
+    height: auto !important;
+    object-fit: contain !important;
+    border-radius: 4px !important;
+    border: 1px solid #ccc !important;
+    background: #fff !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  html.de-data-entry-print-host .de-corrections-panel-aside .de-correction-old .de-signature-correction-print-img {
+    opacity: 0.82 !important;
+  }
+
+  html.de-data-entry-print-host .de-corrections-panel-aside .de-signature-correction-print-caption {
+    font-size: 0.72rem !important;
+    color: #444 !important;
+    font-weight: 500 !important;
+    text-decoration: none !important;
+  }
+
+  html.de-data-entry-print-host .de-corrections-panel-aside .de-correction-old:has(.de-signature-correction-wrap) {
+    text-decoration: none !important;
+  }
+
+  .overlay-field-ref-badge,
+  .overlay-field-ref-badge--compact {
+    background: #667eea !important;
+    color: #fff !important;
+  }
 }
 
 /* ── Responsive ─────────────────────────────────────────── */

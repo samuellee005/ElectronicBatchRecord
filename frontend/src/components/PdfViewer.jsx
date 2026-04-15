@@ -2,10 +2,14 @@ import { useEffect, useRef, useState, useCallback, forwardRef, useImperativeHand
 import { Document, Page, pdfjs } from 'react-pdf'
 import 'react-pdf/dist/Page/AnnotationLayer.css'
 import 'react-pdf/dist/Page/TextLayer.css'
+import './PdfViewer.css'
 
 pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`
 
-const PdfViewer = forwardRef(function PdfViewer({ pdfUrl, scale = 1.5, onPageRendered, children, paginationPosition = 'bottom', paginationOverlay = false, zoomControls, hidePagination = false }, ref) {
+const PdfViewer = forwardRef(function PdfViewer(
+  { pdfUrl, scale = 1.5, onPageRendered, children, paginationPosition = 'bottom', paginationOverlay = false, zoomControls, hidePagination = false, paginationScrubber = null },
+  ref,
+) {
   const containerRef = useRef(null)
   const [numPages, setNumPages] = useState(0)
   const [currentPage, setCurrentPage] = useState(1)
@@ -20,6 +24,11 @@ const PdfViewer = forwardRef(function PdfViewer({ pdfUrl, scale = 1.5, onPageRen
     changePage: (delta) => {
       const next = currentPage + delta
       if (next >= 1 && next <= numPages) setCurrentPage(next)
+    },
+    goToPage: (page) => {
+      if (numPages < 1) return
+      const p = Math.max(1, Math.min(numPages, Math.round(Number(page))))
+      setCurrentPage(p)
     },
   }))
 
@@ -46,10 +55,6 @@ const PdfViewer = forwardRef(function PdfViewer({ pdfUrl, scale = 1.5, onPageRen
   }, [currentPage, numPages, onPageRendered])
 
   useEffect(() => {
-    setCanvasSize((prev) => (prev.width ? { width: 0, height: 0 } : prev))
-  }, [currentPage])
-
-  useEffect(() => {
     if (pdfUrl) {
       setLoading(true)
       setError(null)
@@ -63,9 +68,18 @@ const PdfViewer = forwardRef(function PdfViewer({ pdfUrl, scale = 1.5, onPageRen
   if (error) return <div className="error-message">Error loading PDF: {error}</div>
 
   const paginationMarkup = (
-    <div className="pdf-pagination" style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'center' }}>
+    <div
+      className={`pdf-pagination${paginationScrubber ? ' pdf-pagination--with-scrubber' : ''}`}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: paginationScrubber ? 6 : 10,
+        justifyContent: 'center',
+        flexWrap: 'nowrap',
+      }}
+    >
       <button type="button" disabled={currentPage === 1} onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}>Previous</button>
-      <span>Page {currentPage} of {numPages}</span>
+      {paginationScrubber ?? <span>Page {currentPage} of {numPages}</span>}
       <button type="button" disabled={currentPage === numPages} onClick={() => setCurrentPage((p) => Math.min(numPages, p + 1))}>Next</button>
     </div>
   )
@@ -73,17 +87,21 @@ const PdfViewer = forwardRef(function PdfViewer({ pdfUrl, scale = 1.5, onPageRen
   const showPaginationTop = !hidePagination && numPages > 1 && (paginationPosition === 'top' || paginationPosition === 'both')
   const showPaginationBottom = !hidePagination && numPages > 1 && (paginationPosition === 'bottom' || paginationPosition === 'both')
   const renderPaginationOutside = !paginationOverlay
+  const showTopToolbar = (renderPaginationOutside && showPaginationTop) || zoomControls
 
   return (
     <div className="pdf-viewer-wrapper">
-      {renderPaginationOutside && showPaginationTop && <div style={{ marginBottom: 16 }}>{paginationMarkup}</div>}
-      <div className="pdf-canvas-wrapper" style={{ position: 'relative', background: 'white', boxShadow: '0 4px 20px rgba(0,0,0,0.2)', display: 'inline-block' }}>
-        {/* Zoom overlay: top right */}
-        {zoomControls && (
-          <div className="pdf-overlay pdf-overlay-zoom" style={{ position: 'absolute', top: 12, right: 12, zIndex: 20, pointerEvents: 'auto' }}>
-            {zoomControls}
+      {showTopToolbar && (
+        <div className="pdf-viewer-toolbar-row">
+          <div className="pdf-viewer-toolbar-cell pdf-viewer-toolbar-cell--pagination">
+            {renderPaginationOutside && showPaginationTop ? paginationMarkup : null}
           </div>
-        )}
+          {zoomControls && (
+            <div className="pdf-viewer-toolbar-cell pdf-viewer-toolbar-cell--zoom">{zoomControls}</div>
+          )}
+        </div>
+      )}
+      <div className="pdf-canvas-wrapper" style={{ position: 'relative', background: 'white', boxShadow: '0 4px 20px rgba(0,0,0,0.2)', display: 'inline-block' }}>
         {/* Pagination overlay: top center and bottom center */}
         {paginationOverlay && showPaginationTop && (
           <div className="pdf-overlay pdf-overlay-pagination-top" style={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', zIndex: 20, pointerEvents: 'auto' }}>
@@ -109,6 +127,7 @@ const PdfViewer = forwardRef(function PdfViewer({ pdfUrl, scale = 1.5, onPageRen
               scale={scale}
               onRenderSuccess={onRenderSuccess}
               loading={null}
+              renderTextLayer={false}
             />
           </Document>
           {canvasSize.width > 0 && canvasSize.height > 0 && (

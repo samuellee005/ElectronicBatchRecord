@@ -1,5 +1,5 @@
 {
-    "id": "batch_69b9cede6585d",
+    "id": "BR-2026-SL-00005",
     "formId": "form_69b739be5bdb0",
     "formName": "test3",
     "pdfFile": "Sams_Contract_with_JB-1_1773260331.pdf",
@@ -10,5 +10,6 @@
     "updatedAt": "2026-03-17T15:00:10-07:00",
     "completedAt": "2026-03-17T15:00:10-07:00",
     "createdBy": "Samuel Lee",
-    "lastEntryId": null
+    "lastEntryId": null,
+    "batchId": "BR-2026-SL-00005"
 }

@@ -1,57 +1,117 @@
 .active-users-page {
-  max-width: 900px;
+  max-width: 1040px;
   margin: 0 auto;
   padding: 24px;
 }
 
-.au-header h1 {
-  margin: 0 0 8px;
-  font-size: 1.5rem;
+.au-page-header {
+  margin-bottom: 24px;
 }
 
-.au-intro {
-  color: #555;
-  margin: 0 0 24px;
-  line-height: 1.5;
+.au-page-header h1 {
+  margin: 0 0 10px;
+  font-size: 1.5rem;
+  color: #1a1a1a;
+}
+
+.au-lead {
+  color: #444;
+  margin: 0 0 16px;
+  line-height: 1.55;
+  max-width: 52rem;
+}
+
+.au-notice {
+  font-size: 0.85rem;
+  color: #4a5568;
+  line-height: 1.45;
+  padding: 12px 14px;
+  background: #f0f4ff;
+  border: 1px solid #d0d8f0;
+  border-radius: 8px;
+  max-width: 52rem;
+}
+
+.au-loading {
+  color: #666;
 }
 
 .au-card {
   background: #fff;
   border-radius: 12px;
-  padding: 20px;
+  padding: 0;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  overflow: hidden;
+}
+
+.au-card-title {
+  padding: 14px 20px;
+  font-weight: 600;
+  font-size: 1rem;
+  color: #333;
+  border-bottom: 1px solid #eee;
+  background: #fafbfc;
+}
+
+.au-table-wrap {
+  overflow-x: auto;
 }
 
 .au-table {
   width: 100%;
   border-collapse: collapse;
-  margin-bottom: 16px;
+  margin-bottom: 0;
 }
 
 .au-table th,
 .au-table td {
   text-align: left;
-  padding: 10px 8px;
+  padding: 12px 14px;
   border-bottom: 1px solid #eee;
+  vertical-align: middle;
+}
+
+.au-table th {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #666;
+  background: #fff;
+}
+
+.au-row--admin {
+  background: linear-gradient(90deg, rgba(102, 126, 234, 0.06), transparent 48%);
 }
 
 .au-input {
   width: 100%;
+  min-width: 160px;
   max-width: 280px;
   padding: 8px 10px;
   border: 1px solid #ccc;
   border-radius: 6px;
 }
 
+.au-role-select {
+  min-width: 160px;
+  padding: 8px 10px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 0.9rem;
+}
+
 .au-id {
   font-size: 0.8rem;
   color: #666;
+  word-break: break-all;
 }
 
 .au-actions {
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
+  padding: 16px 20px 20px;
 }
 
 .au-btn-add,
@@ -86,10 +146,11 @@
   border-radius: 6px;
   cursor: pointer;
   font-size: 0.85rem;
+  white-space: nowrap;
 }
 
 .au-msg {
-  margin-top: 12px;
+  margin: 0 20px 20px;
 }
 
 .au-msg.ok {

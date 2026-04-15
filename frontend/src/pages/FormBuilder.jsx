@@ -6,38 +6,41 @@ import {
   PencilSquareIcon,
   CalendarIcon,
   HashtagIcon,
-  PencilIcon,
-  DocumentTextIcon,
   ChevronUpDownIcon,
   CheckIcon,
   ClockIcon,
   StopCircleIcon,
   Squares2X2Icon,
   UserGroupIcon,
+  TableCellsIcon,
 } from '@heroicons/react/24/outline'
 import PdfViewer from '../components/PdfViewer'
+import PdfPageScrubber from '../components/PdfPageScrubber'
+import PdfZoomControls from '../components/PdfZoomControls'
 import { listForms, loadFormById, saveForm } from '../api/client'
+import { buildTableMergeLayout, tableCellKey } from '../utils/tableMergeLayout'
 import './FormBuilder.css'
 
 const COMPONENT_TYPES = [
   { type: 'text', Icon: PencilSquareIcon, name: 'Text Entry' },
   { type: 'date', Icon: CalendarIcon, name: 'Date Entry' },
   { type: 'number', Icon: HashtagIcon, name: 'Number Entry' },
-  { type: 'signature', Icon: PencilIcon, name: 'Signature' },
-  { type: 'textarea', Icon: DocumentTextIcon, name: 'Text Area' },
   { type: 'dropdown', Icon: ChevronUpDownIcon, name: 'Dropdown' },
   { type: 'checkbox', Icon: CheckIcon, name: 'Checkbox' },
   { type: 'time', Icon: ClockIcon, name: 'Time Entry' },
   { type: 'radio', Icon: StopCircleIcon, name: 'Radio Group' },
   { type: 'multiselect', Icon: Squares2X2Icon, name: 'Multi Select' },
   { type: 'collaborator', Icon: UserGroupIcon, name: 'Collaborator Entry' },
+  { type: 'table', Icon: TableCellsIcon, name: 'Data Table' },
 ]
 
 const DEFAULT_CONFIGS = {
   text: { width: 200, height: 35, label: 'Text Field', placeholder: 'Enter text' },
   date: { width: 200, height: 35, label: 'Date Field', placeholder: 'Select date' },
   number: { width: 200, height: 35, label: 'Number Field', placeholder: 'Enter number', unit: '' },
+  /* Not in COMPONENT_TYPES (hidden from palette); kept for existing forms / future re-enable */
   signature: { width: 300, height: 100, label: 'Signature Field', placeholder: 'Sign here' },
+  /* Not in COMPONENT_TYPES (hidden from palette); kept for existing forms / future re-enable */
   textarea: { width: 300, height: 100, label: 'Text Area', placeholder: 'Enter text' },
   dropdown: { width: 200, height: 35, label: 'Dropdown Field', options: ['Option 1', 'Option 2'] },
   checkbox: { width: 150, height: 30, label: 'Checkbox Field' },
@@ -50,6 +53,7 @@ const DEFAULT_CONFIGS = {
     label: 'Collaborators',
     helpText: 'Designate primary analyst and secondary reviewer from Active Users.',
   },
+  table: { width: 420, height: 240, label: 'Data table' },
 }
 
 const UNIT_OPTIONS = ['', 'kg', 'g', 'mg', 'L', 'mL', '\u00B0C', '\u00B0F', '%', 'ppm', 'pH']
@@ -60,6 +64,505 @@ const RULER_LABEL_INTERVAL = 100
 const RULER_SIZE = 24
 // Scale at which field coordinates are stored; overlay positions scale with zoom
 const DESIGN_SCALE = 1.5
+/** Default input font size (px) for new fields; matches ~0.8rem at 16px root */
+const DEFAULT_INPUT_FONT_PX = 13
+
+const PROPERTIES_PANEL_DEFAULT_W = 320
+const PROPERTIES_PANEL_MIN_W = 260
+const PROPERTIES_PANEL_MAX_W = 640
+const PROPERTIES_PANEL_WIDTH_STORAGE_KEY = 'fb-properties-panel-width'
+
+function readStoredPropertiesPanelWidth() {
+  if (typeof localStorage === 'undefined') return PROPERTIES_PANEL_DEFAULT_W
+  const n = parseInt(localStorage.getItem(PROPERTIES_PANEL_WIDTH_STORAGE_KEY), 10)
+  if (!Number.isFinite(n)) return PROPERTIES_PANEL_DEFAULT_W
+  return Math.min(PROPERTIES_PANEL_MAX_W, Math.max(PROPERTIES_PANEL_MIN_W, n))
+}
+
+const DEFAULT_TABLE_COL_WIDTH = 72
+const DEFAULT_TABLE_ROW_HEIGHT = 28
+
+function newTablePartId() {
+  return 't_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8)
+}
+
+function tableColWidthPx(c) {
+  const w = parseInt(c?.width, 10)
+  return Number.isFinite(w) && w >= 12 ? w : DEFAULT_TABLE_COL_WIDTH
+}
+
+function tableRowHeightPx(r) {
+  const h = parseInt(r?.height, 10)
+  return Number.isFinite(h) && h >= 12 ? h : DEFAULT_TABLE_ROW_HEIGHT
+}
+
+/** Split total between two sizes by delta; enforce minimum. */
+function redistributePair(a, b, delta, min = 12) {
+  const sum = a + b
+  let na = Math.max(min, a + delta)
+  let nb = sum - na
+  if (nb < min) {
+    nb = min
+    na = sum - nb
+  }
+  return [na, nb]
+}
+
+function TableFieldPreview({ field, selected, onFieldUpdate, containerStyle }) {
+  const cols = field.tableColumns || []
+  const rows = field.tableRows || []
+  const wrapRef = useRef(null)
+
+  const totalW = cols.reduce((s, c) => s + tableColWidthPx(c), 0)
+  const totalH = rows.reduce((s, r) => s + tableRowHeightPx(r), 0)
+
+  const startColDrag = (e, boundaryIndex) => {
+    e.stopPropagation()
+    e.preventDefault()
+    if (!onFieldUpdate || cols.length < 2) return
+    const startX = e.clientX
+    const w0 = tableColWidthPx(cols[boundaryIndex])
+    const w1 = tableColWidthPx(cols[boundaryIndex + 1])
+    const wrap = wrapRef.current
+    const tableW = wrap?.clientWidth ?? 1
+    const scale = totalW / Math.max(tableW, 1)
+
+    const move = (ev) => {
+      const logicalDelta = (ev.clientX - startX) * scale
+      const [na, nb] = redistributePair(w0, w1, logicalDelta)
+      const nextCols = cols.map((c, j) => {
+        if (j === boundaryIndex) return { ...c, width: na }
+        if (j === boundaryIndex + 1) return { ...c, width: nb }
+        return c
+      })
+      onFieldUpdate({ tableColumns: nextCols })
+    }
+    const up = () => {
+      document.removeEventListener('mousemove', move)
+      document.removeEventListener('mouseup', up)
+      document.body.style.userSelect = ''
+    }
+    document.body.style.userSelect = 'none'
+    document.addEventListener('mousemove', move)
+    document.addEventListener('mouseup', up)
+  }
+
+  const startRowDrag = (e, boundaryIndex) => {
+    e.stopPropagation()
+    e.preventDefault()
+    if (!onFieldUpdate || rows.length < 2) return
+    const startY = e.clientY
+    const h0 = tableRowHeightPx(rows[boundaryIndex])
+    const h1 = tableRowHeightPx(rows[boundaryIndex + 1])
+    const wrap = wrapRef.current
+    const tableH = wrap?.clientHeight ?? 1
+    const scale = totalH / Math.max(tableH, 1)
+
+    const move = (ev) => {
+      const logicalDelta = (ev.clientY - startY) * scale
+      const [na, nb] = redistributePair(h0, h1, logicalDelta)
+      const nextRows = rows.map((r, j) => {
+        if (j === boundaryIndex) return { ...r, height: na }
+        if (j === boundaryIndex + 1) return { ...r, height: nb }
+        return r
+      })
+      onFieldUpdate({ tableRows: nextRows })
+    }
+    const up = () => {
+      document.removeEventListener('mousemove', move)
+      document.removeEventListener('mouseup', up)
+      document.body.style.userSelect = ''
+    }
+    document.body.style.userSelect = 'none'
+    document.addEventListener('mousemove', move)
+    document.addEventListener('mouseup', up)
+  }
+
+  if (!cols.length || !rows.length || totalW <= 0 || totalH <= 0) {
+    return (
+      <div style={{ ...containerStyle, justifyContent: 'flex-end', alignItems: 'center' }}>
+        <span className="fb-table-preview-empty">Table</span>
+      </div>
+    )
+  }
+
+  let cumW = 0
+  const colHandleLeftPct = []
+  for (let i = 0; i < cols.length - 1; i++) {
+    cumW += tableColWidthPx(cols[i])
+    colHandleLeftPct.push((cumW / totalW) * 100)
+  }
+
+  let cumH = 0
+  const rowHandleTopPct = []
+  for (let i = 0; i < rows.length - 1; i++) {
+    cumH += tableRowHeightPx(rows[i])
+    rowHandleTopPct.push((cumH / totalH) * 100)
+  }
+
+  const { rowIds, colIds, covered, spanOf } = buildTableMergeLayout(field)
+
+  return (
+    <div style={{ ...containerStyle, alignItems: 'stretch' }}>
+      <div ref={wrapRef} className="fb-table-preview-interactive">
+        <table className="fb-table-preview fb-table-preview-data-only" style={{ tableLayout: 'fixed', width: '100%', height: '100%' }}>
+          <colgroup>
+            {cols.map((c) => (
+              <col key={c.id} style={{ width: `${(tableColWidthPx(c) / totalW) * 100}%` }} />
+            ))}
+          </colgroup>
+          <tbody>
+            {rows.map((r, ri) => (
+              <tr key={r.id} style={{ height: `${(tableRowHeightPx(r) / totalH) * 100}%` }}>
+                {colIds.map((colId) => {
+                  const cellKey = tableCellKey(rowIds[ri], colId)
+                  if (covered.has(cellKey)) return null
+                  const span = spanOf.get(cellKey)
+                  const rs = span?.rowspan || 1
+                  const cs = span?.colspan || 1
+                  const isMerged = rs > 1 || cs > 1
+                  return (
+                    <td
+                      key={cellKey}
+                      rowSpan={rs}
+                      colSpan={cs}
+                      className={isMerged ? 'fb-table-preview-td--merged' : undefined}
+                    >
+                      <span
+                        className={`fb-table-preview-cell${isMerged ? ' fb-table-preview-cell--merged' : ''}`}
+                        title={isMerged ? `Merged ${rs}×${cs}` : undefined}
+                      />
+                    </td>
+                  )
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {selected && onFieldUpdate && (
+          <>
+            {colHandleLeftPct.map((leftPct, i) => (
+              <div
+                key={`col-res-${i}`}
+                className="fb-table-resize-v"
+                style={{ left: `${leftPct}%` }}
+                title="Drag to resize columns"
+                onMouseDown={(e) => startColDrag(e, i)}
+              />
+            ))}
+            {rowHandleTopPct.map((topPct, i) => (
+              <div
+                key={`row-res-${i}`}
+                className="fb-table-resize-h"
+                style={{ top: `${topPct}%` }}
+                title="Drag to resize rows"
+                onMouseDown={(e) => startRowDrag(e, i)}
+              />
+            ))}
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** Drop merges that no longer fit row/column ids or grid bounds. */
+function pruneMerges(merges, rowIds, colIds) {
+  const rids = rowIds || []
+  const cids = colIds || []
+  return (merges || []).filter((m) => {
+    const ri = rids.indexOf(m.anchorRowId)
+    const ci = cids.indexOf(m.anchorColId)
+    if (ri < 0 || ci < 0) return false
+    const rs = Math.max(1, parseInt(m.rowspan, 10) || 1)
+    const cs = Math.max(1, parseInt(m.colspan, 10) || 1)
+    return ri + rs <= rids.length && ci + cs <= cids.length
+  })
+}
+
+function TableFieldProperties({ field, onUpdate }) {
+  const cols = field.tableColumns || []
+  const rows = field.tableRows || []
+  const merges = field.tableMerges || []
+  const rowIds = rows.map((r) => r.id)
+  const colIds = cols.map((c) => c.id)
+
+  if (!cols.length || !rows.length) {
+    return (
+      <div className="fb-form-group">
+        <p className="fb-hint">This table needs at least one row and one column.</p>
+        <button
+          type="button"
+          className="fb-btn fb-btn-success"
+          onClick={() =>
+            onUpdate({
+              tableColumns: [
+                { id: newTablePartId(), label: 'Column 1', width: DEFAULT_TABLE_COL_WIDTH },
+                { id: newTablePartId(), label: 'Column 2', width: DEFAULT_TABLE_COL_WIDTH },
+              ],
+              tableRows: [{ id: newTablePartId(), label: 'Row 1', height: DEFAULT_TABLE_ROW_HEIGHT }],
+              tableMerges: [],
+            })
+          }
+        >
+          Initialize table structure
+        </button>
+      </div>
+    )
+  }
+
+  const setCols = (next) => {
+    onUpdate({
+      tableColumns: next,
+      tableMerges: pruneMerges(merges, rows.map((r) => r.id), next.map((c) => c.id)),
+    })
+  }
+  const setRows = (next) => {
+    onUpdate({
+      tableRows: next,
+      tableMerges: pruneMerges(merges, next.map((r) => r.id), cols.map((c) => c.id)),
+    })
+  }
+
+  return (
+    <>
+      <div className="fb-form-group">
+        <label>Columns</label>
+        <p className="fb-hint">
+          Labels and keys are not shown on the PDF overlay—only for merges, exports, and this panel. Set width
+          (px) here, or select the field and drag the vertical handles on the table on the canvas.
+        </p>
+        {cols.map((c, i) => (
+          <div key={c.id} className="fb-table-axis-row">
+            <input
+              type="text"
+              placeholder="Label"
+              value={c.label}
+              onChange={(e) => {
+                const next = cols.map((x, j) => (j === i ? { ...x, label: e.target.value } : x))
+                setCols(next)
+              }}
+            />
+            <input
+              type="text"
+              className="fb-table-key"
+              placeholder="Key (optional)"
+              value={c.key || ''}
+              onChange={(e) => {
+                const next = cols.map((x, j) => (j === i ? { ...x, key: e.target.value } : x))
+                setCols(next)
+              }}
+            />
+            <label className="fb-table-dim-label" title="Column width in pixels">
+              W
+              <input
+                type="number"
+                className="fb-table-dim-input"
+                min={12}
+                max={2000}
+                value={tableColWidthPx(c)}
+                onChange={(e) => {
+                  const w = Math.max(12, parseInt(e.target.value, 10) || DEFAULT_TABLE_COL_WIDTH)
+                  const next = cols.map((x, j) => (j === i ? { ...x, width: w } : x))
+                  setCols(next)
+                }}
+              />
+            </label>
+            <button
+              type="button"
+              className="fb-table-remove-btn"
+              disabled={cols.length <= 1}
+              title={cols.length <= 1 ? 'At least one column required' : 'Remove column'}
+              onClick={() => {
+                if (cols.length <= 1) return
+                setCols(cols.filter((_, j) => j !== i))
+              }}
+            >
+              &times;
+            </button>
+          </div>
+        ))}
+        <button
+          type="button"
+          className="fb-link-btn"
+          onClick={() =>
+            setCols([
+              ...cols,
+              { id: newTablePartId(), label: `Column ${cols.length + 1}`, width: DEFAULT_TABLE_COL_WIDTH },
+            ])
+          }
+        >
+          + Add column
+        </button>
+      </div>
+
+      <div className="fb-form-group">
+        <label>Rows</label>
+        <p className="fb-hint">
+          Set row height (px) here, or select the field and drag the horizontal handles on the table on the
+          canvas.
+        </p>
+        {rows.map((r, i) => (
+          <div key={r.id} className="fb-table-axis-row">
+            <input
+              type="text"
+              placeholder="Label"
+              value={r.label}
+              onChange={(e) => {
+                const next = rows.map((x, j) => (j === i ? { ...x, label: e.target.value } : x))
+                setRows(next)
+              }}
+            />
+            <input
+              type="text"
+              className="fb-table-key"
+              placeholder="Key (optional)"
+              value={r.key || ''}
+              onChange={(e) => {
+                const next = rows.map((x, j) => (j === i ? { ...x, key: e.target.value } : x))
+                setRows(next)
+              }}
+            />
+            <label className="fb-table-dim-label" title="Row height in pixels">
+              H
+              <input
+                type="number"
+                className="fb-table-dim-input"
+                min={12}
+                max={2000}
+                value={tableRowHeightPx(r)}
+                onChange={(e) => {
+                  const h = Math.max(12, parseInt(e.target.value, 10) || DEFAULT_TABLE_ROW_HEIGHT)
+                  const next = rows.map((x, j) => (j === i ? { ...x, height: h } : x))
+                  setRows(next)
+                }}
+              />
+            </label>
+            <button
+              type="button"
+              className="fb-table-remove-btn"
+              disabled={rows.length <= 1}
+              title={rows.length <= 1 ? 'At least one row required' : 'Remove row'}
+              onClick={() => {
+                if (rows.length <= 1) return
+                setRows(rows.filter((_, j) => j !== i))
+              }}
+            >
+              &times;
+            </button>
+          </div>
+        ))}
+        <button
+          type="button"
+          className="fb-link-btn"
+          onClick={() =>
+            setRows([
+              ...rows,
+              { id: newTablePartId(), label: `Row ${rows.length + 1}`, height: DEFAULT_TABLE_ROW_HEIGHT },
+            ])
+          }
+        >
+          + Add row
+        </button>
+      </div>
+
+      <div className="fb-form-group">
+        <label>Merged cells</label>
+        <p className="fb-hint">
+          Anchor cell holds the value; rowspan and colspan must fit inside the grid. Overlapping merges are not
+          validated here—avoid crossing regions.
+        </p>
+        {merges.map((m, idx) => (
+          <div key={idx} className="fb-table-merge-row">
+            <select
+              value={m.anchorRowId}
+              onChange={(e) => {
+                const next = merges.map((x, j) =>
+                  j === idx ? { ...x, anchorRowId: e.target.value } : x,
+                )
+                onUpdate({ tableMerges: pruneMerges(next, rowIds, colIds) })
+              }}
+            >
+              {rows.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.label}
+                </option>
+              ))}
+            </select>
+            <select
+              value={m.anchorColId}
+              onChange={(e) => {
+                const next = merges.map((x, j) =>
+                  j === idx ? { ...x, anchorColId: e.target.value } : x,
+                )
+                onUpdate({ tableMerges: pruneMerges(next, rowIds, colIds) })
+              }}
+            >
+              {cols.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+            <label className="fb-table-merge-num">
+              R
+              <input
+                type="number"
+                min={1}
+                value={m.rowspan ?? 1}
+                onChange={(e) => {
+                  const rowspan = Math.max(1, parseInt(e.target.value, 10) || 1)
+                  const next = merges.map((x, j) => (j === idx ? { ...x, rowspan } : x))
+                  onUpdate({ tableMerges: pruneMerges(next, rowIds, colIds) })
+                }}
+              />
+            </label>
+            <label className="fb-table-merge-num">
+              C
+              <input
+                type="number"
+                min={1}
+                value={m.colspan ?? 1}
+                onChange={(e) => {
+                  const colspan = Math.max(1, parseInt(e.target.value, 10) || 1)
+                  const next = merges.map((x, j) => (j === idx ? { ...x, colspan } : x))
+                  onUpdate({ tableMerges: pruneMerges(next, rowIds, colIds) })
+                }}
+              />
+            </label>
+            <button
+              type="button"
+              className="fb-table-remove-btn"
+              onClick={() => onUpdate({ tableMerges: merges.filter((_, j) => j !== idx) })}
+            >
+              &times;
+            </button>
+          </div>
+        ))}
+        <button
+          type="button"
+          className="fb-link-btn"
+          disabled={!rowIds.length || !colIds.length}
+          onClick={() =>
+            onUpdate({
+              tableMerges: [
+                ...merges,
+                {
+                  anchorRowId: rowIds[0],
+                  anchorColId: colIds[0],
+                  rowspan: 1,
+                  colspan: 1,
+                },
+              ],
+            })
+          }
+        >
+          + Add merge
+        </button>
+      </div>
+    </>
+  )
+}
 
 function formatDate(dateString) {
   if (!dateString) return 'Unknown'
@@ -75,6 +578,9 @@ export default function FormBuilder() {
 
   const pdfRef = useRef(null)
   const overlayRef = useRef(null)
+  const canvasScrollRef = useRef(null)
+  /** Saved when changing pages; applied in handlePageRendered after the new page paints (avoids jump on first load). */
+  const pendingCanvasScrollRestoreRef = useRef(null)
 
   const [fields, setFields] = useState([])
   const [selectedFieldId, setSelectedFieldId] = useState(null)
@@ -105,6 +611,10 @@ export default function FormBuilder() {
   const [saving, setSaving] = useState(false)
   const [componentsPanelCollapsed, setComponentsPanelCollapsed] = useState(false)
   const [propertiesPanelCollapsed, setPropertiesPanelCollapsed] = useState(false)
+  const [propertiesPanelWidth, setPropertiesPanelWidth] = useState(readStoredPropertiesPanelWidth)
+  const [propertiesPanelResizing, setPropertiesPanelResizing] = useState(false)
+  const propertiesPanelWidthRef = useRef(readStoredPropertiesPanelWidth())
+  const propertiesResizeRef = useRef({ active: false, startX: 0, startW: PROPERTIES_PANEL_DEFAULT_W })
 
   // Drag/resize state via refs to avoid re-renders during drag
   const dragState = useRef({ active: false, fieldId: null, offsetX: 0, offsetY: 0 })
@@ -118,6 +628,77 @@ export default function FormBuilder() {
   const selectedField = useMemo(
     () => fields.find((f) => f.id === selectedFieldId) || null,
     [fields, selectedFieldId],
+  )
+
+  useEffect(() => {
+    propertiesPanelWidthRef.current = propertiesPanelWidth
+  }, [propertiesPanelWidth])
+
+  const endPropertiesResize = useCallback(() => {
+    if (!propertiesResizeRef.current.active) return
+    propertiesResizeRef.current.active = false
+    setPropertiesPanelResizing(false)
+    document.body.style.cursor = ''
+    document.body.style.userSelect = ''
+    try {
+      localStorage.setItem(PROPERTIES_PANEL_WIDTH_STORAGE_KEY, String(propertiesPanelWidthRef.current))
+    } catch {
+      /* ignore */
+    }
+  }, [])
+
+  useEffect(() => {
+    const move = (e) => {
+      if (!propertiesResizeRef.current.active) return
+      const clientX =
+        'touches' in e && e.touches && e.touches.length > 0 ? e.touches[0].clientX : e.clientX
+      if (e.type === 'touchmove' && e.cancelable) e.preventDefault()
+      const { startX, startW } = propertiesResizeRef.current
+      const dx = startX - clientX
+      const next = Math.min(
+        PROPERTIES_PANEL_MAX_W,
+        Math.max(PROPERTIES_PANEL_MIN_W, startW + dx),
+      )
+      propertiesPanelWidthRef.current = next
+      setPropertiesPanelWidth(next)
+    }
+    const up = () => endPropertiesResize()
+
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+    window.addEventListener('touchmove', move, { passive: false })
+    window.addEventListener('touchend', up)
+
+    return () => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+      window.removeEventListener('touchmove', move)
+      window.removeEventListener('touchend', up)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      if (propertiesResizeRef.current.active) {
+        propertiesResizeRef.current.active = false
+        setPropertiesPanelResizing(false)
+      }
+    }
+  }, [endPropertiesResize])
+
+  const onPropertiesResizePointerDown = useCallback(
+    (e) => {
+      if (propertiesPanelCollapsed) return
+      e.preventDefault()
+      const clientX =
+        'touches' in e && e.touches && e.touches.length > 0 ? e.touches[0].clientX : e.clientX
+      propertiesResizeRef.current = {
+        active: true,
+        startX: clientX,
+        startW: propertiesPanelWidthRef.current,
+      }
+      setPropertiesPanelResizing(true)
+      document.body.style.cursor = 'col-resize'
+      document.body.style.userSelect = 'none'
+    },
+    [propertiesPanelCollapsed],
   )
 
   const scaleFactor = scale / DESIGN_SCALE
@@ -166,10 +747,36 @@ export default function FormBuilder() {
     setCurrentPage(page)
     setCanvasSize({ width, height })
     if (n != null) setTotalPages(n)
+
+    const saved = pendingCanvasScrollRestoreRef.current
+    if (saved != null) {
+      pendingCanvasScrollRestoreRef.current = null
+      const scrollRef = canvasScrollRef
+      const apply = () => {
+        const el = scrollRef.current
+        if (el) el.scrollTop = saved
+      }
+      apply()
+      queueMicrotask(apply)
+      requestAnimationFrame(() => {
+        apply()
+        requestAnimationFrame(() => {
+          apply()
+          setTimeout(apply, 0)
+          setTimeout(apply, 16)
+          setTimeout(apply, 50)
+          setTimeout(apply, 100)
+          setTimeout(apply, 200)
+          setTimeout(apply, 400)
+        })
+      })
+    }
   }, [])
 
-  const goToPrevPage = () => pdfRef.current?.changePage(-1)
-  const goToNextPage = () => pdfRef.current?.changePage(1)
+  const goToPdfPage = useCallback((page) => {
+    pendingCanvasScrollRestoreRef.current = canvasScrollRef.current?.scrollTop ?? 0
+    pdfRef.current?.goToPage?.(page)
+  }, [])
 
   // Zoom handlers
   const zoomIn = () => setScale((s) => Math.min(s + 0.25, 3.0))
@@ -221,12 +828,24 @@ export default function FormBuilder() {
       width: config.width,
       height: config.height,
       label: config.label,
-      required: false,
+      required: true,
       stageInProcess: '',
       stageOrder: null,
       placeholder: config.placeholder || '',
       unit: config.unit ?? '',
       options: config.options ? [...config.options] : undefined,
+      inputFontSize: config.inputFontSize ?? DEFAULT_INPUT_FONT_PX,
+    }
+    if (type === 'table') {
+      newField.tableColumns = [
+        { id: newTablePartId(), label: 'Column 1', width: DEFAULT_TABLE_COL_WIDTH },
+        { id: newTablePartId(), label: 'Column 2', width: DEFAULT_TABLE_COL_WIDTH },
+      ]
+      newField.tableRows = [
+        { id: newTablePartId(), label: 'Row 1', height: DEFAULT_TABLE_ROW_HEIGHT },
+        { id: newTablePartId(), label: 'Row 2', height: DEFAULT_TABLE_ROW_HEIGHT },
+      ]
+      newField.tableMerges = []
     }
     setFields((prev) => [...prev, newField])
     setSelectedFieldId(newField.id)
@@ -285,6 +904,88 @@ export default function FormBuilder() {
     return { x: snappedX, y: snappedY }
   }, [fields, currentPage])
 
+  /** Snap bottom-right resize to other fields' edges and canvas bounds; returns guides for overlay */
+  const snapResizeDimensions = useCallback(
+    (field, tentativeW, tentativeH, scaleFactor) => {
+      const leftPx = field.x * scaleFactor
+      const topPx = field.y * scaleFactor
+      const minWPx = 100 * scaleFactor
+      const minHPx = 30 * scaleFactor
+      const maxRightPx = canvasSize.width
+      const maxBottomPx = canvasSize.height
+
+      let rightPx = leftPx + tentativeW * scaleFactor
+      let bottomPx = topPx + tentativeH * scaleFactor
+      rightPx = Math.min(rightPx, maxRightPx)
+      bottomPx = Math.min(bottomPx, maxBottomPx)
+
+      const snapXs = [maxRightPx]
+      const snapYs = [maxBottomPx]
+      for (const f of fields) {
+        if (f.id === field.id || f.page !== currentPage) continue
+        const fx = f.x * scaleFactor
+        const fy = f.y * scaleFactor
+        const fw = f.width * scaleFactor
+        const fh = f.height * scaleFactor
+        snapXs.push(fx, fx + fw)
+        snapYs.push(fy, fy + fh)
+      }
+
+      const snapCoord = (value, targets) => {
+        let best = value
+        let bestD = SNAP_THRESHOLD + 1
+        let matched = null
+        for (const t of targets) {
+          const d = Math.abs(value - t)
+          if (d < bestD && d < SNAP_THRESHOLD) {
+            bestD = d
+            best = t
+            matched = t
+          }
+        }
+        return { value: best, matched }
+      }
+
+      const r = snapCoord(rightPx, snapXs)
+      rightPx = r.value
+      const snappedRightMatch = r.matched
+
+      const b = snapCoord(bottomPx, snapYs)
+      bottomPx = b.value
+      const snappedBottomMatch = b.matched
+
+      if (rightPx - leftPx < minWPx) rightPx = leftPx + minWPx
+      if (bottomPx - topPx < minHPx) bottomPx = topPx + minHPx
+
+      rightPx = Math.min(rightPx, maxRightPx)
+      bottomPx = Math.min(bottomPx, maxBottomPx)
+
+      const newGuides = []
+      if (snappedRightMatch != null && Math.abs(rightPx - snappedRightMatch) < 2) {
+        newGuides.push({ type: 'vertical', pos: snappedRightMatch })
+      }
+      if (snappedBottomMatch != null && Math.abs(bottomPx - snappedBottomMatch) < 2) {
+        newGuides.push({ type: 'horizontal', pos: snappedBottomMatch })
+      }
+
+      const width = (rightPx - leftPx) / scaleFactor
+      const height = (bottomPx - topPx) / scaleFactor
+
+      return {
+        width,
+        height,
+        guides: newGuides,
+        positionGuides: {
+          left: leftPx,
+          top: topPx,
+          right: rightPx,
+          bottom: bottomPx,
+        },
+      }
+    },
+    [fields, currentPage, canvasSize],
+  )
+
   // -- Mouse handlers for drag/resize --
 
   useEffect(() => {
@@ -333,9 +1034,15 @@ export default function FormBuilder() {
         const maxDesignWidth = (canvasSize.width * DESIGN_SCALE) / scale - field.x
         const maxDesignHeight = (canvasSize.height * DESIGN_SCALE) / scale - field.y
 
+        const clampedW = Math.min(newDesignWidth, maxDesignWidth)
+        const clampedH = Math.min(newDesignHeight, maxDesignHeight)
+        const snapped = snapResizeDimensions(field, clampedW, clampedH, scaleFactor)
+
+        setGuides(snapped.guides)
+        setPositionGuides(snapped.positionGuides)
         updateField(field.id, {
-          width: Math.min(newDesignWidth, maxDesignWidth),
-          height: Math.min(newDesignHeight, maxDesignHeight),
+          width: snapped.width,
+          height: snapped.height,
         })
       }
     }
@@ -353,7 +1060,7 @@ export default function FormBuilder() {
       document.removeEventListener('mousemove', handleMouseMove)
       document.removeEventListener('mouseup', handleMouseUp)
     }
-  }, [fields, canvasSize, snapToAlignment, updateField, scale])
+  }, [fields, canvasSize, snapToAlignment, snapResizeDimensions, updateField, scale])
 
   // -- Drop from components panel --
 
@@ -387,6 +1094,7 @@ export default function FormBuilder() {
       e.target.classList.contains('fb-field-delete') ||
       e.target.closest('.fb-field-delete')
     ) return
+    if (e.target.closest('.fb-table-resize-v') || e.target.closest('.fb-table-resize-h')) return
     if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return
 
     e.preventDefault()
@@ -406,6 +1114,7 @@ export default function FormBuilder() {
 
   const handleResizeMouseDown = (e, field) => {
     e.stopPropagation()
+    setSelectedFieldId(field.id)
     resizeState.current = {
       active: true,
       fieldId: field.id,
@@ -627,16 +1336,7 @@ export default function FormBuilder() {
 
         {/* Canvas Area */}
         <div className="fb-canvas-area" onWheel={handleCanvasWheel}>
-          {/* Zoom row: above ruler so it never covers it; always visible */}
-          <div className="fb-zoom-row">
-            <div className="fb-zoom-controls">
-              <button onClick={zoomOut} title="Zoom Out">&minus;</button>
-              <span>{Math.round(scale * 100)}%</span>
-              <button onClick={zoomIn} title="Zoom In">+</button>
-              <button onClick={resetZoom} title="Reset zoom" aria-label="Reset zoom">&#8635;</button>
-            </div>
-          </div>
-          <div className="fb-canvas-scroll">
+          <div className="fb-canvas-scroll" ref={canvasScrollRef}>
           <div className="fb-rulers-and-canvas">
             {/* Top ruler (sticky when scrolling down) */}
             {canvasSize.width > 0 && canvasSize.height > 0 && (
@@ -691,7 +1391,28 @@ export default function FormBuilder() {
             pdfUrl={`/uploads/${pdfFile}`}
             scale={scale}
             onPageRendered={handlePageRendered}
-            hidePagination
+            paginationPosition="both"
+            hidePagination={totalPages <= 1}
+            zoomControls={
+              <PdfZoomControls
+                className="fb-zoom-controls"
+                scale={scale}
+                onScaleChange={setScale}
+                minScale={0.5}
+                maxScale={3}
+                defaultScale={1.5}
+                resetIcon
+              />
+            }
+            paginationScrubber={
+              totalPages > 1 ? (
+                <PdfPageScrubber
+                  currentPage={currentPage}
+                  totalPages={totalPages}
+                  onGoToPage={goToPdfPage}
+                />
+              ) : undefined
+            }
           >
             {/* Overlay */}
             <div
@@ -749,6 +1470,7 @@ export default function FormBuilder() {
                   field={field}
                   selected={selectedFieldId === field.id}
                   scaleFactor={scaleFactor}
+                  onFieldUpdate={(updates) => updateField(field.id, updates)}
                   onMouseDown={(e) => handleFieldMouseDown(e, field)}
                   onResizeMouseDown={(e) => handleResizeMouseDown(e, field)}
                   onDelete={() => deleteField(field.id)}
@@ -763,38 +1485,19 @@ export default function FormBuilder() {
             </div>
           </div>
           </div>
-          {/* Page navigation - bottom of view, icon-based */}
-          {totalPages > 1 && (
-            <div className="fb-page-nav">
-              <button
-                type="button"
-                className="fb-page-nav-btn"
-                onClick={goToPrevPage}
-                disabled={currentPage <= 1}
-                title="Previous page"
-                aria-label="Previous page"
-              >
-                &#8249;
-              </button>
-              <span className="fb-page-nav-label">Page {currentPage} of {totalPages}</span>
-              <button
-                type="button"
-                className="fb-page-nav-btn"
-                onClick={goToNextPage}
-                disabled={currentPage >= totalPages}
-                title="Next page"
-                aria-label="Next page"
-              >
-                &#8250;
-              </button>
-            </div>
-          )}
         </div>
 
         {/* Properties Panel - only visible when a field is selected; collapsible like components */}
         {selectedField && (
           <div
-            className={`fb-properties-panel ${propertiesPanelCollapsed ? 'fb-properties-panel-collapsed' : ''}`}
+            className={`fb-properties-panel${propertiesPanelCollapsed ? ' fb-properties-panel-collapsed' : ''}${
+              propertiesPanelResizing ? ' fb-properties-panel--resizing' : ''
+            }`}
+            style={
+              propertiesPanelCollapsed
+                ? undefined
+                : { width: propertiesPanelWidth, minWidth: propertiesPanelWidth, flexShrink: 0 }
+            }
           >
             <button
               type="button"
@@ -815,14 +1518,25 @@ export default function FormBuilder() {
               </span>
             </button>
             {!propertiesPanelCollapsed && (
-              <div className="fb-properties-panel-content">
-                <h2 className="fb-properties-panel-title">Properties</h2>
-                <PropertiesForm
-                  field={selectedField}
-                  existingStages={existingStages}
-                  onUpdate={(updates) => updateField(selectedField.id, updates)}
+              <>
+                <div
+                  role="separator"
+                  aria-orientation="vertical"
+                  aria-label="Resize properties panel"
+                  title="Drag to resize"
+                  className="fb-properties-panel-resize"
+                  onMouseDown={onPropertiesResizePointerDown}
+                  onTouchStart={onPropertiesResizePointerDown}
                 />
-              </div>
+                <div className="fb-properties-panel-content">
+                  <h2 className="fb-properties-panel-title">Properties</h2>
+                  <PropertiesForm
+                    field={selectedField}
+                    existingStages={existingStages}
+                    onUpdate={(updates) => updateField(selectedField.id, updates)}
+                  />
+                </div>
+              </>
             )}
           </div>
         )}
@@ -1073,21 +1787,31 @@ export default function FormBuilder() {
 
 // -- FormField sub-component --
 
-function FormField({ field, selected, scaleFactor = 1, onMouseDown, onResizeMouseDown, onDelete, onClick }) {
+function formFieldFontPx(field) {
+  const n = Number(field?.inputFontSize)
+  if (field?.inputFontSize != null && !Number.isNaN(n) && n > 0) {
+    return Math.min(48, Math.max(8, Math.round(n)))
+  }
+  return DEFAULT_INPUT_FONT_PX
+}
+
+function FormField({ field, selected, scaleFactor = 1, onFieldUpdate, onMouseDown, onResizeMouseDown, onDelete, onClick }) {
+  const fontPx = formFieldFontPx(field)
   return (
     <div
       className={`fb-field ${selected ? 'selected' : ''}`}
+      aria-label={field.label || 'Field'}
       style={{
         left: field.x * scaleFactor,
         top: field.y * scaleFactor,
         width: field.width * scaleFactor,
         height: field.height * scaleFactor,
+        ['--fb-field-font-size']: `${fontPx}px`,
       }}
       onMouseDown={onMouseDown}
       onClick={onClick}
     >
-      <div className="fb-field-label">{field.label || 'Field'}</div>
-      <FieldPreview field={field} />
+      <FieldPreview field={field} selected={selected} onFieldUpdate={onFieldUpdate} />
       <div className="fb-field-resize" onMouseDown={onResizeMouseDown} />
       {selected && (
         <button
@@ -1104,14 +1828,20 @@ function FormField({ field, selected, scaleFactor = 1, onMouseDown, onResizeMous
   )
 }
 
-function FieldPreview({ field }) {
-  const containerStyle = {
-    padding: 4,
-    height: 'calc(100% - 24px)',
-    display: 'flex',
-    alignItems: 'center',
-    overflow: 'hidden',
-  }
+/** Matches compact PDF overlay: full component box = value area; centered text, bottom-aligned */
+const fieldPreviewContainerBase = {
+  padding: '2px 2px',
+  height: '100%',
+  boxSizing: 'border-box',
+  display: 'flex',
+  flexDirection: 'column',
+  justifyContent: 'flex-end',
+  alignItems: 'stretch',
+  overflow: 'hidden',
+}
+
+function FieldPreview({ field, selected, onFieldUpdate }) {
+  const containerStyle = fieldPreviewContainerBase
   switch (field.type) {
     case 'text':
       return (
@@ -1150,7 +1880,7 @@ function FieldPreview({ field }) {
       return (
         <div style={containerStyle}>
           <textarea
-            className="fb-field-input"
+            className="fb-field-input fb-field-input--textarea"
             placeholder={field.placeholder}
             disabled
             style={{ resize: 'none' }}
@@ -1169,20 +1899,20 @@ function FieldPreview({ field }) {
       )
     case 'checkbox':
       return (
-        <div style={containerStyle}>
+        <div style={{ ...containerStyle, justifyContent: 'center', alignItems: 'center' }}>
           <input type="checkbox" className="fb-field-input" disabled />
         </div>
       )
     case 'time':
       return (
-        <div style={{ ...containerStyle, gap: 6 }}>
+        <div style={{ ...containerStyle, flexDirection: 'row', alignItems: 'flex-end', gap: 6 }}>
           <input type="time" className="fb-field-input" disabled style={{ flex: 1 }} />
           <button type="button" className="fb-field-now-btn" disabled>Now</button>
         </div>
       )
     case 'radio':
       return (
-        <div style={{ ...containerStyle, flexDirection: 'column', alignItems: 'stretch', gap: 4, overflowY: 'auto' }}>
+        <div style={{ ...containerStyle, justifyContent: 'flex-start', flexDirection: 'column', alignItems: 'stretch', gap: 4, overflowY: 'auto' }}>
           {(field.options || ['A', 'B']).slice(0, 4).map((opt, i) => (
             <label key={i} className="fb-preview-radio">
               <input type="radio" disabled /> {opt}
@@ -1192,7 +1922,7 @@ function FieldPreview({ field }) {
       )
     case 'multiselect':
       return (
-        <div style={{ ...containerStyle, flexDirection: 'column', alignItems: 'stretch', gap: 4, overflowY: 'auto' }}>
+        <div style={{ ...containerStyle, justifyContent: 'flex-start', flexDirection: 'column', alignItems: 'stretch', gap: 4, overflowY: 'auto' }}>
           {(field.options || []).slice(0, 4).map((opt, i) => (
             <label key={i} className="fb-preview-radio">
               <input type="checkbox" disabled /> {opt}
@@ -1202,7 +1932,7 @@ function FieldPreview({ field }) {
       )
     case 'collaborator':
       return (
-        <div style={{ ...containerStyle, flexDirection: 'column', alignItems: 'stretch', gap: 6, fontSize: '0.75rem' }}>
+        <div style={{ ...containerStyle, justifyContent: 'flex-start', flexDirection: 'column', alignItems: 'stretch', gap: 6, fontSize: '0.75rem' }}>
           <div className="fb-collab-preview-row">
             <span>Primary</span>
             <select className="fb-field-input" disabled><option>—</option></select>
@@ -1215,6 +1945,15 @@ function FieldPreview({ field }) {
             <input type="checkbox" disabled /> Reviewer records all entry
           </label>
         </div>
+      )
+    case 'table':
+      return (
+        <TableFieldPreview
+          field={field}
+          selected={selected}
+          onFieldUpdate={onFieldUpdate}
+          containerStyle={{ ...containerStyle, padding: 2 }}
+        />
       )
     default:
       return <div style={containerStyle} />
@@ -1361,6 +2100,24 @@ function PropertiesForm({ field, existingStages, onUpdate }) {
       </div>
 
       <div className="fb-form-group">
+        <label>Input font size (px):</label>
+        <input
+          type="number"
+          min={8}
+          max={48}
+          value={field.inputFontSize ?? DEFAULT_INPUT_FONT_PX}
+          onChange={(e) => {
+            const v = parseInt(e.target.value, 10)
+            if (Number.isNaN(v)) onUpdate({ inputFontSize: DEFAULT_INPUT_FONT_PX })
+            else onUpdate({ inputFontSize: Math.min(48, Math.max(8, v)) })
+          }}
+        />
+        <small className="fb-hint">
+          Preview on the PDF and data entry use this size for field text and placeholders.
+        </small>
+      </div>
+
+      <div className="fb-form-group">
         <label className="fb-checkbox-label">
           <input
             type="checkbox"
@@ -1443,6 +2200,8 @@ function PropertiesForm({ field, existingStages, onUpdate }) {
           </small>
         </div>
       )}
+
+      {field.type === 'table' && <TableFieldProperties field={field} onUpdate={onUpdate} />}
     </div>
   )
 }

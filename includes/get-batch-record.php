@@ -4,6 +4,7 @@
  * Used when viewing a batch (e.g. completed) to show data and enable PDF download.
  */
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/batch-record.php';
 
 header('Content-Type: application/json');
 
@@ -25,6 +26,8 @@ if (!$batch || empty($batch['formId'])) {
     echo json_encode(['success' => false, 'message' => 'Invalid batch record']);
     exit;
 }
+
+$batch = ebr_batch_record_ensure_batch_id($batch);
 
 // Load latest entry data for this batch
 $formData = [];

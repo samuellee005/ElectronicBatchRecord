@@ -1,6 +1,8 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import PdfViewer from '../components/PdfViewer'
+import PdfPageScrubber from '../components/PdfPageScrubber'
+import PdfZoomControls from '../components/PdfZoomControls'
 import {
   loadFormById,
   loadFormByPdf,
@@ -8,10 +10,24 @@ import {
   createBatchRecord,
   updateBatchRecord,
   getBatchRecord,
-  getDownloadBatchPdfUrl,
+  exportBatchPdfBlob,
   listActiveUsers,
 } from '../api/client'
 import './DataEntry.css'
+import { buildTableMergeLayout, tableCellKey } from '../utils/tableMergeLayout'
+
+/** Default matches FormBuilder `DEFAULT_INPUT_FONT_PX` when `inputFontSize` is unset. */
+const OVERLAY_DEFAULT_INPUT_FONT_PX = 13
+
+/** Per-field PDF font size (px) from Form Builder; drives --field-input-font-size on the overlay. */
+function overlayFieldFontStyle(field) {
+  const n = Number(field?.inputFontSize)
+  const px =
+    field?.inputFontSize != null && !Number.isNaN(n) && n > 0
+      ? Math.min(48, Math.max(8, Math.round(n)))
+      : OVERLAY_DEFAULT_INPUT_FONT_PX
+  return { '--field-input-font-size': `${px}px` }
+}
 
 // ─── Field entry audit (timestamp, lock, corrections) ────────────────────────
 const IDLE_LOCK_MS = 60 * 1000
@@ -87,6 +103,235 @@ function parseMultiselectValue(v) {
   return []
 }
 
+const DEFAULT_TABLE_COL_WIDTH = 72
+const DEFAULT_TABLE_ROW_HEIGHT = 28
+
+function tableColWidthPx(c) {
+  const w = parseInt(c?.width, 10)
+  return Number.isFinite(w) && w >= 12 ? w : DEFAULT_TABLE_COL_WIDTH
+}
+
+function tableRowHeightPx(r) {
+  const h = parseInt(r?.height, 10)
+  return Number.isFinite(h) && h >= 12 ? h : DEFAULT_TABLE_ROW_HEIGHT
+}
+
+function normalizeTableValue(v) {
+  if (v && typeof v === 'object' && !Array.isArray(v) && v.cells && typeof v.cells === 'object') {
+    return { cells: { ...v.cells } }
+  }
+  return { cells: {} }
+}
+
+function iterTableAnchorKeys(field) {
+  const { rowIds, colIds, covered } = buildTableMergeLayout(field)
+  const keys = []
+  for (let i = 0; i < rowIds.length; i++) {
+    for (let j = 0; j < colIds.length; j++) {
+      const key = tableCellKey(rowIds[i], colIds[j])
+      if (covered.has(key)) continue
+      keys.push(key)
+    }
+  }
+  return keys
+}
+
+/**
+ * Data-table fields: `type === 'table'` (any case) or legacy JSON with rows/columns but missing/wrong type.
+ * Prevents the corrections panel from falling through to `displayFieldValue` and dumping every filled cell as "Current:".
+ */
+function isTableField(field) {
+  if (!field || typeof field !== 'object') return false
+  const t = String(field.type ?? '').trim().toLowerCase()
+  if (t === 'table') return true
+  const cols = field.tableColumns
+  const rows = field.tableRows
+  return Array.isArray(cols) && cols.length > 0 && Array.isArray(rows) && rows.length > 0
+}
+
+function tableCellIsFilled(cells, key) {
+  const v = cells[key]
+  return v !== undefined && v !== null && String(v).trim() !== ''
+}
+
+function normalizedTableCellString(cells, key) {
+  const v = cells[key]
+  if (v === undefined || v === null) return ''
+  return String(v).trim()
+}
+
+/** "Row label / Col label" for a cell key (rowId::colId). */
+function tableCellDisplayLabel(field, key) {
+  const sep = '::'
+  const i = String(key).indexOf(sep)
+  if (i < 0) return String(key)
+  const rowId = String(key).slice(0, i)
+  const colId = String(key).slice(i + sep.length)
+  const rl = (field.tableRows || []).find((x) => x.id === rowId)?.label || rowId
+  const cl = (field.tableColumns || []).find((x) => x.id === colId)?.label || colId
+  return `${rl} / ${cl}`
+}
+
+/** Anchor keys whose values differ between two table snapshots (one correction step). */
+function getTableCorrectionChangedKeys(field, fromValue, toValue) {
+  if (!isTableField(field)) return []
+  const fromCells = normalizeTableValue(fromValue).cells
+  const toCells = normalizeTableValue(toValue).cells
+  const changed = []
+  for (const key of iterTableAnchorKeys(field)) {
+    if (normalizedTableCellString(fromCells, key) !== normalizedTableCellString(toCells, key)) {
+      changed.push(key)
+    }
+  }
+  return changed
+}
+
+/** Stable reading order for a list of cell keys (matches table layout). */
+function sortTableKeysByFieldOrder(field, keys) {
+  if (!keys?.length) return []
+  const order = new Map()
+  iterTableAnchorKeys(field).forEach((k, i) => order.set(k, i))
+  return [...keys].sort((a, b) => (order.get(a) ?? 9999) - (order.get(b) ?? 9999))
+}
+
+/** One side of a table correction (only changed cells), for the corrections panel. */
+function displayTableCorrectionSide(field, value, changedKeys) {
+  const { cells } = normalizeTableValue(value)
+  const parts = []
+  for (const key of changedKeys) {
+    const lab = tableCellDisplayLabel(field, key)
+    const raw = cells[key]
+    const display = raw !== undefined && raw !== null && String(raw).trim() !== '' ? String(raw) : '-'
+    parts.push(`${lab}: ${display}`)
+  }
+  return parts.length ? parts.join('; ') : '-'
+}
+
+function isTableFieldFilled(field, value) {
+  const { cells } = normalizeTableValue(value)
+  const keys = iterTableAnchorKeys(field)
+  if (keys.length === 0) return false
+  const anyFilled = keys.some((k) => tableCellIsFilled(cells, k))
+  if (isRequired(field)) {
+    return keys.every((k) => tableCellIsFilled(cells, k))
+  }
+  return anyFilled
+}
+
+function isTableFieldEmpty(field, value) {
+  const { cells } = normalizeTableValue(value)
+  const keys = iterTableAnchorKeys(field)
+  if (keys.length === 0) return true
+  return !keys.some((k) => tableCellIsFilled(cells, k))
+}
+
+/**
+ * Normalize stored signature payloads to a usable <img src>.
+ * Handles data URLs, URLs, and raw base64 (no `data:image/...` prefix) from exports or legacy saves.
+ */
+function normalizeSignatureImageSrc(value) {
+  if (value == null || value === '') return null
+  const s = String(value).trim()
+  if (!s) return null
+  if (/^data:image\//i.test(s)) return s
+  if (s.startsWith('blob:')) return s
+  if (/^https?:\/\//i.test(s)) return s
+  if (s.startsWith('/')) return s
+  const compact = s.replace(/\s+/g, '')
+  if (!/^[A-Za-z0-9+/]+=*$/.test(compact) || compact.length < 32) return null
+  if (compact.startsWith('iVBORw0KGgo')) return `data:image/png;base64,${compact}`
+  if (compact.startsWith('/9j/')) return `data:image/jpeg;base64,${compact}`
+  return null
+}
+
+/** Value can be used as <img src> (after normalization). */
+function isSignatureImageSrc(value) {
+  return normalizeSignatureImageSrc(value) != null
+}
+
+/**
+ * Corrections UI: never put data:/blob: in <a href> — print/PDF often dumps the full URI as text.
+ * Use a <button> (no href) for those; a normal <a> for http(s) and app paths.
+ * Print: hide interactive controls and show the actual signature image (before/after), not labels or base64 text.
+ */
+function SignatureCorrectionLink({ value, children }) {
+  if (value === undefined || value === null || value === '') {
+    return <span className="de-signature-correction-empty">—</span>
+  }
+  const src = normalizeSignatureImageSrc(value)
+  if (!src) {
+    return <span className="de-signature-correction-empty">—</span>
+  }
+  const label = children ?? 'View signature'
+  const opaque = /^data:/i.test(src) || src.startsWith('blob:')
+  const openInNewTab = (e) => {
+    e.stopPropagation()
+    e.preventDefault()
+    window.open(src, '_blank', 'noopener,noreferrer')
+  }
+  const interactive = opaque ? (
+    <button type="button" className="de-signature-correction-link" onClick={openInNewTab}>
+      {label}
+    </button>
+  ) : (
+    <a
+      href={src}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="de-signature-correction-link"
+      onClick={(e) => e.stopPropagation()}
+    >
+      {label}
+    </a>
+  )
+  return (
+    <span className="de-signature-correction-wrap">
+      <span className="de-signature-correction-interactive">{interactive}</span>
+      <span className="de-signature-correction-print-fallback" aria-hidden="true">
+        <img src={src} alt="" className="de-signature-correction-print-img" />
+        <span className="de-signature-correction-print-caption">{label}</span>
+      </span>
+    </span>
+  )
+}
+
+/** Corrections list: signature UI for signature fields, or any value that resolves to an image src. */
+function correctionsUseSignatureLink(field, value) {
+  if (field?.type === 'signature') return true
+  return normalizeSignatureImageSrc(value) != null
+}
+
+/** Read-only signature on the PDF overlay (locked fields) — show image, not raw data URL text. */
+function ReadonlySignatureValue({ value, className = '' }) {
+  if (value == null || value === '') return <span className={className}>—</span>
+  const src = normalizeSignatureImageSrc(value)
+  if (src) {
+    return <img src={src} alt="" className={`de-signature-readonly-img${className ? ` ${className}` : ''}`} />
+  }
+  return <span className={className}>{String(value)}</span>
+}
+
+function isCheckboxChecked(value) {
+  return value === true || value === 'true' || value === 1
+}
+
+/** Submitted / locked checkbox: drawn box on screen and in print; native clipped for accessibility only. */
+function ReadonlyCheckboxValue({ value, className = '' }) {
+  const checked = isCheckboxChecked(value)
+  return (
+    <span
+      className={`de-checkbox-readonly${className ? ` ${className}` : ''}`}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <input type="checkbox" checked={checked} disabled tabIndex={-1} aria-label={checked ? 'Checked' : 'Unchecked'} />
+      <span
+        className={`de-checkbox-print-visual${checked ? ' de-checkbox-print-visual--checked' : ''}`}
+        aria-hidden="true"
+      />
+    </span>
+  )
+}
+
 function displayFieldValue(field, value) {
   if (field.type === 'multiselect') {
     const arr = parseMultiselectValue(value)
@@ -99,9 +344,35 @@ function displayFieldValue(field, value) {
     const rec = value.reviewerIsDesignatedRecorder ? ' · Reviewer records all entry' : ''
     return `Primary: ${p} · Reviewer: ${s}${rec}`
   }
+  if (isTableField(field)) {
+    const { cells } = normalizeTableValue(value)
+    const { rowIds, colIds, covered } = buildTableMergeLayout(field)
+    const parts = []
+    for (let i = 0; i < rowIds.length; i++) {
+      for (let j = 0; j < colIds.length; j++) {
+        const key = tableCellKey(rowIds[i], colIds[j])
+        if (covered.has(key)) continue
+        if (!tableCellIsFilled(cells, key)) continue
+        const rl = (field.tableRows || []).find((x) => x.id === rowIds[i])?.label || rowIds[i]
+        const cl = (field.tableColumns || []).find((x) => x.id === colIds[j])?.label || colIds[j]
+        parts.push(`${rl} / ${cl}: ${cells[key]}`)
+      }
+    }
+    return parts.length ? parts.join('; ') : '—'
+  }
+  if (field.type === 'signature') {
+    if (value === undefined || value === null || value === '') return '—'
+    if (normalizeSignatureImageSrc(value)) return 'Signature captured'
+    const t = String(value).trim()
+    if (t.length > 120) return 'Signature (see corrections for link)'
+    return t || '—'
+  }
   if (value === undefined || value === null || value === '') return '—'
   if (field.type === 'checkbox') {
-    return value === true || value === 'true' || value === 1 ? 'Yes' : 'No'
+    return isCheckboxChecked(value) ? '✓' : '—'
+  }
+  if (normalizeSignatureImageSrc(value)) {
+    return 'Signature captured'
   }
   return String(value)
 }
@@ -118,6 +389,9 @@ function isFieldValueFilled(field, value) {
     const a = value.primaryUserId
     const b = value.secondaryUserId
     return !!(a && b && a !== b)
+  }
+  if (isTableField(field)) {
+    return isTableFieldFilled(field, value)
   }
   return value !== undefined && value !== null && value !== '' && (typeof value !== 'string' || value.trim() !== '')
 }
@@ -180,17 +454,53 @@ function computeStageCompletion(stages, formData) {
   return comp
 }
 
-// Build ref numbers for fields that have corrections (for side-panel reference)
-function useCorrectionRefs(fields, formData) {
+/** Fields on one page: top to bottom, then left to right (FormBuilder x/y). Stable when form array order changes. */
+function getPageFieldsSpatialOrder(allFields, page) {
+  if (!allFields?.length) return []
+  return allFields
+    .filter((f) => (f.page || 1) === page)
+    .sort((a, b) => {
+      const dy = (a.y ?? 0) - (b.y ?? 0)
+      if (dy !== 0) return dy
+      const dx = (a.x ?? 0) - (b.x ?? 0)
+      if (dx !== 0) return dx
+      return String(a.id ?? '').localeCompare(String(b.id ?? ''), undefined, { numeric: true })
+    })
+}
+
+// Build ref numbers for fields that have corrections (side panel + overlay badges).
+// Ref = 1-based index among all fields on the page in spatial order (not form array or fill order).
+function useCorrectionRefs(fields, formData, currentPage) {
   return useMemo(() => {
     if (!fields?.length) return { refMap: {}, list: [] }
-    const list = fields
-      .map(f => ({ field: f, entry: formData[f.id] }))
-      .filter(({ entry }) => isFieldEntryObject(entry) && Array.isArray(entry.corrections) && entry.corrections.length > 0)
+    const pageFields = getPageFieldsSpatialOrder(fields, currentPage)
     const refMap = {}
-    list.forEach(({ field }, i) => { refMap[field.id] = i + 1 })
+    pageFields.forEach((f, i) => {
+      const entry = formData[f.id]
+      if (
+        isFieldEntryObject(entry) &&
+        Array.isArray(entry.corrections) &&
+        entry.corrections.length > 0
+      ) {
+        refMap[f.id] = i + 1
+      }
+    })
+    const list = pageFields
+      .filter((f) => {
+        const entry = formData[f.id]
+        return (
+          isFieldEntryObject(entry) &&
+          Array.isArray(entry.corrections) &&
+          entry.corrections.length > 0
+        )
+      })
+      .map((f) => ({
+        field: f,
+        entry: formData[f.id],
+        ref: refMap[f.id],
+      }))
     return { refMap, list }
-  }, [fields, formData])
+  }, [fields, formData, currentPage])
 }
 
 function isStageAccessible(stage, stages, stageCompletion) {
@@ -230,22 +540,26 @@ function SignaturePad({ fieldId, width, height, disabled, value, onChange }) {
     canvas.height = rect.height * dpr
     const ctx = canvas.getContext('2d')
     ctx.scale(dpr, dpr)
-    ctx.fillStyle = '#ffffff'
-    ctx.fillRect(0, 0, rect.width, rect.height)
+    ctx.clearRect(0, 0, rect.width, rect.height)
     ctx.strokeStyle = '#000'
     ctx.lineWidth = 2
     ctx.lineCap = 'round'
     ctx.lineJoin = 'round'
 
-    if (value) {
+    if (value && typeof value === 'string') {
       const img = new Image()
       img.onload = () => {
-        try { ctx.drawImage(img, 0, 0, rect.width, rect.height) } catch {}
+        try {
+          ctx.drawImage(img, 0, 0, rect.width, rect.height)
+        } catch {
+          /* ignore */
+        }
       }
+      img.onerror = () => {}
       img.src = value
     }
     initialized.current = true
-  }, []) // value captured once on mount
+  }, [value])
 
   useEffect(() => {
     const t = setTimeout(initCanvas, 60)
@@ -272,7 +586,12 @@ function SignaturePad({ fieldId, width, height, disabled, value, onChange }) {
     const c = coords(e)
     last.current = c
     const ctx = canvasRef.current?.getContext('2d')
-    if (ctx) { ctx.beginPath(); ctx.arc(c.x, c.y, 1, 0, Math.PI * 2); ctx.fill() }
+    if (ctx) {
+      ctx.fillStyle = '#000'
+      ctx.beginPath()
+      ctx.arc(c.x, c.y, 1, 0, Math.PI * 2)
+      ctx.fill()
+    }
   }, [coords])
 
   const onMove = useCallback((e) => {
@@ -304,9 +623,14 @@ function SignaturePad({ fieldId, width, height, disabled, value, onChange }) {
     const canvas = canvasRef.current
     if (!canvas) return
     const ctx = canvas.getContext('2d')
-    const r = canvas.parentElement.getBoundingClientRect()
-    ctx.fillStyle = '#ffffff'
-    ctx.fillRect(0, 0, r.width, r.height)
+    const dpr = window.devicePixelRatio || 1
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
+    ctx.clearRect(0, 0, canvas.width, canvas.height)
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    ctx.strokeStyle = '#000'
+    ctx.lineWidth = 2
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
     onChange('')
   }, [onChange])
 
@@ -337,11 +661,13 @@ function CorrectionsPanel({ correctionList, formatTs, noOuterWrapper }) {
   if (!correctionList?.length) return null
   const inner = (
     <>
-      <h3 className="de-corrections-panel-title">Corrections</h3>
-      <p className="de-corrections-panel-hint">Reference numbers match the badges on the form.</p>
+      <h3 className="de-corrections-panel-title">Corrections (this page)</h3>
+      <p className="de-corrections-panel-hint">
+        Only corrections for fields on the page you are viewing. Reference numbers match field badges (top to bottom, then left to right).
+      </p>
       <div className="de-corrections-list">
-        {correctionList.map(({ field, entry }, idx) => {
-          const refNum = idx + 1
+        {correctionList.map(({ field, entry, ref }) => {
+          const refNum = ref
           const corrections = entry.corrections || []
           const currentValue = getEffectiveValue(entry)
           const label = field.label || 'Field'
@@ -350,17 +676,55 @@ function CorrectionsPanel({ correctionList, formatTs, noOuterWrapper }) {
               <div className="de-correction-block-header">
                 <span className="de-correction-ref" aria-label={`Reference ${refNum}`}>{refNum}</span>
                 <span className="de-correction-label">{label}</span>
-                <span className="de-correction-current">Current: {displayFieldValue(field, currentValue)}</span>
+                {!isTableField(field) && (
+                  <span className="de-correction-current">
+                    Current:{' '}
+                    {field.type === 'checkbox' ? (
+                      <ReadonlyCheckboxValue value={currentValue} className="de-correction-checkbox" />
+                    ) : correctionsUseSignatureLink(field, currentValue) ? (
+                      <SignatureCorrectionLink value={currentValue}>View current signature</SignatureCorrectionLink>
+                    ) : (
+                      displayFieldValue(field, currentValue)
+                    )}
+                  </span>
+                )}
               </div>
               <ul className="de-correction-history">
-                {corrections.map((c, i) => (
-                  <li key={i}>
-                    <span className="de-correction-old">{displayFieldValue(field, c.from)}</span>
-                    <span className="de-correction-arrow" aria-hidden>→</span>
-                    <span className="de-correction-new">{displayFieldValue(field, c.to)}</span>
-                    <span className="de-correction-meta">({c.by}, {formatTs(c.at)})</span>
-                  </li>
-                ))}
+                {corrections.map((c, i) => {
+                  const tableDeltaKeys = isTableField(field)
+                    ? sortTableKeysByFieldOrder(field, getTableCorrectionChangedKeys(field, c.from, c.to))
+                    : null
+                  return (
+                    <li key={i}>
+                      <span className="de-correction-old">
+                        {field.type === 'checkbox' ? (
+                          <ReadonlyCheckboxValue value={c.from} className="de-correction-checkbox" />
+                        ) : isTableField(field) ? (
+                          displayTableCorrectionSide(field, c.from, tableDeltaKeys)
+                        ) : correctionsUseSignatureLink(field, c.from) ? (
+                          <SignatureCorrectionLink value={c.from}>Previous signature</SignatureCorrectionLink>
+                        ) : (
+                          displayFieldValue(field, c.from)
+                        )}
+                      </span>
+                      <span className="de-correction-arrow" aria-hidden>
+                        →
+                      </span>
+                      <span className="de-correction-new">
+                        {field.type === 'checkbox' ? (
+                          <ReadonlyCheckboxValue value={c.to} className="de-correction-checkbox" />
+                        ) : isTableField(field) ? (
+                          displayTableCorrectionSide(field, c.to, tableDeltaKeys)
+                        ) : correctionsUseSignatureLink(field, c.to) ? (
+                          <SignatureCorrectionLink value={c.to}>Updated signature</SignatureCorrectionLink>
+                        ) : (
+                          displayFieldValue(field, c.to)
+                        )}
+                      </span>
+                      <span className="de-correction-meta">({c.by}, {formatTs(c.at)})</span>
+                    </li>
+                  )
+                })}
               </ul>
             </div>
           )
@@ -374,6 +738,534 @@ function CorrectionsPanel({ correctionList, formatTs, noOuterWrapper }) {
 
 // Scale at which the form was designed (FormBuilder default); overlay coords are in this space
 const DESIGN_SCALE = 1.5
+
+function overlayFieldSelector(fieldId) {
+  const s = String(fieldId)
+  const esc =
+    typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+      ? CSS.escape(s)
+      : s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+  return `[data-de-overlay-field="${esc}"]`
+}
+
+/** Position the fixed field panel so its vertical center lines up with the selected overlay field. */
+function computeFieldPanelAnchorStyle(fieldId) {
+  if (typeof document === 'undefined') return null
+  const el = document.querySelector(overlayFieldSelector(fieldId))
+  if (!el) return null
+  const r = el.getBoundingClientRect()
+  const vh = window.innerHeight
+  const TOP_MIN = 72
+  const BOTTOM_PAD = 20
+  const maxPanelH = Math.min(560, Math.max(200, vh - TOP_MIN - BOTTOM_PAD))
+  const half = maxPanelH / 2
+  let fieldMid = r.top + r.height / 2
+  fieldMid = Math.max(TOP_MIN + half, Math.min(fieldMid, vh - BOTTOM_PAD - half))
+  return {
+    top: `${fieldMid}px`,
+    transform: 'translateY(-50%)',
+    maxHeight: `${maxPanelH}px`,
+    bottom: 'auto',
+  }
+}
+
+function initializeCorrectionDraft(field, rawValue) {
+  if (field.type === 'multiselect') return parseMultiselectValue(rawValue)
+  if (field.type === 'checkbox') return rawValue === true || rawValue === 'true' || rawValue === 1
+  if (field.type === 'collaborator') return collaboratorDraft(rawValue)
+  if (field.type === 'table') return normalizeTableValue(rawValue)
+  return rawValue ?? ''
+}
+
+function normalizeCorrectionForSave(field, newValue, activeUsers) {
+  if (field.type === 'multiselect')
+    return [...(Array.isArray(newValue) ? newValue : parseMultiselectValue(newValue))]
+  if (field.type === 'collaborator') {
+    const cv = collaboratorDraft(newValue)
+    const map = Object.fromEntries(activeUsers.map((u) => [u.id, u.displayName]))
+    return {
+      ...cv,
+      primaryDisplayName: map[cv.primaryUserId] || cv.primaryUserId,
+      secondaryDisplayName: map[cv.secondaryUserId] || cv.secondaryUserId,
+    }
+  }
+  if (field.type === 'table') return normalizeTableValue(newValue)
+  return newValue
+}
+
+function fieldTypeLabel(type) {
+  const m = {
+    text: 'Text',
+    date: 'Date',
+    number: 'Number',
+    signature: 'Signature',
+    textarea: 'Text area',
+    dropdown: 'Dropdown',
+    checkbox: 'Checkbox',
+    time: 'Time',
+    radio: 'Radio group',
+    multiselect: 'Multi select',
+    collaborator: 'Collaborator',
+    table: 'Data table',
+  }
+  return m[type] || type
+}
+
+/** Read-only audit lines (same facts as the on-field info popover). */
+function FieldAuditDetails({ entry, formatTs, correctionRef }) {
+  if (!isFieldEntryObject(entry)) return null
+  const enteredAt = entry.enteredAt
+  const lockedAt = entry.lockedAt
+  const recordedBy = entry.recordedBy
+  const corrs = Array.isArray(entry.corrections) ? entry.corrections : []
+  const show =
+    enteredAt ||
+    lockedAt ||
+    (recordedBy != null && recordedBy !== '') ||
+    corrs.length > 0 ||
+    correctionRef != null
+  if (!show) return null
+  return (
+    <div className="de-field-panel-audit">
+      <div className="de-field-panel-section-title">Entry history</div>
+      {enteredAt && (
+        <div className="de-field-panel-row">
+          <span className="de-field-panel-k">First entered</span>
+          <span className="de-field-panel-v">{formatTs(enteredAt)}</span>
+        </div>
+      )}
+      {lockedAt && (
+        <div className="de-field-panel-row">
+          <span className="de-field-panel-k">Submitted / locked</span>
+          <span className="de-field-panel-v">{formatTs(lockedAt)}</span>
+        </div>
+      )}
+      {recordedBy != null && recordedBy !== '' && (
+        <div className="de-field-panel-row">
+          <span className="de-field-panel-k">Recorded by</span>
+          <span className="de-field-panel-v">{recordedBy}</span>
+        </div>
+      )}
+      {correctionRef != null && (
+        <div className="de-field-panel-row">
+          <span className="de-field-panel-k">Correction ref</span>
+          <span className="de-field-panel-v">#{correctionRef} (see Corrections panel for this page)</span>
+        </div>
+      )}
+      {corrs.length > 0 && (
+        <ul className="de-field-panel-correction-list">
+          {corrs.map((c, i) => (
+            <li key={i}>
+              {formatTs(c.at)} — {c.by || '—'}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Right-side panel: field definition (read-only) + optional value edit + actions.
+ */
+function FieldDetailPanel({
+  field,
+  entry,
+  stageAccessible,
+  readOnly: batchReadOnly,
+  onChange,
+  onLockField,
+  onStartCorrection,
+  onClose,
+  correctionRef,
+  activeUsers,
+  collaboratorSetupComplete,
+  formatTs,
+  className = '',
+  style: panelStyle,
+  editingCorrectionId = null,
+  correctionDraft,
+  onCorrectionDraftChange,
+  onSaveCorrection,
+  /** Same scale as PDF overlay (field.width * scale/DESIGN_SCALE). */
+  overlayScale = DESIGN_SCALE,
+}) {
+  const value = getEffectiveValue(entry)
+  const fieldLocked = isFieldEntryLocked(entry)
+  const stageLocked = !stageAccessible || batchReadOnly
+  const req = isRequired(field)
+  const blockedByCollaborator =
+    field.type !== 'collaborator' && !collaboratorSetupComplete
+  const hasValue = isFieldValueFilled(field, value)
+  const canSubmit =
+    hasValue && !fieldLocked && !stageLocked && !blockedByCollaborator
+
+  const isEditingCorrectionHere =
+    editingCorrectionId === field.id && fieldLocked && !batchReadOnly
+  const showValueEditors =
+    (!fieldLocked && !stageLocked && !batchReadOnly) ||
+    (isEditingCorrectionHere && !stageLocked && !batchReadOnly)
+  const editSourceValue = isEditingCorrectionHere ? correctionDraft : value
+  const setFieldValue = (v) => {
+    if (isEditingCorrectionHere) onCorrectionDraftChange(v)
+    else onChange(field.id, v)
+  }
+
+  let valueEditor = null
+  if (showValueEditors && (!isEditingCorrectionHere || correctionDraft !== undefined)) {
+    switch (field.type) {
+      case 'text':
+        valueEditor = (
+          <input
+            type="text"
+            className="de-field-panel-input"
+            placeholder={field.placeholder || ''}
+            value={editSourceValue ?? ''}
+            onChange={(e) => setFieldValue(e.target.value)}
+          />
+        )
+        break
+      case 'textarea':
+        valueEditor = (
+          <textarea
+            className="de-field-panel-textarea"
+            placeholder={field.placeholder || ''}
+            value={editSourceValue ?? ''}
+            rows={3}
+            onChange={(e) => setFieldValue(e.target.value)}
+          />
+        )
+        break
+      case 'number':
+        valueEditor = field.unit ? (
+          <div className="unit-input-group">
+            <input
+              type="number"
+              className="de-field-panel-input"
+              placeholder={field.placeholder || ''}
+              value={editSourceValue ?? ''}
+              onChange={(e) => setFieldValue(e.target.value)}
+            />
+            <div className="unit-display">{field.unit}</div>
+          </div>
+        ) : (
+          <input
+            type="number"
+            className="de-field-panel-input"
+            placeholder={field.placeholder || ''}
+            value={editSourceValue ?? ''}
+            onChange={(e) => setFieldValue(e.target.value)}
+          />
+        )
+        break
+      case 'date':
+        valueEditor = (
+          <input
+            type="date"
+            className="de-field-panel-input"
+            value={editSourceValue ?? ''}
+            onChange={(e) => setFieldValue(e.target.value)}
+          />
+        )
+        break
+      case 'time': {
+        const t = typeof editSourceValue === 'string' ? editSourceValue.slice(0, 5) : ''
+        valueEditor = (
+          <input
+            type="time"
+            className="de-field-panel-input"
+            value={t}
+            onChange={(e) => setFieldValue(e.target.value)}
+          />
+        )
+        break
+      }
+      case 'dropdown':
+        valueEditor = (
+          <select
+            className="de-field-panel-input"
+            value={editSourceValue ?? ''}
+            onChange={(e) => setFieldValue(e.target.value)}
+          >
+            <option value="">— Select —</option>
+            {(field.options || []).map((opt) => (
+              <option key={opt} value={opt}>
+                {opt}
+              </option>
+            ))}
+          </select>
+        )
+        break
+      case 'checkbox':
+        valueEditor = (
+          <label className="de-field-panel-check">
+            <input
+              type="checkbox"
+              checked={editSourceValue === true || editSourceValue === 'true' || editSourceValue === 1}
+              onChange={(e) => setFieldValue(e.target.checked)}
+            />
+            <span>Checked</span>
+          </label>
+        )
+        break
+      case 'radio':
+        valueEditor = (
+          <select
+            className="de-field-panel-input"
+            value={editSourceValue ?? ''}
+            onChange={(e) => setFieldValue(e.target.value)}
+          >
+            <option value="">— Select —</option>
+            {(field.options || []).map((opt) => (
+              <option key={opt} value={opt}>
+                {opt}
+              </option>
+            ))}
+          </select>
+        )
+        break
+      case 'multiselect': {
+        const selected = parseMultiselectValue(editSourceValue)
+        valueEditor = (
+          <div className="de-field-panel-multiselect">
+            {(field.options || []).map((opt) => (
+              <label key={opt} className="de-field-panel-check">
+                <input
+                  type="checkbox"
+                  checked={selected.includes(opt)}
+                  onChange={() => {
+                    const next = selected.includes(opt)
+                      ? selected.filter((x) => x !== opt)
+                      : [...selected, opt]
+                    setFieldValue(next)
+                  }}
+                />
+                <span>{opt}</span>
+              </label>
+            ))}
+          </div>
+        )
+        break
+      }
+      case 'collaborator': {
+        const cv = collaboratorDraft(editSourceValue)
+        const opts = activeUsers.filter((u) => u.active !== false)
+        valueEditor = (
+          <div className="overlay-collaborator de-field-panel-collab">
+            {field.helpText && <p className="overlay-collab-help">{field.helpText}</p>}
+            <label className="overlay-collab-label">
+              Primary analyst
+              <select
+                value={cv.primaryUserId}
+                onChange={(e) =>
+                  setFieldValue({ ...cv, primaryUserId: e.target.value })
+                }
+              >
+                <option value="">— Select —</option>
+                {opts.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.displayName}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="overlay-collab-label">
+              Secondary reviewer
+              <select
+                value={cv.secondaryUserId}
+                onChange={(e) =>
+                  setFieldValue({ ...cv, secondaryUserId: e.target.value })
+                }
+              >
+                <option value="">— Select —</option>
+                {opts.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.displayName}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="overlay-collab-check">
+              <input
+                type="checkbox"
+                checked={!!cv.reviewerIsDesignatedRecorder}
+                onChange={(e) =>
+                  setFieldValue({ ...cv, reviewerIsDesignatedRecorder: e.target.checked })
+                }
+              />
+              Secondary reviewer is the designated recorder for all data entry
+            </label>
+          </div>
+        )
+        break
+      }
+      case 'table':
+        valueEditor = (
+          <div className="de-field-panel-table">
+            <TableFieldInput
+              field={field}
+              value={editSourceValue}
+              onChange={(next) => setFieldValue(next)}
+              disabled={false}
+              showRowColumnLabels
+            />
+          </div>
+        )
+        break
+      case 'signature': {
+        const sigFactor = overlayScale / DESIGN_SCALE
+        valueEditor = isEditingCorrectionHere ? (
+          <div className="de-field-panel-sig-correction">
+            <p className="de-field-panel-hint">Draw a new signature below, or clear and re-sign.</p>
+            <SignaturePad
+              fieldId={`${field.id}-panel-correction`}
+              width={field.width * sigFactor}
+              height={field.height * sigFactor}
+              disabled={false}
+              value={typeof editSourceValue === 'string' ? editSourceValue : ''}
+              onChange={(val) => setFieldValue(val)}
+            />
+          </div>
+        ) : (
+          <p className="de-field-panel-hint">
+            Draw or clear the signature using the field on the document. The preview updates as you draw.
+          </p>
+        )
+        break
+      }
+      default:
+        valueEditor = (
+          <input
+            type="text"
+            className="de-field-panel-input"
+            value={editSourceValue ?? ''}
+            onChange={(e) => setFieldValue(e.target.value)}
+          />
+        )
+    }
+  }
+
+  const handlePanelKeyDown = (e) => {
+    if (e.key !== 'Enter') return
+    if (e.target.closest?.('button')) return
+    if (e.target.tagName === 'TEXTAREA' && !(e.ctrlKey || e.metaKey)) return
+    if (
+      isEditingCorrectionHere &&
+      onSaveCorrection &&
+      correctionDraft !== undefined
+    ) {
+      e.preventDefault()
+      onSaveCorrection(field.id, normalizeCorrectionForSave(field, correctionDraft, activeUsers))
+      return
+    }
+    if (!canSubmit || !onLockField) return
+    e.preventDefault()
+    onLockField(field.id)
+  }
+
+  return (
+    <aside
+      className={`de-field-detail-panel${className ? ` ${className}` : ''}`}
+      aria-label="Field details"
+      style={panelStyle}
+      onKeyDown={handlePanelKeyDown}
+    >
+      <div className="de-field-detail-panel-header">
+        <h3 className="de-field-detail-panel-title">{field.label || 'Field'}</h3>
+        <button type="button" className="de-field-detail-panel-close" onClick={onClose} aria-label="Close field details">
+          &times;
+        </button>
+      </div>
+      <div className="de-field-detail-panel-body">
+        {!stageAccessible && (
+          <p className="de-field-panel-stage-lock">
+            This stage is not available yet. Complete earlier stages in order first.
+          </p>
+        )}
+        <div className="de-field-panel-meta">
+          {req && <span className="de-field-panel-badge de-field-panel-badge-req">Required</span>}
+          <span className="de-field-panel-badge">{fieldTypeLabel(field.type)}</span>
+          {field.stageInProcess?.trim() && (
+            <span className="de-field-panel-badge de-field-panel-badge-stage">Stage: {field.stageInProcess}</span>
+          )}
+        </div>
+        {field.placeholder && ['text', 'number', 'textarea', 'time'].includes(field.type) && (
+          <p className="de-field-panel-hint">
+            <span className="de-field-panel-k">Placeholder: </span>
+            {field.placeholder}
+          </p>
+        )}
+        {field.type === 'number' && field.unit && (
+          <p className="de-field-panel-hint">
+            <span className="de-field-panel-k">Unit: </span>
+            {field.unit}
+          </p>
+        )}
+        {(field.type === 'dropdown' || field.type === 'radio' || field.type === 'multiselect') &&
+          (field.options || []).length > 0 && (
+            <p className="de-field-panel-hint">
+              <span className="de-field-panel-k">Options: </span>
+              {(field.options || []).join(', ')}
+            </p>
+          )}
+        {field.type === 'collaborator' && field.helpText && (
+          <p className="de-field-panel-hint">{field.helpText}</p>
+        )}
+
+        <div className="de-field-panel-section-title">Current value</div>
+        {showValueEditors && valueEditor ? (
+          valueEditor
+        ) : (
+          <div className="de-field-panel-readonly-value">
+            {field.type === 'table' ? (
+              <TableFieldInput field={field} value={value} readOnly showRowColumnLabels />
+            ) : field.type === 'checkbox' ? (
+              <ReadonlyCheckboxValue value={value} className="de-field-panel-checkbox-readonly" />
+            ) : field.type === 'signature' && value && isSignatureImageSrc(value) ? (
+              <img src={value} alt="Signature" className="de-field-panel-sig-preview" />
+            ) : (
+              <span>{displayFieldValue(field, value)}</span>
+            )}
+          </div>
+        )}
+
+        <FieldAuditDetails entry={entry} formatTs={formatTs} correctionRef={correctionRef} />
+
+        <div className="de-field-panel-actions">
+          {canSubmit && onLockField && (
+            <button type="button" className="btn btn-primary de-field-panel-submit" onClick={() => onLockField(field.id)}>
+              Submit field
+            </button>
+          )}
+          {isEditingCorrectionHere && onSaveCorrection && (
+            <>
+              <button
+                type="button"
+                className="btn btn-primary de-field-panel-submit"
+                onClick={() =>
+                  onSaveCorrection(
+                    field.id,
+                    normalizeCorrectionForSave(field, correctionDraft, activeUsers),
+                  )
+                }
+              >
+                Save correction
+              </button>
+              <button type="button" className="btn btn-save" onClick={() => onStartCorrection(null)}>
+                Cancel
+              </button>
+            </>
+          )}
+          {fieldLocked && !batchReadOnly && !isEditingCorrectionHere && (
+            <button type="button" className="btn btn-save" onClick={() => onStartCorrection(field.id)}>
+              Edit (correction)
+            </button>
+          )}
+        </div>
+      </div>
+    </aside>
+  )
+}
 
 /** Info icon: click to show entered time, lock time, recorded-by, correction history (reduces on-form clutter). */
 function FieldAuditInfoPopover({ entry, formatTs, correctionRef }) {
@@ -447,7 +1339,7 @@ function FieldAuditInfoPopover({ entry, formatTs, correctionRef }) {
           {correctionRef != null && (
             <div className="overlay-audit-info-row">
               <span className="overlay-audit-info-key">Correction ref</span>
-              <span className="overlay-audit-info-val">#{correctionRef} (see Corrections panel)</span>
+              <span className="overlay-audit-info-val">#{correctionRef} (see Corrections panel for this page)</span>
             </div>
           )}
           {corrs.length > 0 && (
@@ -469,27 +1361,143 @@ function FieldAuditInfoPopover({ entry, formatTs, correctionRef }) {
   )
 }
 
+function tableHeaderLabel(entity, idFallback) {
+  const t = entity && typeof entity.label === 'string' ? entity.label.trim() : ''
+  return t || idFallback
+}
+
+function TableFieldInput({
+  field,
+  value,
+  onChange,
+  disabled,
+  readOnly,
+  showRowColumnLabels = false,
+  /** When true (PDF overlay), row/column weights fill the field frame like Form Builder preview. */
+  fillParent = false,
+}) {
+  const { cells } = normalizeTableValue(value)
+  const cols = field.tableColumns || []
+  const rows = field.tableRows || []
+  const { rowIds, colIds, covered, spanOf } = buildTableMergeLayout(field)
+
+  const setCell = (key, text) => {
+    if (readOnly) return
+    onChange({ cells: { ...cells, [key]: text } })
+  }
+
+  if (!cols.length || !rows.length) {
+    return (
+      <p className="overlay-table-empty">This table has no rows or columns in the form definition.</p>
+    )
+  }
+
+  const totalColW = cols.reduce((s, c) => s + tableColWidthPx(c), 0)
+  const totalRowH = rows.reduce((s, r) => s + tableRowHeightPx(r), 0)
+
+  const tableStyle = fillParent
+    ? { tableLayout: 'fixed', width: '100%', height: '100%' }
+    : { tableLayout: 'fixed', width: '100%' }
+
+  const colWidthStyle = (c) => {
+    if (fillParent && totalColW > 0) {
+      return { width: `${(tableColWidthPx(c) / totalColW) * 100}%` }
+    }
+    return { width: tableColWidthPx(c) }
+  }
+
+  const rowHeightStyle = (row) => {
+    if (fillParent && totalRowH > 0) {
+      return { height: `${(tableRowHeightPx(row) / totalRowH) * 100}%` }
+    }
+    return { height: tableRowHeightPx(row) }
+  }
+
+  const tableClass = showRowColumnLabels
+    ? 'overlay-table overlay-table-with-labels'
+    : 'overlay-table overlay-table-data-only'
+
+  return (
+    <div className={`overlay-table-scroll${readOnly ? ' overlay-table-scroll-readonly' : ''}`}>
+      <table className={tableClass} style={tableStyle}>
+        <colgroup>
+          {showRowColumnLabels && <col className="overlay-table-col-rowlabels" />}
+          {cols.map((c) => (
+            <col key={c.id} style={colWidthStyle(c)} />
+          ))}
+        </colgroup>
+        {showRowColumnLabels && (
+          <thead>
+            <tr>
+              <th scope="col" className="overlay-table-label-corner" aria-label="Row and column labels">
+                {' '}
+              </th>
+              {colIds.map((colId) => {
+                const col = cols.find((c) => c.id === colId)
+                return (
+                  <th key={colId} scope="col" className="overlay-table-col-header">
+                    {tableHeaderLabel(col, colId)}
+                  </th>
+                )
+              })}
+            </tr>
+          </thead>
+        )}
+        <tbody>
+          {rows.map((row, ri) => (
+            <tr key={row.id} style={rowHeightStyle(row)}>
+              {showRowColumnLabels && (
+                <th scope="row" className="overlay-table-row-header">
+                  {tableHeaderLabel(row, row.id)}
+                </th>
+              )}
+              {colIds.map((colId) => {
+                const cellKey = tableCellKey(rowIds[ri], colId)
+                if (covered.has(cellKey)) return null
+                const span = spanOf.get(cellKey)
+                const cellVal = cells[cellKey] ?? ''
+                return (
+                  <td key={cellKey} rowSpan={span?.rowspan || 1} colSpan={span?.colspan || 1}>
+                    {readOnly ? (
+                      <span className="overlay-table-input overlay-table-readonly">{cellVal || '\u00A0'}</span>
+                    ) : (
+                      <input
+                        type="text"
+                        className="overlay-table-input"
+                        value={cellVal}
+                        disabled={disabled}
+                        onChange={(e) => setCell(cellKey, e.target.value)}
+                      />
+                    )}
+                  </td>
+                )
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 // ─── Field renderer (with audit: timestamp, lock after 1 min, corrections) ─────
 function OverlayField({
   field,
   entry,
   stageAccessible,
   onChange,
-  editingCorrectionId,
-  onStartCorrection,
-  onSaveCorrection,
   onLockField,
   correctionRef,
   scale: currentScale = DESIGN_SCALE,
   readOnly = false,
   activeUsers = [],
   collaboratorSetupComplete = true,
+  onFieldPanelToggle,
+  fieldPanelActive = false,
 }) {
   const stageLocked = !stageAccessible || readOnly
   const value = getEffectiveValue(entry)
   const fieldLocked = isFieldEntryLocked(entry)
-  const isEditingCorrection = editingCorrectionId === field.id
-  const req = isRequired(field)
 
   const scaleFactor = currentScale / DESIGN_SCALE
   const style = {
@@ -497,78 +1505,76 @@ function OverlayField({
     top: field.y * scaleFactor,
     width: field.width * scaleFactor,
     height: field.height * scaleFactor,
+    ...overlayFieldFontStyle(field),
   }
 
-  const enteredAt = isFieldEntryObject(entry) ? entry.enteredAt : null
-  const corrections = isFieldEntryObject(entry) && Array.isArray(entry.corrections) ? entry.corrections : []
+  const compactShell = (className, inner) => (
+    <div
+      data-de-overlay-field={field.id}
+      className={`overlay-field overlay-field--compact${fieldPanelActive ? ' overlay-field--panel-active' : ''}${className ? ` ${className}` : ''}`}
+      style={style}
+      onClick={(e) => {
+        e.stopPropagation()
+        onFieldPanelToggle?.(field.id)
+      }}
+    >
+      {inner}
+    </div>
+  )
 
-  const formatTs = (iso) => {
-    if (!iso) return ''
-    try {
-      const d = new Date(iso)
-      return d.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'medium' })
-    } catch {
-      return iso
-    }
-  }
+  const compactInputBase =
+    'overlay-field-input-container overlay-field-input-container--compact' +
+    (field.type === 'textarea' ? ' overlay-field-input-container--textarea' : '')
 
-  // Locked and in correction mode: show crossed-out original + correction log + new input
+  // Batch complete / read-only: values on PDF are display-only
   if (stageLocked) {
-    return (
-      <div className="overlay-field locked" style={style}>
-        <div className="overlay-field-label overlay-field-label-row">
-          <span className="overlay-field-label-text">
-            {field.label || 'Field'}
-            {req && <span className="required-marker">*</span>}
+    return compactShell(
+      'locked',
+      <div
+        className={`${compactInputBase}${field.type === 'table' ? ' overlay-field-audit-table' : ''}`}
+      >
+        {field.type === 'table' ? (
+          <TableFieldInput field={field} value={value} readOnly fillParent />
+        ) : field.type === 'signature' ? (
+          <ReadonlySignatureValue value={value} className="overlay-field-value-readonly overlay-field-value-readonly--compact" />
+        ) : field.type === 'checkbox' ? (
+          <ReadonlyCheckboxValue value={value} className="overlay-field-value-readonly overlay-field-value-readonly--compact" />
+        ) : (
+          <span
+            className={`overlay-field-value-readonly overlay-field-value-readonly--compact${field.type === 'textarea' ? ' overlay-field-value-readonly--textarea' : ''}`}
+          >
+            {displayFieldValue(field, value)}
           </span>
-          <FieldAuditInfoPopover entry={entry} formatTs={formatTs} correctionRef={correctionRef} />
-        </div>
-        <div className="overlay-field-audit">
-          <span className="overlay-field-value-readonly">{displayFieldValue(field, value)}</span>
-        </div>
-      </div>
+        )}
+      </div>,
     )
   }
 
-  if (fieldLocked && isEditingCorrection) {
-    return (
-      <CorrectionEditor
-        field={field}
-        entry={entry}
-        value={value}
-        style={style}
-        req={req}
-        correctionRef={correctionRef}
-        onSave={(newVal) => onSaveCorrection(field.id, newVal)}
-        activeUsers={activeUsers}
-        onCancel={() => onStartCorrection(null)}
-        formatTs={formatTs}
-      />
-    )
-  }
-
-  if (fieldLocked && !isEditingCorrection) {
-    return (
-      <div className="overlay-field overlay-field-locked" style={style}>
-        <div className="overlay-field-locked-header">
-          <div className="overlay-field-locked-title">
-            {field.label || 'Field'}
-            {req && <span className="required-marker">*</span>}
-            {correctionRef != null && (
-              <span className="overlay-field-ref-badge" title={`See correction history #${correctionRef} in the panel`}>{correctionRef}</span>
-            )}
-          </div>
-          <div className="overlay-field-locked-header-actions">
-            <FieldAuditInfoPopover entry={entry} formatTs={formatTs} correctionRef={correctionRef} />
-            <button type="button" className="overlay-field-edit-btn overlay-field-edit-btn-header" onClick={() => onStartCorrection(field.id)}>
-              Edit
-            </button>
-          </div>
-        </div>
-        <div className="overlay-field-audit">
-          <span className="overlay-field-value-readonly">{displayFieldValue(field, value)}</span>
-        </div>
-      </div>
+  if (fieldLocked) {
+    return compactShell(
+      'overlay-field-locked',
+      <div
+        className={`${compactInputBase} overlay-field-locked-inner${field.type === 'table' ? ' overlay-field-audit-table' : ''}`}
+      >
+        {correctionRef != null && (
+          <span className="overlay-field-ref-badge overlay-field-ref-badge--compact" title={`Correction #${correctionRef}`}>
+            {correctionRef}
+          </span>
+        )}
+        {field.type === 'table' ? (
+          <TableFieldInput field={field} value={value} readOnly fillParent />
+        ) : field.type === 'signature' ? (
+          <ReadonlySignatureValue value={value} className="overlay-field-value-readonly overlay-field-value-readonly--compact" />
+        ) : field.type === 'checkbox' ? (
+          <ReadonlyCheckboxValue value={value} className="overlay-field-value-readonly overlay-field-value-readonly--compact" />
+        ) : (
+          <span
+            className={`overlay-field-value-readonly overlay-field-value-readonly--compact${field.type === 'textarea' ? ' overlay-field-value-readonly--textarea' : ''}`}
+          >
+            {displayFieldValue(field, value)}
+          </span>
+        )}
+      </div>,
     )
   }
 
@@ -620,12 +1626,18 @@ function OverlayField({
       break
     case 'textarea':
       input = (
-        <textarea
-          placeholder={field.placeholder || ''}
-          value={value ?? ''}
-          disabled={stageLocked}
-          onChange={e => onChange(field.id, e.target.value)}
-        />
+        <div className="overlay-textarea-stack">
+          <textarea
+            placeholder={field.placeholder || ''}
+            value={value ?? ''}
+            disabled={stageLocked}
+            onChange={e => onChange(field.id, e.target.value)}
+          />
+          {/* Print: native textarea paints text from the top of a full-height box; mirror uses flex bottom-align */}
+          <div className="overlay-textarea-print-mirror" aria-hidden="true">
+            {value ?? ''}
+          </div>
+        </div>
       )
       break
     case 'dropdown':
@@ -642,19 +1654,25 @@ function OverlayField({
         </select>
       )
       break
-    case 'checkbox':
+    case 'checkbox': {
+      const chk = value === true || value === 'true' || value === 1
       input = (
-        <div className="overlay-checkbox-wrap">
+        <div className="overlay-checkbox-wrap overlay-checkbox-wrap--compact">
           <input
             type="checkbox"
-            checked={value === true || value === 'true' || value === 1}
+            checked={chk}
             disabled={stageLocked}
+            aria-label={field.label || 'Checkbox'}
             onChange={e => onChange(field.id, e.target.checked)}
           />
-          <span>{field.label || 'Check'}</span>
+          <span
+            className={`de-checkbox-print-visual${chk ? ' de-checkbox-print-visual--checked' : ''}`}
+            aria-hidden="true"
+          />
         </div>
       )
       break
+    }
     case 'time': {
       const t = typeof value === 'string' ? value.slice(0, 5) : ''
       input = (
@@ -720,6 +1738,10 @@ function OverlayField({
                   onChange(field.id, next)
                 }}
               />
+              <span
+                className={`de-checkbox-print-visual de-checkbox-print-visual--print-only${selected.includes(opt) ? ' de-checkbox-print-visual--checked' : ''}`}
+                aria-hidden="true"
+              />
               <span>{opt}</span>
             </label>
           ))}
@@ -743,8 +1765,7 @@ function OverlayField({
       const cv = collaboratorDraft(value)
       const opts = activeUsers.filter((u) => u.active !== false)
       input = (
-        <div className="overlay-collaborator">
-          {field.helpText && <p className="overlay-collab-help">{field.helpText}</p>}
+        <div className="overlay-collaborator overlay-collaborator--compact">
           <label className="overlay-collab-label">
             Primary analyst
             <select
@@ -794,6 +1815,17 @@ function OverlayField({
       )
       break
     }
+    case 'table':
+      input = (
+        <TableFieldInput
+          field={field}
+          value={value}
+          onChange={(next) => onChange(field.id, next)}
+          disabled={stageLocked}
+          fillParent
+        />
+      )
+      break
     default:
       input = (
         <input
@@ -805,274 +1837,35 @@ function OverlayField({
       )
   }
 
-  const hasValue = isFieldValueFilled(field, value)
   const blockedByCollaborator =
     field.type !== 'collaborator' && !collaboratorSetupComplete
-  const showSubmit =
-    hasValue && !fieldLocked && !stageLocked && !blockedByCollaborator
 
-  return (
-    <div className={`overlay-field${stageLocked ? ' locked' : ''}`} style={style}>
-      <div className="overlay-field-label overlay-field-label-row">
-        <span className="overlay-field-label-text">
-          {field.label || 'Field'}
-          {req && <span className="required-marker">*</span>}
-        </span>
-        {!fieldLocked && (
-          <FieldAuditInfoPopover entry={entry} formatTs={formatTs} correctionRef={correctionRef} />
-        )}
-      </div>
-      <div className="overlay-field-input-container">
-        {blockedByCollaborator && (
-          <p className="overlay-collab-block-hint">Complete the Collaborator Entry field first.</p>
-        )}
-        {input}
-        {showSubmit && onLockField && (
-          <button type="button" className="overlay-field-submit-btn" onClick={() => onLockField(field.id)} title="Lock this field (data is correct)">
-            Submit
-          </button>
-        )}
-      </div>
-    </div>
-  )
-}
+  const canSubmitOverlay =
+    isFieldValueFilled(field, value) && !fieldLocked && !stageLocked && !blockedByCollaborator
 
-// Inline correction editor: ref badge + crossed-out original + new input (past corrections in side panel)
-function CorrectionEditor({
-  field,
-  entry,
-  value,
-  style,
-  req,
-  correctionRef,
-  onSave,
-  onCancel,
-  formatTs,
-  activeUsers = [],
-}) {
-  const [newValue, setNewValue] = useState(() => {
-    if (field.type === 'multiselect') return parseMultiselectValue(value)
-    if (field.type === 'checkbox') return value === true || value === 'true' || value === 1
-    if (field.type === 'collaborator') return collaboratorDraft(value)
-    return value ?? ''
-  })
-  useEffect(() => {
-    if (field.type === 'multiselect') setNewValue(parseMultiselectValue(value))
-    else if (field.type === 'checkbox') setNewValue(value === true || value === 'true' || value === 1)
-    else if (field.type === 'collaborator') setNewValue(collaboratorDraft(value))
-    else setNewValue(value ?? '')
-  }, [field.id, field.type, value])
-
-  const displayValue = displayFieldValue(field, value)
-  const handleSave = () => {
-    if (field.type === 'multiselect') onSave([...newValue])
-    else if (field.type === 'collaborator') {
-      const cv = collaboratorDraft(newValue)
-      const map = Object.fromEntries(activeUsers.map((u) => [u.id, u.displayName]))
-      onSave({
-        ...cv,
-        primaryDisplayName: map[cv.primaryUserId] || cv.primaryUserId,
-        secondaryDisplayName: map[cv.secondaryUserId] || cv.secondaryUserId,
-      })
-    } else onSave(newValue)
+  const handleOverlayKeyDown = (e) => {
+    if (e.key !== 'Enter') return
+    if (!canSubmitOverlay || !onLockField) return
+    if (e.target.closest?.('button')) return
+    if (e.target.tagName === 'TEXTAREA' && !(e.ctrlKey || e.metaKey)) return
+    e.preventDefault()
+    e.stopPropagation()
+    onLockField(field.id)
   }
 
-  let correctionInput
-  if (field.type === 'textarea') {
-    correctionInput = (
-      <textarea
-        className="overlay-field-correction-input"
-        value={newValue}
-        onChange={e => setNewValue(e.target.value)}
-        placeholder="Enter corrected value"
-        rows={2}
-      />
-    )
-  } else if (field.type === 'number') {
-    correctionInput = (
-      <div className="unit-input-group">
-        <input
-          type="number"
-          className="overlay-field-correction-input"
-          value={newValue}
-          onChange={e => setNewValue(e.target.value)}
-          placeholder="Enter corrected value"
-        />
-        {field.unit && <div className="unit-display">{field.unit}</div>}
-      </div>
-    )
-  } else if (field.type === 'date') {
-    correctionInput = (
-      <input
-        type="date"
-        className="overlay-field-correction-input"
-        value={newValue}
-        onChange={e => setNewValue(e.target.value)}
-      />
-    )
-  } else if (field.type === 'time') {
-    correctionInput = (
-      <div className="overlay-time-row">
-        <input
-          type="time"
-          className="overlay-field-correction-input"
-          value={typeof newValue === 'string' ? newValue.slice(0, 5) : ''}
-          onChange={e => setNewValue(e.target.value)}
-        />
-        <button
-          type="button"
-          className="overlay-time-now-btn"
-          onClick={() => {
-            const d = new Date()
-            setNewValue(`${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`)
-          }}
-        >
-          Now
-        </button>
-      </div>
-    )
-  } else if (field.type === 'dropdown') {
-    correctionInput = (
-      <select
-        className="overlay-field-correction-input"
-        value={newValue}
-        onChange={e => setNewValue(e.target.value)}
-      >
-        <option value="">-- Select --</option>
-        {(field.options || []).map(opt => (
-          <option key={opt} value={opt}>{opt}</option>
-        ))}
-      </select>
-    )
-  } else if (field.type === 'radio') {
-    correctionInput = (
-      <div className="overlay-radio-group">
-        {(field.options || []).map(opt => (
-          <label key={opt} className="overlay-radio-label">
-            <input
-              type="radio"
-              name={`de-rc-${field.id}`}
-              value={opt}
-              checked={newValue === opt}
-              onChange={() => setNewValue(opt)}
-            />
-            <span>{opt}</span>
-          </label>
-        ))}
-      </div>
-    )
-  } else if (field.type === 'multiselect') {
-    const sel = Array.isArray(newValue) ? newValue : []
-    correctionInput = (
-      <div className="overlay-multiselect-group">
-        {(field.options || []).map(opt => (
-          <label key={opt} className="overlay-radio-label">
-            <input
-              type="checkbox"
-              checked={sel.includes(opt)}
-              onChange={() => {
-                setNewValue(sel.includes(opt) ? sel.filter(x => x !== opt) : [...sel, opt])
-              }}
-            />
-            <span>{opt}</span>
-          </label>
-        ))}
-      </div>
-    )
-  } else if (field.type === 'checkbox') {
-    correctionInput = (
-      <div className="overlay-checkbox-wrap">
-        <input
-          type="checkbox"
-          checked={newValue === true || newValue === 'true' || newValue === 1}
-          onChange={e => setNewValue(e.target.checked)}
-        />
-        <span>Corrected value</span>
-      </div>
-    )
-  } else if (field.type === 'collaborator') {
-    const cv = collaboratorDraft(newValue)
-    const opts = activeUsers.filter((u) => u.active !== false)
-    correctionInput = (
-      <div className="overlay-collaborator overlay-collab-correction">
-        <label className="overlay-collab-label">
-          Primary analyst
-          <select
-            value={cv.primaryUserId}
-            onChange={(e) => setNewValue({ ...cv, primaryUserId: e.target.value })}
-          >
-            <option value="">—</option>
-            {opts.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.displayName}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="overlay-collab-label">
-          Secondary reviewer
-          <select
-            value={cv.secondaryUserId}
-            onChange={(e) => setNewValue({ ...cv, secondaryUserId: e.target.value })}
-          >
-            <option value="">—</option>
-            {opts.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.displayName}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="overlay-collab-check">
-          <input
-            type="checkbox"
-            checked={!!cv.reviewerIsDesignatedRecorder}
-            onChange={(e) =>
-              setNewValue({ ...cv, reviewerIsDesignatedRecorder: e.target.checked })
-            }
-          />
-          Reviewer records all entry
-        </label>
-      </div>
-    )
-  } else {
-    correctionInput = (
-      <input
-        type="text"
-        className="overlay-field-correction-input"
-        value={newValue}
-        onChange={e => setNewValue(e.target.value)}
-        placeholder="Enter corrected value"
-      />
-    )
-  }
+  const compactEmpty = !isFieldValueFilled(field, value)
 
-  return (
-    <div className="overlay-field overlay-field-correction-editor" style={style}>
-      <div className="overlay-field-label overlay-field-label-row">
-        <span className="overlay-field-label-text">
-          {field.label || 'Field'}
-          {req && <span className="required-marker">*</span>}
-          {correctionRef != null && (
-            <span className="overlay-field-ref-badge" title={`Correction history #${correctionRef} in panel`}>{correctionRef}</span>
-          )}
-        </span>
-        <FieldAuditInfoPopover entry={entry} formatTs={formatTs} correctionRef={correctionRef} />
-      </div>
-      <div className="overlay-field-audit">
-        <div className="overlay-field-correction-new-entry overlay-field-correction-row">
-          <span className="overlay-field-correction-original">{displayValue}</span>
-          <span className="overlay-field-correction-arrow" aria-hidden>→</span>
-          <div className="overlay-field-correction-input-wrap">
-            {correctionInput}
-            <div className="overlay-field-correction-actions">
-              <button type="button" className="overlay-field-correction-save" onClick={handleSave}>Save correction</button>
-              <button type="button" className="overlay-field-correction-cancel" onClick={onCancel}>Cancel</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+  return compactShell(
+    compactEmpty ? 'overlay-field--compact-empty' : '',
+    <div
+      className={compactInputBase}
+      onKeyDown={handleOverlayKeyDown}
+    >
+      {blockedByCollaborator && (
+        <p className="overlay-collab-block-hint">Complete the Collaborator Entry field first.</p>
+      )}
+      {input}
+    </div>,
   )
 }
 
@@ -1104,6 +1897,10 @@ export default function DataEntry() {
   const [batchRecord, setBatchRecord] = useState(null)
   const [isCompleted, setIsCompleted] = useState(false)
   const [batchLoading, setBatchLoading] = useState(false)
+  /** Field whose definition/value panel is open (Form Builder label + metadata + actions). */
+  const [fieldInfoPanelId, setFieldInfoPanelId] = useState(null)
+  /** Inline position for fixed panel so it lines up with the overlay field on screen. */
+  const [fieldPanelAnchorStyle, setFieldPanelAnchorStyle] = useState(null)
 
   // Load form config
   useEffect(() => {
@@ -1123,7 +1920,7 @@ export default function DataEntry() {
         const lastSeen = stored ? JSON.parse(stored) : {}
         if (!lastSeen[key] || lastSeen[key] < ver) lastSeen[key] = ver
         localStorage.setItem('ebrFormLastSeen', JSON.stringify(lastSeen))
-      } catch {}
+      } catch { }
 
       // Update recently used (for Commonly Used section)
       try {
@@ -1132,7 +1929,7 @@ export default function DataEntry() {
         const entry = { formId: res.form.id, formName: res.form.name || 'Unnamed', pdfFile: res.form.pdfFile || '', openedAt: new Date().toISOString() }
         const merged = [entry, ...list.filter((x) => x.formId !== res.form.id)].slice(0, 30)
         localStorage.setItem('ebrRecentlyUsed', JSON.stringify(merged))
-      } catch {}
+      } catch { }
     })
       .catch(err => setError(err.message))
       .finally(() => setLoading(false))
@@ -1152,9 +1949,41 @@ export default function DataEntry() {
           }
         }
       })
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => setBatchLoading(false))
   }, [batchId, formConfig?.id])
+
+  const [batchIdCopied, setBatchIdCopied] = useState(false)
+
+  const copyBatchIdToClipboard = useCallback(async () => {
+    const id = String(batchRecord?.batchId ?? batchId ?? '').trim()
+    if (!id) return
+    try {
+      await navigator.clipboard.writeText(id)
+    } catch {
+      try {
+        const ta = document.createElement('textarea')
+        ta.value = id
+        ta.setAttribute('readonly', '')
+        ta.style.position = 'fixed'
+        ta.style.left = '-9999px'
+        document.body.appendChild(ta)
+        ta.select()
+        document.execCommand('copy')
+        document.body.removeChild(ta)
+      } catch {
+        return
+      }
+    }
+    setBatchIdCopied(true)
+    window.setTimeout(() => setBatchIdCopied(false), 2000)
+  }, [batchRecord?.batchId, batchId])
+
+  /* Print: scope layout fixes to this route only (see DataEntry.css @media print + html class) */
+  useEffect(() => {
+    document.documentElement.classList.add('de-data-entry-print-host')
+    return () => document.documentElement.classList.remove('de-data-entry-print-host')
+  }, [])
 
   // Derived data: effective values for validation (handles audit object shape)
   const formDataEffective = useMemo(() => {
@@ -1168,10 +1997,62 @@ export default function DataEntry() {
 
   const currentPageFields = useMemo(() => {
     if (!formConfig?.fields) return []
-    return formConfig.fields.filter(f => (f.page || 1) === currentPage)
+    return getPageFieldsSpatialOrder(formConfig.fields, currentPage)
   }, [formConfig, currentPage])
 
-  const { refMap: correctionRefMap, list: correctionList } = useCorrectionRefs(formConfig?.fields, formData)
+  const fieldInfoPanelField = useMemo(() => {
+    if (!fieldInfoPanelId || !formConfig?.fields) return null
+    const f = formConfig.fields.find((x) => x.id === fieldInfoPanelId)
+    if (!f || (f.page || 1) !== currentPage) return null
+    return f
+  }, [fieldInfoPanelId, formConfig?.fields, currentPage])
+
+  /** Open the right-side field panel; close only via the panel close control (or page change). */
+  const openFieldPanel = useCallback((fieldId) => {
+    setFieldInfoPanelId(fieldId)
+  }, [])
+
+  useEffect(() => {
+    setFieldInfoPanelId(null)
+    setEditingCorrectionId(null)
+    setCorrectionDraft(null)
+  }, [currentPage])
+
+  useLayoutEffect(() => {
+    if (!fieldInfoPanelId) {
+      setFieldPanelAnchorStyle(null)
+      return
+    }
+    const measure = () => {
+      setFieldPanelAnchorStyle(computeFieldPanelAnchorStyle(fieldInfoPanelId))
+    }
+    measure()
+    const node = document.querySelector(overlayFieldSelector(fieldInfoPanelId))
+    const ro = new ResizeObserver(measure)
+    if (node) ro.observe(node)
+    window.addEventListener('resize', measure)
+    window.addEventListener('scroll', measure, true)
+    const t = window.setTimeout(measure, 100)
+    return () => {
+      ro.disconnect()
+      window.removeEventListener('resize', measure)
+      window.removeEventListener('scroll', measure, true)
+      window.clearTimeout(t)
+    }
+  }, [fieldInfoPanelId, scale, currentPage])
+
+  const fieldPanelStageAccessible = useMemo(() => {
+    if (!fieldInfoPanelField) return true
+    const sn = fieldInfoPanelField.stageInProcess || 'Default Stage'
+    const st = stages.find((s) => s.stage === sn)
+    return st ? isStageAccessible(st, stages, stageCompletion) : true
+  }, [fieldInfoPanelField, stages, stageCompletion])
+
+  const { refMap: correctionRefMap, list: correctionList } = useCorrectionRefs(
+    formConfig?.fields,
+    formData,
+    currentPage,
+  )
 
   const formatTs = useCallback((iso) => {
     if (!iso) return ''
@@ -1184,6 +2065,8 @@ export default function DataEntry() {
 
   const lastActivityRef = useRef({})
   const [editingCorrectionId, setEditingCorrectionId] = useState(null)
+  /** Draft value while correcting a locked field (Field detail panel only). */
+  const [correctionDraft, setCorrectionDraft] = useState(null)
   const [activeUsers, setActiveUsers] = useState([])
   const [recorderModalFieldId, setRecorderModalFieldId] = useState(null)
   const [correctionModal, setCorrectionModal] = useState(null)
@@ -1191,6 +2074,11 @@ export default function DataEntry() {
   const [editorOther, setEditorOther] = useState('')
   const [completeModalOpen, setCompleteModalOpen] = useState(false)
   const [completeSignOffChecked, setCompleteSignOffChecked] = useState(false)
+  const [pdfPreviewOpen, setPdfPreviewOpen] = useState(false)
+  const [pdfPreviewUrl, setPdfPreviewUrl] = useState(null)
+  const [pdfPreviewLoading, setPdfPreviewLoading] = useState(false)
+  const [pdfPreviewError, setPdfPreviewError] = useState(null)
+  const [pdfPreviewFilename, setPdfPreviewFilename] = useState('batch.pdf')
 
   const formConfigRef = useRef(null)
   formConfigRef.current = formConfig
@@ -1205,7 +2093,7 @@ export default function DataEntry() {
       .then((r) => {
         if (r.success && Array.isArray(r.users)) setActiveUsers(r.users)
       })
-      .catch(() => {})
+      .catch(() => { })
   }, [formConfig?.id])
 
   const userIdToName = useMemo(
@@ -1245,6 +2133,18 @@ export default function DataEntry() {
         const merged = { ...prevV, ...value }
         return { ...prev, [id]: normalizeEntry(existing, merged, { setEnteredAt: true }) }
       }
+      if (
+        field?.type === 'table' &&
+        value &&
+        typeof value === 'object' &&
+        !Array.isArray(value) &&
+        value.cells
+      ) {
+        const existing = prev[id]
+        const prevV = normalizeTableValue(isFieldEntryObject(existing) ? existing.v : existing)
+        const merged = { cells: { ...prevV.cells, ...value.cells } }
+        return { ...prev, [id]: normalizeEntry(existing, merged, { setEnteredAt: true }) }
+      }
       const existing = prev[id]
       const normalized = normalizeEntry(existing, value, { setEnteredAt: true })
       return { ...prev, [id]: normalized }
@@ -1271,6 +2171,7 @@ export default function DataEntry() {
         if (!entry) return
         const effective = getEffectiveValue(entry)
         if (f.type === 'multiselect' && parseMultiselectValue(effective).length === 0) return
+        if (f.type === 'table' && isTableFieldEmpty(f, effective)) return
         if (
           effective === undefined ||
           effective === null ||
@@ -1344,6 +2245,7 @@ export default function DataEntry() {
       [fieldId]: addCorrection(prev[fieldId], newValue, by, correctedAt),
     }))
     setEditingCorrectionId(null)
+    setCorrectionDraft(null)
     setCorrectionModal(null)
     setEditorOther('')
   }, [correctionModal, editorRole, editorOther])
@@ -1372,6 +2274,11 @@ export default function DataEntry() {
         ...prev,
         [fieldId]: normalizeEntry(prev[fieldId], v, { setEnteredAt: false, setLockedAt: true }),
       }))
+      return
+    }
+
+    if (field?.type === 'table' && isRequired(field) && !isFieldValueFilled(field, effective)) {
+      window.alert('Fill all cells in this table before submitting.')
       return
     }
 
@@ -1406,10 +2313,26 @@ export default function DataEntry() {
     })
   }, [])
 
+  const handleStartCorrection = useCallback((fieldId) => {
+    if (fieldId == null) {
+      setEditingCorrectionId(null)
+      setCorrectionDraft(null)
+      return
+    }
+    setFieldInfoPanelId(fieldId)
+    setEditingCorrectionId(fieldId)
+    const field = formConfig?.fields?.find((f) => f.id === fieldId)
+    if (field) {
+      const v = getEffectiveValue(formData[fieldId])
+      setCorrectionDraft(initializeCorrectionDraft(field, v))
+    }
+  }, [formConfig, formData])
+
   function fIsEmptyEffective(field, effective) {
     if (field?.type === 'multiselect') return parseMultiselectValue(effective).length === 0
     if (field?.type === 'checkbox')
       return effective !== true && effective !== 'true' && effective !== 1
+    if (field?.type === 'table') return isTableFieldEmpty(field, effective)
     return false
   }
 
@@ -1443,15 +2366,42 @@ export default function DataEntry() {
   }, [recorderModalFieldId])
 
   const [pdfPageSize, setPdfPageSize] = useState({ width: 0, height: 0 })
+  /** Saved when changing pages; applied in onPageRendered after the new page paints. */
+  const pendingWindowScrollRestoreRef = useRef(null)
+
   const onPageRendered = useCallback(({ page, totalPages: n, width, height }) => {
     setCurrentPage(page)
     if (n != null) setTotalPages(n)
     if (width > 0 && height > 0) setPdfPageSize({ width, height })
+
+    const savedY = pendingWindowScrollRestoreRef.current
+    if (savedY != null && typeof window !== 'undefined') {
+      pendingWindowScrollRestoreRef.current = null
+      const apply = () => window.scrollTo(0, savedY)
+      apply()
+      queueMicrotask(apply)
+      requestAnimationFrame(() => {
+        apply()
+        requestAnimationFrame(() => {
+          apply()
+          setTimeout(apply, 0)
+          setTimeout(apply, 16)
+          setTimeout(apply, 50)
+          setTimeout(apply, 100)
+          setTimeout(apply, 200)
+          setTimeout(apply, 400)
+        })
+      })
+    }
   }, [])
 
-  const zoomIn = () => setScale((s) => Math.min(s + 0.25, 3))
-  const zoomOut = () => setScale((s) => Math.max(s - 0.25, 0.5))
-  const resetZoom = () => setScale(1.5)
+
+  const goToPdfPage = useCallback((page) => {
+    if (typeof window !== 'undefined') {
+      pendingWindowScrollRestoreRef.current = window.scrollY
+    }
+    pdfRef.current?.goToPage?.(page)
+  }, [])
 
   // Save handler
   const handleSave = useCallback(async () => {
@@ -1488,32 +2438,60 @@ export default function DataEntry() {
     }
   }, [formConfig, formData, formDataEffective, stageCompletion, stages, batchId])
 
-  // Download completed batch as PDF
-  const handleDownloadPdf = useCallback(() => {
-    if (!batchId) return
-    const url = getDownloadBatchPdfUrl(batchId)
-    fetch(url)
-      .then((res) => {
-        const ct = res.headers.get('Content-Type') || ''
-        if (ct.includes('application/json')) {
-          return res.json().then((data) => {
-            if (!data.success) throw new Error(data.message || 'Download failed')
-          })
-        }
-        if (!res.ok) throw new Error('Download failed')
-        return res.blob()
+  useEffect(() => {
+    return () => {
+      if (pdfPreviewUrl) URL.revokeObjectURL(pdfPreviewUrl)
+    }
+  }, [pdfPreviewUrl])
+
+  const handleClosePdfPreview = useCallback(() => {
+    setPdfPreviewOpen(false)
+    setPdfPreviewUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev)
+      return null
+    })
+    setPdfPreviewError(null)
+    setPdfPreviewLoading(false)
+  }, [])
+
+  const handleOpenPdfPreview = useCallback(async () => {
+    if (!formConfig) return
+    setPdfPreviewError(null)
+    setPdfPreviewOpen(true)
+    setPdfPreviewLoading(true)
+    setPdfPreviewUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev)
+      return null
+    })
+    const safeName = `${(batchRecord?.title || formConfig.name || 'batch').replace(/[^\w-]+/g, '_')}_${new Date().toISOString().slice(0, 10)}.pdf`
+    setPdfPreviewFilename(safeName)
+    try {
+      const blob = await exportBatchPdfBlob({
+        formId: formConfig.id,
+        pdfFile: formConfig.pdfFile,
+        data: formData,
+        batch: {
+          title: batchRecord?.title || formConfig.name,
+          completedSignOffBy: batchRecord?.completedSignOffBy,
+          completedSignOffAt: batchRecord?.completedSignOffAt,
+          completedAt: batchRecord?.completedAt,
+        },
       })
-      .then((blob) => {
-        if (blob instanceof Blob) {
-          const a = document.createElement('a')
-          a.href = URL.createObjectURL(blob)
-          a.download = (batchRecord?.title || 'batch') + '_' + new Date().toISOString().slice(0, 10) + '.pdf'
-          a.click()
-          URL.revokeObjectURL(a.href)
-        }
-      })
-      .catch((err) => alert(err.message || 'Could not download PDF'))
-  }, [batchId, batchRecord?.title])
+      setPdfPreviewUrl(URL.createObjectURL(blob))
+    } catch (err) {
+      setPdfPreviewError(err.message || 'Could not generate PDF')
+    } finally {
+      setPdfPreviewLoading(false)
+    }
+  }, [formConfig, formData, batchRecord])
+
+  const handleDownloadPdfFromPreview = useCallback(() => {
+    if (!pdfPreviewUrl) return
+    const a = document.createElement('a')
+    a.href = pdfPreviewUrl
+    a.download = pdfPreviewFilename
+    a.click()
+  }, [pdfPreviewUrl, pdfPreviewFilename])
 
   const runCompleteBatch = useCallback(
     async (extra = {}) => {
@@ -1658,8 +2636,13 @@ export default function DataEntry() {
         <h1>Data Entry &mdash; {formConfig.name}</h1>
         <div className="de-header-actions">
           {isCompleted ? (
-            <button type="button" className="btn btn-download-pdf" onClick={handleDownloadPdf}>
-              Download PDF
+            <button
+              type="button"
+              className="btn btn-download-pdf"
+              disabled={pdfPreviewLoading}
+              onClick={handleOpenPdfPreview}
+            >
+              {pdfPreviewLoading ? 'Preparing PDF…' : 'Preview PDF'}
             </button>
           ) : (
             <>
@@ -1671,10 +2654,42 @@ export default function DataEntry() {
                   Mark as Complete
                 </button>
               )}
+              <button
+                type="button"
+                className="btn btn-download-pdf"
+                disabled={pdfPreviewLoading}
+                onClick={handleOpenPdfPreview}
+              >
+                {pdfPreviewLoading ? 'Preparing PDF…' : 'Preview PDF'}
+              </button>
             </>
           )}
         </div>
       </div>
+
+      {batchId && (
+        <div className="de-batch-meta">
+          {batchLoading && !batchRecord ? (
+            <p className="de-batch-meta-loading">Loading batch…</p>
+          ) : batchRecord?.title ? (
+            <p className="de-batch-meta-title">
+              <strong>Batch:</strong> {batchRecord.title}
+            </p>
+          ) : null}
+          <div className="de-batch-meta-id-row">
+            <span className="de-batch-meta-label">Batch ID</span>
+            <code className="de-batch-id">{batchRecord?.batchId ?? batchId}</code>
+            <button
+              type="button"
+              className="de-batch-id-copy"
+              onClick={copyBatchIdToClipboard}
+              aria-label="Copy batch ID to clipboard"
+            >
+              {batchIdCopied ? 'Copied' : 'Copy'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {firstCollabField && !collaboratorSetupComplete && batchId && !isCompleted && (
         <div className="de-collab-banner" role="status">
@@ -1739,29 +2754,9 @@ export default function DataEntry() {
           )}
         </div>
 
-        {/* PDF + corrections flush right of page; panel height tracks rendered page (zoom/page change) */}
+        {/* PDF + corrections: row layout; corrections column is card stack (not full page height) */}
         <div className="de-pdf-and-corrections">
           <div className="de-pdf-area">
-            <div className="de-pdf-toolbar">
-              <div className="de-pdf-toolbar-spacer" aria-hidden="true" />
-              <div className="de-pdf-toolbar-center">
-                {totalPages > 1 && (
-                  <div className="de-pdf-pagination">
-                    <button type="button" disabled={currentPage <= 1} onClick={() => pdfRef.current?.changePage(-1)}>Previous</button>
-                    <span>Page {currentPage} of {totalPages}</span>
-                    <button type="button" disabled={currentPage >= totalPages} onClick={() => pdfRef.current?.changePage(1)}>Next</button>
-                  </div>
-                )}
-              </div>
-              <div className="de-pdf-toolbar-right">
-                <div className="de-zoom-controls">
-                  <button type="button" onClick={zoomOut} title="Zoom out">&minus;</button>
-                  <span>{Math.round(scale * 100)}%</span>
-                  <button type="button" onClick={zoomIn} title="Zoom in">+</button>
-                  <button type="button" onClick={resetZoom} title="Reset zoom">Reset</button>
-                </div>
-              </div>
-            </div>
             <div className="de-pdf-viewport">
               <div className="de-pdf-page-and-corrections">
                 <PdfViewer
@@ -1769,7 +2764,27 @@ export default function DataEntry() {
                   pdfUrl={`/uploads/${formConfig.pdfFile}`}
                   scale={scale}
                   onPageRendered={onPageRendered}
-                  paginationPosition="bottom"
+                  paginationPosition="both"
+                  hidePagination={totalPages <= 1}
+                  zoomControls={
+                    <PdfZoomControls
+                      className="de-zoom-controls"
+                      scale={scale}
+                      onScaleChange={setScale}
+                      minScale={0.5}
+                      maxScale={3}
+                      defaultScale={1.5}
+                    />
+                  }
+                  paginationScrubber={
+                    totalPages > 1 ? (
+                      <PdfPageScrubber
+                        currentPage={currentPage}
+                        totalPages={totalPages}
+                        onGoToPage={goToPdfPage}
+                      />
+                    ) : undefined
+                  }
                 >
                   {currentPageFields.map(field => {
                     const stageName = field.stageInProcess || 'Default Stage'
@@ -1784,13 +2799,12 @@ export default function DataEntry() {
                         correctionRef={correctionRefMap[field.id]}
                         scale={scale}
                         onChange={handleFieldChange}
-                        editingCorrectionId={editingCorrectionId}
-                        onStartCorrection={setEditingCorrectionId}
-                        onSaveCorrection={handleSaveCorrectionRequest}
                         onLockField={handleLockField}
                         readOnly={isCompleted}
                         activeUsers={activeUsers}
                         collaboratorSetupComplete={collaboratorSetupComplete}
+                        onFieldPanelToggle={openFieldPanel}
+                        fieldPanelActive={fieldInfoPanelId === field.id}
                       />
                     )
                   })}
@@ -1829,6 +2843,32 @@ export default function DataEntry() {
           </div>
         )}
       </div>
+
+      {fieldInfoPanelField && (
+        <FieldDetailPanel
+          className="de-field-detail-panel--margin"
+          style={fieldPanelAnchorStyle ?? undefined}
+          field={fieldInfoPanelField}
+          entry={formData[fieldInfoPanelField.id]}
+          stageAccessible={fieldPanelStageAccessible}
+          readOnly={isCompleted}
+          onChange={handleFieldChange}
+          onLockField={handleLockField}
+          onStartCorrection={handleStartCorrection}
+          onClose={() => setFieldInfoPanelId(null)}
+          correctionRef={correctionRefMap[fieldInfoPanelField.id]}
+          activeUsers={activeUsers}
+          collaboratorSetupComplete={collaboratorSetupComplete}
+          formatTs={formatTs}
+          overlayScale={scale}
+          editingCorrectionId={editingCorrectionId}
+          correctionDraft={
+            editingCorrectionId === fieldInfoPanelField.id ? correctionDraft : undefined
+          }
+          onCorrectionDraftChange={setCorrectionDraft}
+          onSaveCorrection={handleSaveCorrectionRequest}
+        />
+      )}
 
       {recorderModalFieldId && collaboratorPolicy && (
         <div
@@ -1934,9 +2974,46 @@ export default function DataEntry() {
                 onClick={() => {
                   setCorrectionModal(null)
                   setEditorOther('')
+                  setEditingCorrectionId(null)
+                  setCorrectionDraft(null)
                 }}
               >
                 Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pdfPreviewOpen && (
+        <div
+          className="de-modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="pdf-preview-title"
+          onClick={handleClosePdfPreview}
+        >
+          <div className="de-modal de-pdf-preview-modal" onClick={(e) => e.stopPropagation()}>
+            <h3 id="pdf-preview-title">PDF export preview</h3>
+            <p className="de-modal-desc">
+              This matches the PDF you can download. It includes your current entries on this page (saved or not yet saved).
+            </p>
+            {pdfPreviewLoading && <p className="de-pdf-preview-status">Generating PDF…</p>}
+            {pdfPreviewError && <p className="de-pdf-preview-error">{pdfPreviewError}</p>}
+            {pdfPreviewUrl && !pdfPreviewLoading && (
+              <iframe title="PDF preview" src={pdfPreviewUrl} className="de-pdf-preview-iframe" />
+            )}
+            <div className="de-modal-actions">
+              <button type="button" className="de-modal-btn ghost" onClick={handleClosePdfPreview}>
+                Close
+              </button>
+              <button
+                type="button"
+                className="de-modal-btn primary"
+                disabled={!pdfPreviewUrl || pdfPreviewLoading}
+                onClick={handleDownloadPdfFromPreview}
+              >
+                Download PDF
               </button>
             </div>
           </div>

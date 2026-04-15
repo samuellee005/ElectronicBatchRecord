@@ -3,6 +3,7 @@
  * Save form data entry
  */
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/batch-record.php';
 
 header('Content-Type: application/json');
 
@@ -62,6 +63,7 @@ if (!empty($data['batchId'])) {
     if (file_exists($batchPath)) {
         $batch = json_decode(file_get_contents($batchPath), true);
         if ($batch && ($batch['status'] ?? '') === 'in_progress') {
+            $batch = ebr_batch_record_ensure_batch_id($batch);
             $batch['updatedAt'] = date('c');
             $batch['lastEntryId'] = $entryId;
             $batch['lastEntryFilename'] = $filename;

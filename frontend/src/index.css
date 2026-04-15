@@ -9,7 +9,28 @@ body {
 a { color: #667eea; text-decoration: none; }
 a:hover { color: #764ba2; text-decoration: underline; }
 
-.main { max-width: 1200px; margin: 0 auto; padding: 32px 20px; }
+.app-shell {
+  display: flex;
+  align-items: stretch;
+  min-height: 100vh;
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 32px 20px;
+  box-sizing: border-box;
+}
+
+/* Form builder + data entry: use more horizontal space; align flush to nav (avoid centered column gap on wide screens) */
+.main.main--wide {
+  max-width: min(1920px, 100%);
+  padding: 28px 32px 40px;
+  margin-left: 0;
+  margin-right: auto;
+}
 .page-title { font-size: 1.75rem; color: #1a1a1a; margin-bottom: 24px; }
 
 .btn {

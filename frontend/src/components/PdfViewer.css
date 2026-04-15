@@ -1,0 +1,23 @@
+/* Top row: pagination centered in the viewport, zoom aligned right */
+.pdf-viewer-toolbar-row {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  width: 100%;
+  max-width: 100%;
+  margin-bottom: 16px;
+  gap: 8px;
+  box-sizing: border-box;
+}
+
+.pdf-viewer-toolbar-cell--pagination {
+  grid-column: 2;
+  justify-self: center;
+  min-width: 0;
+}
+
+.pdf-viewer-toolbar-cell--zoom {
+  grid-column: 3;
+  justify-self: end;
+  min-width: 0;
+}

@@ -3,6 +3,7 @@
  * Create a new batch record (in progress)
  */
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/batch-record.php';
 
 header('Content-Type: application/json');
 
@@ -31,10 +32,11 @@ if ($title === '') {
     exit;
 }
 
-$id = 'batch_' . uniqid();
+$id = ebr_generate_batch_id($createdBy);
 $now = date('c');
 $record = [
     'id' => $id,
+    'batchId' => $id,
     'formId' => $formId,
     'formName' => $formName,
     'pdfFile' => $pdfFile,

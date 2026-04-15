@@ -103,6 +103,12 @@
   text-overflow: ellipsis;
 }
 
+.data-search-td-batch-number code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-size: 0.85em;
+  color: #1a1a1a;
+}
+
 .data-search-th-narrow,
 .data-search-td-narrow {
   width: 1%;

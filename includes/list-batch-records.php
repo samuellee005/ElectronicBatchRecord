@@ -3,6 +3,7 @@
  * List batch records (optional filter by status)
  */
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/batch-record.php';
 
 header('Content-Type: application/json');
 
@@ -22,6 +23,7 @@ if (is_dir($dir)) {
     foreach ($files as $file) {
         $data = @json_decode(file_get_contents($file), true);
         if (!$data || !isset($data['id'])) continue;
+        $data = ebr_batch_record_ensure_batch_id($data);
         if ($data['status'] !== $status) continue;
         if ($filterByCreator !== '') {
             $creator = trim((string) ($data['createdBy'] ?? ''));
@@ -31,6 +33,7 @@ if (is_dir($dir)) {
         }
         $records[] = [
             'id' => $data['id'],
+            'batchId' => $data['batchId'],
             'formId' => $data['formId'] ?? '',
             'formName' => $data['formName'] ?? '',
             'pdfFile' => $data['pdfFile'] ?? '',

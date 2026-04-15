@@ -69,9 +69,29 @@ export async function searchData(params) {
   return request(`/includes/search-data.php?${q.toString()}`)
 }
 
-/** Returns the URL to download a completed batch as PDF (use as link href; opens in same tab for download). */
+/** Returns the URL to download a batch as PDF (saved server data; GET). */
 export function getDownloadBatchPdfUrl(batchId) {
   return `/includes/download-batch-pdf.php?batchId=${encodeURIComponent(batchId)}`
+}
+
+/**
+ * Generate PDF from current form data (POST). Use for preview / export before or without saving.
+ * @param {{ formId: string, pdfFile: string, data: object, batch?: object }} body
+ * @returns {Promise<Blob>}
+ */
+export async function exportBatchPdfBlob(body) {
+  const res = await fetch(`${API_BASE}/includes/export-batch-pdf.php`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const ct = res.headers.get('Content-Type') || ''
+  if (ct.includes('application/json')) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.message || 'PDF export failed')
+  }
+  if (!res.ok) throw new Error('PDF export failed')
+  return res.blob()
 }
 
 // Templates / PDFs
@@ -90,7 +110,7 @@ export async function testGhostscript() {
   return request('/includes/test-ghostscript.php')
 }
 
-/** @returns {Promise<{ success: boolean, users: Array<{ id: string, displayName: string, active: boolean }> }>} */
+/** @returns {Promise<{ success: boolean, users: Array<{ id: string, displayName: string, active: boolean, role: 'admin'|'user' }> }>} */
 export async function listActiveUsers(all = false) {
   const q = all ? '?all=1' : ''
   return request(`/includes/list-active-users.php${q}`)

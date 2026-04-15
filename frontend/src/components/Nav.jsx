@@ -1,11 +1,38 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useCallback } from 'react'
 import { Link, useLocation } from 'react-router-dom'
+import {
+  HomeIcon,
+  RectangleStackIcon,
+  DocumentDuplicateIcon,
+  ClipboardDocumentListIcon,
+  MagnifyingGlassIcon,
+  UsersIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+} from '@heroicons/react/24/outline'
 import './Nav.css'
+
+const STORAGE_KEY = 'ebrSidebarCollapsed'
 
 export default function Nav() {
   const location = useLocation()
   const [openDropdown, setOpenDropdown] = useState(null)
-  const navRef = useRef(null)
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem(STORAGE_KEY) === '1'
+    } catch {
+      return false
+    }
+  })
+  const toggleCollapsed = useCallback(() => {
+    setCollapsed((prev) => {
+      const next = !prev
+      try {
+        localStorage.setItem(STORAGE_KEY, next ? '1' : '0')
+      } catch {}
+      return next
+    })
+  }, [])
 
   const isActive = (path, match) => {
     if (match === 'batch') return location.pathname === '/batch'
@@ -17,63 +44,131 @@ export default function Nav() {
     return false
   }
 
-  useEffect(() => {
-    function handleClickOutside(e) {
-      if (navRef.current && !navRef.current.contains(e.target)) setOpenDropdown(null)
-    }
-    document.addEventListener('click', handleClickOutside)
-    return () => document.removeEventListener('click', handleClickOutside)
-  }, [])
-
   const toggle = (key) => {
     setOpenDropdown((prev) => (prev === key ? null : key))
   }
 
+  const closeDropdowns = useCallback(() => {
+    setOpenDropdown(null)
+  }, [])
+
   return (
-    <nav className="app-nav" ref={navRef}>
-      <Link to="/" className="nav-logo">Electronic Batch Record</Link>
-      <ul className="nav-links">
-        <li className={'nav-dropdown ' + (isActive(null, 'batch') ? 'active ' : '') + (openDropdown === 'batch' ? 'open' : '')}>
+    <aside className={`app-nav${collapsed ? ' app-nav--collapsed' : ''}`} aria-label="Main navigation">
+      <div className="app-nav-brand">
+        <Link to="/" className="app-nav-logo" title="Electronic Batch Record — Home" onClick={closeDropdowns}>
+          <HomeIcon className="app-nav-logo-icon" aria-hidden />
+          <span className="app-nav-logo-text">Electronic Batch Record</span>
+        </Link>
+      </div>
+
+      <ul id="app-nav-links" className="app-nav-links">
+        <li
+          className={
+            'app-nav-dropdown ' +
+            (isActive(null, 'batch') ? 'active ' : '') +
+            (openDropdown === 'batch' ? 'open' : '')
+          }
+        >
           <button
             type="button"
-            className="nav-dropdown-trigger"
+            className="app-nav-item app-nav-dropdown-trigger"
             aria-expanded={openDropdown === 'batch'}
             aria-haspopup="true"
-            onClick={(e) => { e.stopPropagation(); toggle('batch') }}
+            onClick={(e) => {
+              e.stopPropagation()
+              toggle('batch')
+            }}
           >
-            Batch Record <span className="nav-arrow">▾</span>
+            <RectangleStackIcon className="app-nav-item-icon" aria-hidden />
+            <span className="app-nav-item-label">Batch Record</span>
+            <span className="app-nav-arrow" aria-hidden>
+              ▾
+            </span>
           </button>
-          <ul className="nav-dropdown-menu">
-            <li><Link to="/batch?filter=in-progress" onClick={() => setOpenDropdown(null)}>In Progress</Link></li>
-            <li><Link to="/batch?filter=completed" onClick={() => setOpenDropdown(null)}>Completed</Link></li>
-            <li><Link to="/batch?filter=commonly-used" onClick={() => setOpenDropdown(null)}>Commonly Used</Link></li>
+          <ul className="app-nav-dropdown-menu">
+            <li>
+              <Link to="/batch?filter=in-progress">In Progress</Link>
+            </li>
+            <li>
+              <Link to="/batch?filter=completed">Completed</Link>
+            </li>
+            <li>
+              <Link to="/batch?filter=commonly-used">Commonly Used</Link>
+            </li>
           </ul>
         </li>
-        <li className={'nav-dropdown ' + (isActive(null, 'templates') ? 'active ' : '') + (openDropdown === 'templates' ? 'open' : '')}>
+
+        <li
+          className={
+            'app-nav-dropdown ' +
+            (isActive(null, 'templates') ? 'active ' : '') +
+            (openDropdown === 'templates' ? 'open' : '')
+          }
+        >
           <button
             type="button"
-            className="nav-dropdown-trigger"
+            className="app-nav-item app-nav-dropdown-trigger"
             aria-expanded={openDropdown === 'templates'}
             aria-haspopup="true"
-            onClick={(e) => { e.stopPropagation(); toggle('templates') }}
+            onClick={(e) => {
+              e.stopPropagation()
+              toggle('templates')
+            }}
           >
-            Templates <span className="nav-arrow">▾</span>
+            <DocumentDuplicateIcon className="app-nav-item-icon" aria-hidden />
+            <span className="app-nav-item-label">Templates</span>
+            <span className="app-nav-arrow" aria-hidden>
+              ▾
+            </span>
           </button>
-          <ul className="nav-dropdown-menu">
-            <li><Link to="/templates/upload" onClick={() => setOpenDropdown(null)}>Upload new template</Link></li>
-            <li><Link to="/templates" onClick={() => setOpenDropdown(null)}>View all Templates</Link></li>
+          <ul className="app-nav-dropdown-menu">
+            <li>
+              <Link to="/templates/upload">Upload new template</Link>
+            </li>
+            <li>
+              <Link to="/templates">View all Templates</Link>
+            </li>
           </ul>
         </li>
+
         <li className={isActive(null, 'forms') ? 'active' : ''}>
-          <Link to="/forms">Batch Record Forms</Link>
+          <Link to="/forms" className="app-nav-item app-nav-link" onClick={closeDropdowns}>
+            <ClipboardDocumentListIcon className="app-nav-item-icon" aria-hidden />
+            <span className="app-nav-item-label">Batch Record Forms</span>
+          </Link>
         </li>
+
         <li className={isActive(null, 'data-search') ? 'active' : ''}>
-          <Link to="/data-search">Data Search</Link>
+          <Link to="/data-search" className="app-nav-item app-nav-link" onClick={closeDropdowns}>
+            <MagnifyingGlassIcon className="app-nav-item-icon" aria-hidden />
+            <span className="app-nav-item-label">Data Search</span>
+          </Link>
         </li>
+
         <li className={isActive(null, 'active-users') ? 'active' : ''}>
-          <Link to="/active-users">Active Users</Link>
+          <Link to="/active-users" className="app-nav-item app-nav-link" onClick={closeDropdowns}>
+            <UsersIcon className="app-nav-item-icon" aria-hidden />
+            <span className="app-nav-item-label">User admin</span>
+          </Link>
         </li>
       </ul>
-    </nav>
+
+      <div className="app-nav-footer">
+        <button
+          type="button"
+          className="app-nav-collapse-btn"
+          onClick={toggleCollapsed}
+          aria-expanded={!collapsed}
+          aria-controls="app-nav-links"
+          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        >
+          {collapsed ? (
+            <ChevronRightIcon className="app-nav-collapse-icon" aria-hidden />
+          ) : (
+            <ChevronLeftIcon className="app-nav-collapse-icon" aria-hidden />
+          )}
+        </button>
+      </div>
+    </aside>
   )
 }

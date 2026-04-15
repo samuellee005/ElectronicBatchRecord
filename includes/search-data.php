@@ -3,6 +3,7 @@
  * Search batch records by title and/or form name; return rows with flattened field values for dynamic table columns.
  */
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/batch-record.php';
 
 header('Content-Type: application/json');
 
@@ -19,6 +20,18 @@ function searchDataGetEffectiveValue($entry)
         return $last['to'] ?? $entry['v'];
     }
     return $entry['v'];
+}
+
+function searchDataFormatFieldValue($f, $v)
+{
+    if (($f['type'] ?? '') === 'checkbox') {
+        if ($v === null || $v === '') {
+            return '';
+        }
+        $on = $v === true || $v === 'true' || $v === 1 || $v === '1';
+        return $on ? '[x]' : '[ ]';
+    }
+    return searchDataFormatValue($v);
 }
 
 function searchDataFormatValue($v)
@@ -151,6 +164,7 @@ foreach (glob($dir . '/*.json') as $file) {
     if (!$batch || empty($batch['id']) || empty($batch['formId'])) {
         continue;
     }
+    $batch = ebr_batch_record_ensure_batch_id($batch);
 
     $title = (string) ($batch['title'] ?? '');
     $formName = (string) ($batch['formName'] ?? '');
@@ -171,7 +185,7 @@ foreach (glob($dir . '/*.json') as $file) {
         continue;
     }
 
-    $batchId = $batch['id'];
+    $batchId = (string) ($batch['batchId'] ?? $batch['id']);
     [$formData] = searchDataLoadEntryForBatch($batchId, $batch);
     $form = searchDataLoadForm($batch['formId']);
 
@@ -184,7 +198,7 @@ foreach (glob($dir . '/*.json') as $file) {
                 $label = $fid;
             }
             $raw = $formData[$fid] ?? null;
-            $val = searchDataFormatValue(searchDataGetEffectiveValue($raw));
+            $val = searchDataFormatFieldValue($f, searchDataGetEffectiveValue($raw));
             if (is_array($raw) && !empty($raw['recordedBy'])) {
                 $val .= ' [rec: ' . searchDataFormatValue($raw['recordedBy']) . ']';
             }

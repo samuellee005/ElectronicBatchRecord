@@ -1,7 +1,6 @@
 # Dependencies
 node_modules/
 vendor/
-composer.lock
 
 # PHP
 __pycache__/

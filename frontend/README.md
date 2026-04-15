@@ -1,16 +1,35 @@
-# React + Vite
+# Electronic Batch Record — frontend (Vite + React)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+## Development (API + hot reload)
 
-Currently, two official plugins are available:
+You need **two terminals** from the **repository root**:
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+1. **PHP** (serves `/includes`, `/uploads`, and the built app on 8080):
 
-## React Compiler
+   ```bash
+   php -S 127.0.0.1:8080 router.php
+   ```
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+2. **Vite** (from this `frontend` folder):
 
-## Expanding the ESLint configuration
+   ```bash
+   cd frontend
+   npm install
+   npm run dev
+   ```
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+Open the URL Vite prints (usually **http://localhost:5173**). The dev server proxies `/includes` and `/uploads` to `http://127.0.0.1:8080`.
+
+If the UI loads but APIs fail, confirm PHP is on **port 8080** (see `vite.config.js`).
+
+### WSL / remote browser
+
+`npm run dev` listens on all interfaces (`host: true`). If `localhost` from Windows does not reach WSL, use the **Network** URL Vite prints, or browse from inside WSL.
+
+## Production build
+
+```bash
+npm run build
+```
+
+Then serve the repo root with PHP using `router.php` (see main project `README.md`).

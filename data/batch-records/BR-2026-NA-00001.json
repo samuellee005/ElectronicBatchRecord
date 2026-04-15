@@ -1,5 +1,5 @@
 {
-    "id": "batch_69b1d1aeb5a5e",
+    "id": "BR-2026-NA-00001",
     "formId": "form_69b1ce7ba0591",
     "formName": "Test Form",
     "title": "New Test Batch Record",
@@ -9,5 +9,6 @@
     "updatedAt": "2026-03-11T13:37:09-07:00",
     "completedAt": null,
     "createdBy": "",
-    "lastEntryId": "entry_69b1d2752e88e"
+    "lastEntryId": "entry_69b1d2752e88e",
+    "batchId": "BR-2026-NA-00001"
 }

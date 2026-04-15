@@ -7,10 +7,19 @@ export default defineConfig({
     include: ['pdfjs-dist'],
   },
   server: {
+    // Listen on all interfaces so WSL / LAN browsers can reach the dev server
+    host: true,
     port: 5173,
+    strictPort: true,
     proxy: {
-      '/includes': { target: 'http://localhost:8080' },
-      '/uploads': { target: 'http://localhost:8080' },
+      '/includes': {
+        target: 'http://127.0.0.1:8080',
+        changeOrigin: true,
+      },
+      '/uploads': {
+        target: 'http://127.0.0.1:8080',
+        changeOrigin: true,
+      },
     },
   },
 })

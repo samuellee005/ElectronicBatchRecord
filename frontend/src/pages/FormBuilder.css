@@ -261,72 +261,14 @@
   padding-bottom: 8px;
 }
 
-/* Zoom row: above ruler, doesn't cover it; always visible and usable */
-.fb-canvas-area .fb-zoom-row {
-  flex-shrink: 0;
-  width: 100%;
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
+/* Zoom + pagination row lives inside PdfViewer (toolbar row) */
+.fb-canvas-area .pdf-viewer-toolbar-row {
   padding: 2px 0 4px 0;
+  margin-bottom: 8px;
   background: #e0e0e0;
 }
 
-.fb-canvas-area .fb-zoom-row .fb-zoom-controls {
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-}
-
-/* Page navigation - bottom of canvas area, centered */
-.fb-page-nav {
-  flex-shrink: 0;
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 8px 12px;
-  background: #f5f5f5;
-  border-top: 1px solid #ddd;
-  border-radius: 6px 6px 0 0;
-}
-
-.fb-page-nav-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  border: 1px solid #ccc;
-  background: white;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 1.25rem;
-  line-height: 1;
-  color: #333;
-  transition: background 0.2s, border-color 0.2s;
-}
-
-.fb-page-nav-btn:hover:not(:disabled) {
-  background: #e8e8ff;
-  border-color: #667eea;
-  color: #667eea;
-}
-
-.fb-page-nav-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.fb-page-nav-label {
-  font-size: 0.85rem;
-  font-weight: 500;
-  color: #555;
-  min-width: 80px;
-  text-align: center;
-}
-
-/* Zoom controls - compact size (used in fb-zoom-row) */
+/* Zoom controls - compact size (form builder) */
 .fb-zoom-controls {
   background: white;
   padding: 2px 4px;
@@ -352,12 +294,19 @@
   background: #f0f0f0;
 }
 
+.fb-zoom-controls .pdf-zoom-controls-percent,
 .fb-zoom-controls span {
   padding: 0 4px;
   font-size: 0.75rem;
   color: #666;
   min-width: 32px;
   text-align: center;
+}
+
+.fb-zoom-controls .pdf-zoom-controls-input {
+  min-width: 36px;
+  padding: 1px 4px;
+  font-size: 0.75rem;
 }
 
 /* Reset button uses refresh icon (↻) */
@@ -529,72 +478,91 @@
   box-shadow: 0 0 2px rgba(102, 126, 234, 0.4);
 }
 
-/* Form fields on canvas */
+/* Form fields on canvas — transparent fill so the PDF shows through */
 .fb-field {
   position: absolute;
   border: 2px solid #667eea;
-  background: rgba(102, 126, 234, 0.1);
+  background: transparent;
   cursor: move;
   pointer-events: all;
   border-radius: 4px;
   box-sizing: border-box;
+  font-size: var(--fb-field-font-size, 13px);
 }
 
 .fb-field.selected {
   border-color: #764ba2;
-  background: rgba(118, 75, 162, 0.2);
-  box-shadow: 0 0 0 3px rgba(118, 75, 162, 0.3);
-}
-
-.fb-field-label {
-  padding: 4px 8px;
-  font-size: 0.75rem;
-  color: #667eea;
-  font-weight: 600;
-  background: rgba(255, 255, 255, 0.9);
-  border-radius: 4px 4px 0 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.fb-field.selected .fb-field-label {
-  color: #764ba2;
+  background: transparent;
+  box-shadow: 0 0 0 3px rgba(118, 75, 162, 0.35);
 }
 
 .fb-field-input {
   width: 100%;
   border: none;
-  background: transparent;
-  padding: 4px;
-  font-size: 0.85rem;
+  background: transparent !important;
+  padding: 0 2px;
+  font-size: inherit;
+  line-height: 1.15;
+  color: #1a1a1a;
   pointer-events: none;
+  text-align: center;
+  text-align-last: center;
+  box-sizing: border-box;
+  text-shadow:
+    0 0 3px rgba(255, 255, 255, 0.9),
+    0 0 6px rgba(255, 255, 255, 0.75);
+}
+
+.fb-field-input::placeholder {
+  color: rgba(0, 0, 0, 0.45);
+  text-shadow: none;
+  text-align: center;
+}
+
+/* Fills preview area from bottom (matches compact overlay textarea behavior) */
+.fb-field-input--textarea {
+  flex: 1 1 auto;
+  min-height: 0;
+  align-self: stretch;
+}
+
+.fb-field select.fb-field-input {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent !important;
+  background-image: none;
+  text-align: center;
+  text-align-last: center;
 }
 
 .fb-field-now-btn {
   flex-shrink: 0;
   padding: 4px 8px;
-  font-size: 0.75rem;
-  border: 1px solid #ccc;
+  font-size: inherit;
+  border: 1px solid rgba(102, 126, 234, 0.35);
   border-radius: 4px;
-  background: #f5f5f5;
-  color: #888;
+  background: transparent;
+  color: #555;
   cursor: default;
+  text-shadow: 0 0 3px rgba(255, 255, 255, 0.9);
 }
 
 .fb-preview-radio {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 0.8rem;
-  color: #444;
+  font-size: inherit;
+  color: #333;
   margin: 0;
   cursor: default;
+  text-shadow:
+    0 0 3px rgba(255, 255, 255, 0.9),
+    0 0 6px rgba(255, 255, 255, 0.75);
 }
 
 .fb-collab-preview-row {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   gap: 8px;
   width: 100%;
 }
@@ -608,30 +576,42 @@
 
 .fb-unit-group {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   gap: 4px;
   width: 100%;
 }
 
 .fb-unit-label {
-  padding: 4px 8px;
-  background: #f0f0f0;
+  padding: 0 4px 0 2px;
+  background: transparent;
   border-radius: 4px;
-  font-size: 0.8rem;
-  color: #555;
+  font-size: inherit;
+  line-height: 1.15;
+  color: #444;
   white-space: nowrap;
+  text-shadow:
+    0 0 3px rgba(255, 255, 255, 0.9),
+    0 0 6px rgba(255, 255, 255, 0.75);
 }
 
 .fb-signature-placeholder {
   width: 100%;
-  border: 1px dashed #ccc;
+  border: 1px dashed rgba(102, 126, 234, 0.45);
   border-radius: 4px;
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: center;
-  color: #999;
-  font-size: 0.85rem;
-  height: 100%;
+  text-align: center;
+  color: #666;
+  font-size: inherit;
+  line-height: 1.15;
+  min-height: 1.5em;
+  padding: 2px 2px 4px;
+  box-sizing: border-box;
+  background: transparent;
+  text-shadow:
+    0 0 3px rgba(255, 255, 255, 0.9),
+    0 0 6px rgba(255, 255, 255, 0.75);
 }
 
 /* Resize handle */
@@ -676,17 +656,41 @@
   transform: scale(1.1);
 }
 
-/* Properties panel (right sidebar); toggle on left edge toward canvas */
+/* Properties panel (right sidebar); toggle on left edge toward canvas; width set inline when expanded */
 .fb-properties-panel {
   display: flex;
   flex-direction: row;
-  width: 320px;
-  min-width: 320px;
   background: white;
   border-left: 1px solid #ddd;
   box-shadow: -2px 0 10px rgba(0, 0, 0, 0.05);
   transition: width 0.2s ease, min-width 0.2s ease;
   overflow: hidden;
+}
+
+.fb-properties-panel.fb-properties-panel--resizing {
+  transition: none;
+}
+
+/* Drag left to widen the panel (toward the canvas) */
+.fb-properties-panel-resize {
+  flex-shrink: 0;
+  width: 6px;
+  cursor: col-resize;
+  touch-action: none;
+  align-self: stretch;
+  min-height: 120px;
+  background: transparent;
+  box-sizing: border-box;
+  position: relative;
+  z-index: 2;
+}
+
+.fb-properties-panel-resize:hover {
+  background: rgba(102, 126, 234, 0.12);
+}
+
+.fb-properties-panel--resizing .fb-properties-panel-resize {
+  background: rgba(102, 126, 234, 0.22);
 }
 
 .fb-properties-panel-collapsed {
@@ -772,7 +776,8 @@
   margin-bottom: 15px;
 }
 
-.fb-form-group label {
+/* Do not target .fb-table-dim-label / .fb-table-merge-num — they are inline flex rows inside the grid */
+.fb-form-group label:not(.fb-table-dim-label):not(.fb-table-merge-num):not(.fb-checkbox-label) {
   display: block;
   margin-bottom: 5px;
   font-weight: 500;
@@ -1173,7 +1178,243 @@
   cursor: not-allowed;
 }
 
-.fb-canvas-area .pdf-pagination span {
+.fb-canvas-area .pdf-pagination > span {
   font-weight: 500;
   color: #333;
+}
+
+.fb-canvas-area .pdf-pagination .pdf-page-scrubber-caption {
+  margin: 0;
+  font-weight: 500;
+  color: #333;
+}
+
+/* Data table field — builder preview & properties */
+.fb-table-preview-wrap {
+  overflow: auto;
+  align-items: flex-start !important;
+}
+
+.fb-table-preview-interactive {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  flex: 1 1 auto;
+  align-self: stretch;
+}
+
+.fb-table-preview-interactive > .fb-table-preview {
+  height: 100%;
+}
+
+.fb-table-preview-empty {
+  text-align: center;
+  font-size: 0.7rem;
+  color: #888;
+}
+
+.fb-table-resize-v {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  margin-left: -4px;
+  z-index: 12;
+  cursor: col-resize;
+  background: transparent;
+  touch-action: none;
+}
+
+.fb-table-resize-v:hover,
+.fb-field.selected .fb-table-resize-v:hover {
+  background: rgba(102, 126, 234, 0.35);
+}
+
+.fb-table-resize-h {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 8px;
+  margin-top: -4px;
+  z-index: 12;
+  cursor: row-resize;
+  background: transparent;
+  touch-action: none;
+}
+
+.fb-table-resize-h:hover,
+.fb-field.selected .fb-table-resize-h:hover {
+  background: rgba(102, 126, 234, 0.35);
+}
+
+.fb-table-preview {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.65rem;
+  color: #333;
+}
+
+/* Table on canvas inherits field input font size */
+.fb-field .fb-table-preview {
+  font-size: inherit;
+}
+
+.fb-table-preview th,
+.fb-table-preview td {
+  border: 1px solid #ccc;
+  padding: 2px 4px;
+  min-width: 28px;
+  text-align: center;
+}
+
+.fb-table-preview-data-only td {
+  padding: 0;
+  vertical-align: middle;
+}
+
+.fb-table-preview-cell {
+  display: block;
+  min-width: 12px;
+  min-height: 12px;
+  height: 100%;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+}
+
+/* Merged anchor: center highlight in rowspan/colspan region */
+.fb-table-preview-data-only td.fb-table-preview-td--merged {
+  vertical-align: middle;
+}
+
+.fb-table-preview-td--merged .fb-table-preview-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+}
+
+/* Merged region anchor cell (matches data-entry table behavior) */
+.fb-table-preview-cell--merged {
+  background: rgba(102, 126, 234, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(102, 126, 234, 0.35);
+}
+
+.fb-table-axis-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(72px, 92px) 88px 40px;
+  column-gap: 10px;
+  row-gap: 6px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.fb-table-axis-row > .fb-table-dim-label {
+  min-width: 0;
+  justify-self: start;
+}
+
+.fb-form-group .fb-table-dim-label {
+  margin-bottom: 0;
+}
+
+.fb-table-dim-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding-right: 2px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #555;
+  white-space: nowrap;
+}
+
+.fb-table-dim-input {
+  width: 52px;
+  min-width: 0;
+  padding: 6px 4px !important;
+  font-size: 0.85rem;
+  box-sizing: border-box;
+}
+
+.fb-table-key {
+  font-size: 0.85rem;
+  min-width: 0;
+}
+
+.fb-table-remove-btn {
+  box-sizing: border-box;
+  justify-self: center;
+  align-self: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: #f0f0f0;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 1.2rem;
+  line-height: 1;
+  color: #666;
+  flex-shrink: 0;
+}
+
+.fb-table-remove-btn:hover:not(:disabled) {
+  background: #fde8e8;
+  color: #c00;
+}
+
+.fb-table-remove-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/*
+ * Row/col selects need real width: a single 5-column grid squeezed two 1fr tracks next to R/C + button.
+ * Layout: row1 = both selects (equal half-width); row2 = R + C; row3 = remove button bottom-right.
+ */
+.fb-table-merge-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) minmax(140px, 1fr);
+  column-gap: 12px;
+  row-gap: 10px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.fb-table-merge-row select {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  box-sizing: border-box;
+  min-height: 36px;
+  padding: 6px 8px;
+  font-size: 0.875rem;
+}
+
+.fb-table-merge-row .fb-table-merge-num {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #555;
+  white-space: nowrap;
+  justify-self: start;
+  min-width: 0;
+}
+
+.fb-table-merge-row .fb-table-remove-btn {
+  grid-column: 2;
+  justify-self: end;
+}
+
+.fb-table-merge-num input {
+  width: 44px;
+  padding: 6px 4px;
+  box-sizing: border-box;
+  font-size: 0.85rem;
 }

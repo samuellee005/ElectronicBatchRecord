@@ -233,6 +233,14 @@
   color: #333;
   font-size: 0.95rem;
 }
+.widget-batch-number {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #4a5568;
+  letter-spacing: 0.02em;
+  word-break: break-all;
+}
 .widget-batch-sub {
   font-size: 0.78rem;
   color: #666;

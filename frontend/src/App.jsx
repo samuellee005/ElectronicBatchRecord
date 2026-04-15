@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom'
 import Nav from './components/Nav'
 import Dashboard from './pages/Dashboard'
 import FormsList from './pages/FormsList'
@@ -13,11 +13,14 @@ import DataSearch from './pages/DataSearch'
 import ActiveUsers from './pages/ActiveUsers'
 
 function Layout({ children }) {
+  const { pathname } = useLocation()
+  const wideMain =
+    pathname.startsWith('/forms/builder') || pathname.startsWith('/forms/entry')
   return (
-    <>
+    <div className="app-shell">
       <Nav />
-      <main className="main">{children}</main>
-    </>
+      <main className={wideMain ? 'main main--wide' : 'main'}>{children}</main>
+    </div>
   )
 }
 

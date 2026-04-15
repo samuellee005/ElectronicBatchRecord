@@ -1,5 +1,5 @@
 {
-    "id": "batch_69b2493638303",
+    "id": "BR-2026-SL-00001",
     "formId": "form_69b24928b7aa4",
     "formName": "Test Form",
     "title": "test",
@@ -9,5 +9,6 @@
     "updatedAt": "2026-03-12T13:34:36-07:00",
     "completedAt": "2026-03-12T13:34:36-07:00",
     "createdBy": "Samuel Lee",
-    "lastEntryId": null
+    "lastEntryId": null,
+    "batchId": "BR-2026-SL-00001"
 }

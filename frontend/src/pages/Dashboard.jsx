@@ -473,13 +473,16 @@ export default function Dashboard() {
                 <li key={b.id}>
                   <div className="widget-batch-meta">
                     <span className="widget-batch-title">{b.title || '—'}</span>
+                    <span className="widget-batch-number" title="Batch number">
+                      {b.batchId ?? b.id}
+                    </span>
                     <span className="widget-batch-sub">
                       {b.formName || '—'} · Updated {formatBatchDate(b.updatedAt)}
                     </span>
                   </div>
                   <WidgetActionMenu
                     items={[
-                      { label: 'Resume', to: `/forms/entry?form=${encodeURIComponent(b.formId)}&batch=${encodeURIComponent(b.id)}` },
+                      { label: 'Resume', to: `/forms/entry?form=${encodeURIComponent(b.formId)}&batch=${encodeURIComponent(b.batchId ?? b.id)}` },
                       ...(b.pdfFile && b.formId
                         ? [{ label: 'View form', to: `/forms/builder?file=${encodeURIComponent(b.pdfFile)}&formId=${encodeURIComponent(b.formId)}` }]
                         : []),
@@ -509,17 +512,20 @@ export default function Dashboard() {
                 <li key={b.id}>
                   <div className="widget-batch-meta">
                     <span className="widget-batch-title">{b.title || '—'}</span>
+                    <span className="widget-batch-number" title="Batch number">
+                      {b.batchId ?? b.id}
+                    </span>
                     <span className="widget-batch-sub">
                       {b.formName || '—'} · Completed {formatBatchDate(b.completedAt)}
                     </span>
                   </div>
                   <WidgetActionMenu
                     items={[
-                      { label: 'View', to: `/forms/entry?form=${encodeURIComponent(b.formId)}&batch=${encodeURIComponent(b.id)}` },
+                      { label: 'View', to: `/forms/entry?form=${encodeURIComponent(b.formId)}&batch=${encodeURIComponent(b.batchId ?? b.id)}` },
                       ...(b.pdfFile && b.formId
                         ? [{ label: 'View form', to: `/forms/builder?file=${encodeURIComponent(b.pdfFile)}&formId=${encodeURIComponent(b.formId)}` }]
                         : []),
-                      { label: 'Download PDF', onClick: () => downloadBatchPdf(b.id, b.title) },
+                      { label: 'Download PDF', onClick: () => downloadBatchPdf(b.batchId ?? b.id, b.title) },
                     ]}
                   />
                 </li>

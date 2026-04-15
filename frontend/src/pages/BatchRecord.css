@@ -5,15 +5,216 @@
 .batch-table-wrapper { overflow-x: auto; border-radius: 8px; border: 1px solid #e0e0e0; background: #fff; }
 .batch-table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
 .batch-table th, .batch-table td { padding: 12px 16px; text-align: left; border-bottom: 1px solid #eee; }
+
+/* In progress / Completed: one line per row, capped column widths */
+.batch-table--records {
+  table-layout: fixed;
+  font-size: 0.82rem;
+}
+
+.batch-table--records th,
+.batch-table--records td {
+  padding: 8px 10px;
+  vertical-align: middle;
+}
+
+.batch-table--records .batch-table-col--batch-num {
+  width: 8.75rem;
+  max-width: 8.75rem;
+}
+
+.batch-table--records .batch-table-col--title {
+  width: 11rem;
+  max-width: 11rem;
+}
+
+.batch-table--records .batch-table-col--description {
+  width: 12.5rem;
+  max-width: 12.5rem;
+}
+
+.batch-table--records .batch-table-col--form {
+  width: 10rem;
+  max-width: 10rem;
+}
+
+.batch-table--records .batch-table-col--date {
+  width: 6.75rem;
+  max-width: 6.75rem;
+}
+
+/* Narrow column: only as wide as the Actions control */
+.batch-table--records .batch-table-col--actions {
+  width: 1%;
+  max-width: max-content;
+  white-space: nowrap;
+}
+
+.batch-table--records th.batch-table-col--actions,
+.batch-table--records td.batch-table-col--actions {
+  padding-left: 10px;
+  padding-right: 10px;
+  vertical-align: middle;
+  text-align: left;
+}
+
+.batch-table--records .batch-table-batch-link {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-size: 0.8rem;
+  color: #3d4db8;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.batch-table--records .batch-table-batch-link:hover {
+  color: #667eea;
+  text-decoration: underline;
+}
+
+.batch-table--records .batch-table-actions-menu {
+  position: relative;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.batch-table-actions-trigger {
+  appearance: none;
+  -webkit-appearance: none;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid #c5c9d6;
+  background: #fff;
+  color: #333;
+  cursor: pointer;
+  line-height: 1.2;
+}
+
+.batch-table-actions-trigger:hover {
+  border-color: #667eea;
+  color: #667eea;
+  background: #f8f9ff;
+}
+
+.batch-table-actions-trigger[aria-expanded='true'] {
+  border-color: #667eea;
+  color: #667eea;
+  background: #f0f0ff;
+}
+
+.batch-table-actions-dropdown {
+  position: absolute;
+  left: 0;
+  right: auto;
+  top: calc(100% + 4px);
+  margin: 0;
+  padding: 6px 0;
+  min-width: 11rem;
+  list-style: none;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  z-index: 40;
+}
+
+.batch-table-actions-dropdown li {
+  margin: 0;
+}
+
+.batch-table-actions-item {
+  display: block;
+  padding: 10px 16px;
+  font-size: 0.88rem;
+  color: #333;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.batch-table-actions-item:hover {
+  background: #f3f4f6;
+  color: #111;
+}
+
+.batch-table-actions-item--primary {
+  font-weight: 600;
+  color: #28a745;
+}
+
+.batch-table--records .batch-table-actions-item.batch-table-actions-item--primary:hover {
+  background: #e8f5e9;
+  color: #1e7e34;
+}
+
+.batch-table--records[data-batch-status='completed'] .batch-table-actions-item--primary {
+  color: #667eea;
+}
+
+.batch-table--records[data-batch-status='completed'] .batch-table-actions-item--primary:hover {
+  background: #eef0ff;
+  color: #5568d3;
+}
+
+.batch-table--records .batch-table-ellipsis {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.batch-table--records .batch-table-date {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  color: #444;
+}
+
+.batch-table--records .batch-table-col--date {
+  font-size: 0.78rem;
+}
+
+.batch-table--records .actions-cell {
+  white-space: nowrap;
+}
+
+.batch-table--records .batch-table-col--batch-num .batch-table-batch-number:not(a) {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.batch-table .batch-table-batch-number {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-size: 0.86rem;
+  color: #1a1a1a;
+  white-space: nowrap;
+}
+
+.batch-table--records .batch-table-batch-number {
+  font-size: 0.8rem;
+}
 .batch-table th { background: #f5f5f5; font-weight: 600; color: #444; }
 .batch-table tbody tr:hover { background: #f8f9fa; }
-.batch-table .actions-cell a { display: inline-block; padding: 6px 12px; margin-right: 6px; border-radius: 6px; font-size: 0.85rem; font-weight: 500; text-decoration: none; }
-.batch-table .actions-cell a.resume-link { background: #28a745; color: white; }
-.batch-table .actions-cell a.resume-link:hover { background: #218838; color: white; }
-.batch-table .actions-cell a.view-link { background: #667eea; color: white; }
-.batch-table .actions-cell a.view-link:hover { background: #5568d3; color: white; }
-.batch-table .actions-cell a.view-form-link { background: #667eea; color: white; }
-.batch-table .actions-cell a.view-form-link:hover { background: #5568d3; color: white; }
+/* Commonly-used tables only — batch list uses .batch-table-actions-dropdown */
+.batch-table:not(.batch-table--records) .actions-cell a { display: inline-block; padding: 6px 12px; margin-right: 6px; border-radius: 6px; font-size: 0.85rem; font-weight: 500; text-decoration: none; }
+.batch-table:not(.batch-table--records) .actions-cell a.resume-link { background: #28a745; color: white; }
+.batch-table:not(.batch-table--records) .actions-cell a.resume-link:hover { background: #218838; color: white; }
+.batch-table:not(.batch-table--records) .actions-cell a.view-link { background: #667eea; color: white; }
+.batch-table:not(.batch-table--records) .actions-cell a.view-link:hover { background: #5568d3; color: white; }
+.batch-table:not(.batch-table--records) .actions-cell a.view-form-link { background: #667eea; color: white; }
+.batch-table:not(.batch-table--records) .actions-cell a.view-form-link:hover { background: #5568d3; color: white; }
 .placeholder-box { background: #fff; border-radius: 12px; padding: 40px; text-align: center; color: #999; border: 1px solid #e0e0e0; }
 .placeholder-box a { color: #667eea; font-weight: 500; }
 .placeholder-box p + p { margin-top: 8px; }

@@ -1,0 +1,26 @@
+.pdf-zoom-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pdf-zoom-controls-percent {
+  cursor: default;
+  user-select: none;
+}
+
+.pdf-zoom-controls-input {
+  width: 3.25rem;
+  padding: 2px 4px;
+  font-size: inherit;
+  text-align: center;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  box-sizing: border-box;
+}
+
+.pdf-zoom-controls-input:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.25);
+}

@@ -31,10 +31,13 @@ foreach ($input['users'] as $u) {
         $id = $id . '_' . uniqid();
     }
     $seen[$id] = true;
+    $roleRaw = isset($u['role']) ? strtolower(trim((string) $u['role'])) : '';
+    $role = ($roleRaw === 'admin') ? 'admin' : 'user';
     $sanitized[] = [
         'id' => preg_replace('/[^a-zA-Z0-9_-]/', '_', $id) ?: 'user_' . uniqid(),
         'displayName' => trim((string) ($u['displayName'] ?? '')) ?: 'Unnamed',
         'active' => !empty($u['active']),
+        'role' => $role,
     ];
 }
 

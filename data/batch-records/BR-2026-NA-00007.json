@@ -1,13 +1,14 @@
 {
-    "id": "batch_69b1f514a46b9",
+    "id": "BR-2026-NA-00007",
     "formId": "form_69409960f3186",
     "formName": "C4 Column",
     "title": "test",
     "description": "test",
     "status": "in_progress",
-    "createdAt": "2026-03-11T16:04:52-07:00",
-    "updatedAt": "2026-03-11T16:04:52-07:00",
+    "createdAt": "2026-03-11T16:02:04-07:00",
+    "updatedAt": "2026-03-11T16:02:04-07:00",
     "completedAt": null,
     "createdBy": "",
-    "lastEntryId": null
+    "lastEntryId": null,
+    "batchId": "BR-2026-NA-00007"
 }
