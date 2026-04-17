@@ -1,0 +1,11 @@
+services:
+  ebr:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ebr-app:latest
+    container_name: ebr-app
+    restart: unless-stopped
+    # Bind to loopback only — Apache on the host reverse-proxies :5173 -> here.
+    ports:
+      - "127.0.0.1:8080:8080"
