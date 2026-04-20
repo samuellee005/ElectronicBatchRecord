@@ -6,6 +6,34 @@
 require_once __DIR__ . '/../config.php';
 
 /**
+ * True if the file content looks like a PDF (Portable Document Format).
+ * Accepts standard headers, optional UTF-8 BOM, and a %PDF marker within the first 1 KiB
+ * (some generators add a short preamble).
+ */
+function ebr_file_looks_like_pdf(string $path): bool
+{
+    $buf = @file_get_contents($path, false, null, 0, 16384);
+    if ($buf === false || $buf === '') {
+        return false;
+    }
+    if (str_starts_with($buf, "\xEF\xBB\xBF")) {
+        $buf = substr($buf, 3);
+    }
+    if (strlen($buf) >= 5 && substr($buf, 0, 5) === '%PDF-') {
+        return true;
+    }
+    if (strlen($buf) >= 4 && substr($buf, 0, 4) === '%PDF') {
+        return true;
+    }
+    $pos = strpos($buf, '%PDF');
+    if ($pos !== false && $pos <= 1024) {
+        return preg_match('/%PDF-[0-9]/', substr($buf, $pos, 32)) === 1;
+    }
+
+    return false;
+}
+
+/**
  * Handle file upload with validation
  */
 function handleFileUpload($file) {
@@ -34,15 +62,10 @@ function handleFileUpload($file) {
         ];
     }
 
-    // Validate MIME type
-    $finfo = finfo_open(FILEINFO_MIME_TYPE);
-    $mimeType = finfo_file($finfo, $file['tmp_name']);
-    finfo_close($finfo);
-
-    if ($mimeType !== 'application/pdf') {
+    if (!ebr_file_looks_like_pdf($file['tmp_name'])) {
         return [
             'success' => false,
-            'message' => 'Invalid file type. File must be a valid PDF.'
+            'message' => 'This file is not a valid PDF. Use a real .pdf (Portable Document Format), not Word/Excel renamed to .pdf.'
         ];
     }
 

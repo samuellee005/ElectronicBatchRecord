@@ -1,3 +1,6 @@
+# PostgreSQL: set EBR_PG_HOST, EBR_PG_USER, EBR_PG_PASSWORD when you have credentials.
+# Arcturus → database db4 when EBR_DEPLOYMENT=arcturus, or EBR_ARCTURUS_APP_IPS matches
+# this host, or EBR_ARCTURUS_HTTP_HOSTS matches HTTP Host (see includes/db.php).
 services:
   ebr:
     build:
@@ -6,6 +9,9 @@ services:
     image: ebr-app:latest
     container_name: ebr-app
     restart: unless-stopped
+    env_file:
+      - .env
     # Bind to loopback only — Apache on the host reverse-proxies :5173 -> here.
     ports:
       - "127.0.0.1:8080:8080"
+    # Also supported in .env: EBR_DEPLOYMENT=arcturus | EBR_ARCTURUS_APP_IPS | EBR_ARCTURUS_HTTP_HOSTS

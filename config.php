@@ -53,3 +53,5 @@ if (!file_exists(BATCH_RECORDS_DIR)) {
 
 // Active users for collaborator dropdowns (JSON array)
 define('ACTIVE_USERS_FILE', DATA_DIR . 'active-users.json');
+
+require_once __DIR__ . '/includes/db.php';

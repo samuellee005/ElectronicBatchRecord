@@ -28,7 +28,16 @@
      && docker-php-ext-install zip \
      && apk del .build-deps
 
+    # PostgreSQL (PDO) — database name is resolved in includes/db.php (db4 vs dev).
+    RUN apk add --no-cache --virtual .pgsql-build-deps $PHPIZE_DEPS postgresql-dev \
+     && docker-php-ext-install pdo_pgsql \
+     && apk del .pgsql-build-deps \
+     && apk add --no-cache libpq
+
     WORKDIR /app
+
+    # Allow PDF templates up to app limit (default PHP is often 2M, which breaks larger PDFs).
+    COPY docker/php-ebr.ini /usr/local/etc/php/conf.d/ebr-uploads.ini
 
     # Copy application source (respects .dockerignore)
     COPY . /app

@@ -33,12 +33,25 @@ export default function UploadTemplate() {
       {message && <div className="message success">{message}</div>}
       {error && <div className="message error">{error}</div>}
       <form className="upload-form" onSubmit={handleSubmit}>
-        <div className="file-input-wrapper">
-          <input id="pdf_file" type="file" accept=".pdf" required onChange={(e) => setFile(e.target.files?.[0] || null)} className="file-input" />
-          <label htmlFor="pdf_file" className="file-input-label">Choose PDF File</label>
+        <p className="upload-step-hint">Step 1 — pick a PDF on your device. Step 2 — send it to the server.</p>
+        <div className="upload-file-row">
+          <label htmlFor="pdf_file" className="upload-field-label">
+            Choose PDF template
+          </label>
+          <input
+            id="pdf_file"
+            name="pdf_file"
+            type="file"
+            accept="application/pdf,.pdf,application/x-pdf"
+            required
+            onChange={(e) => setFile(e.target.files?.[0] || null)}
+            className="upload-file-input"
+          />
         </div>
         {file && <div className="file-name">Selected: {file.name}</div>}
-        <button type="submit" className="upload-btn" disabled={!file || loading}>{loading ? 'Uploading...' : 'Upload PDF'}</button>
+        <button type="submit" className="upload-btn" disabled={!file || loading}>
+          {loading ? 'Uploading…' : 'Upload PDF to server'}
+        </button>
       </form>
       <Link to="/templates" className="back-link">View all templates</Link>
     </div>
