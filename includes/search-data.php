@@ -150,40 +150,21 @@ if ($q === '') {
 }
 
 $needle = strtolower($q);
-$dir = BATCH_RECORDS_DIR;
 $results = [];
 $columnSet = [];
 
-if (!is_dir($dir)) {
+try {
+    $batchRows = ebr_db_batch_rows_for_search($needle, $scope);
+} catch (Throwable $e) {
     echo json_encode(['success' => true, 'results' => [], 'columns' => []]);
     exit;
 }
 
-foreach (glob($dir . '/*.json') as $file) {
-    $batch = @json_decode(file_get_contents($file), true);
-    if (!$batch || empty($batch['id']) || empty($batch['formId'])) {
+foreach ($batchRows as $batch) {
+    if (empty($batch['id']) || empty($batch['formId'])) {
         continue;
     }
     $batch = ebr_batch_record_ensure_batch_id($batch);
-
-    $title = (string) ($batch['title'] ?? '');
-    $formName = (string) ($batch['formName'] ?? '');
-    $match = false;
-
-    if ($scope === 'batch_title' || $scope === 'both') {
-        if ($needle !== '' && stripos(strtolower($title), $needle) !== false) {
-            $match = true;
-        }
-    }
-    if (!$match && ($scope === 'form_name' || $scope === 'both')) {
-        if ($needle !== '' && stripos(strtolower($formName), $needle) !== false) {
-            $match = true;
-        }
-    }
-
-    if (!$match) {
-        continue;
-    }
 
     $batchId = (string) ($batch['batchId'] ?? $batch['id']);
     [$formData] = searchDataLoadEntryForBatch($batchId, $batch);
@@ -213,8 +194,8 @@ foreach (glob($dir . '/*.json') as $file) {
 
     $results[] = [
         'batchId' => $batchId,
-        'title' => $title,
-        'formName' => $formName,
+        'title' => (string) ($batch['title'] ?? ''),
+        'formName' => (string) ($batch['formName'] ?? ''),
         'formId' => $batch['formId'],
         'status' => $batch['status'] ?? 'in_progress',
         'updatedAt' => $batch['updatedAt'] ?? '',

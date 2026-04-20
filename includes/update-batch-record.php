@@ -21,16 +21,10 @@ if (!$data || empty($data['batchId'])) {
 }
 
 $batchId = preg_replace('/[^a-zA-Z0-9_-]/', '', $data['batchId']);
-$path = BATCH_RECORDS_DIR . $batchId . '.json';
 
-if (!file_exists($path)) {
+$record = ebr_db_batch_fetch_by_id($batchId);
+if ($record === null) {
     echo json_encode(['success' => false, 'message' => 'Batch record not found']);
-    exit;
-}
-
-$record = json_decode(file_get_contents($path), true);
-if (!$record) {
-    echo json_encode(['success' => false, 'message' => 'Invalid batch record']);
     exit;
 }
 
@@ -53,8 +47,16 @@ if (isset($data['lastEntryId'])) {
     $record['lastEntryId'] = $data['lastEntryId'];
 }
 
-if (file_put_contents($path, json_encode($record, JSON_PRETTY_PRINT))) {
-    echo json_encode(['success' => true, 'batch' => $record]);
-} else {
+try {
+    $saved = ebr_db_batch_save_from_api($record);
+} catch (Throwable $e) {
     echo json_encode(['success' => false, 'message' => 'Failed to update']);
+    exit;
 }
+
+if ($saved === null) {
+    echo json_encode(['success' => false, 'message' => 'Failed to update']);
+    exit;
+}
+
+echo json_encode(['success' => true, 'batch' => $saved]);

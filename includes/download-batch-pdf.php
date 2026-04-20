@@ -14,16 +14,16 @@ if (!isset($_GET['batchId'])) {
 }
 
 $batchId = preg_replace('/[^a-zA-Z0-9_-]/', '', $_GET['batchId']);
-$batchPath = BATCH_RECORDS_DIR . $batchId . '.json';
 
-if (!file_exists($batchPath)) {
+try {
+    $batch = ebr_db_batch_fetch_by_id($batchId);
+} catch (Throwable $e) {
     header('Content-Type: application/json');
     echo json_encode(['success' => false, 'message' => 'Batch not found']);
     exit;
 }
 
-$batch = json_decode(file_get_contents($batchPath), true);
-if (!$batch || empty($batch['formId'])) {
+if ($batch === null || empty($batch['formId'])) {
     header('Content-Type: application/json');
     echo json_encode(['success' => false, 'message' => 'Invalid batch']);
     exit;

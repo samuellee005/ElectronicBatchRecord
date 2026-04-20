@@ -59,16 +59,10 @@ if (!file_put_contents($filepath, json_encode($dataEntry, JSON_PRETTY_PRINT))) {
 
 if (!empty($data['batchId'])) {
     $batchId = preg_replace('/[^a-zA-Z0-9_-]/', '', $data['batchId']);
-    $batchPath = BATCH_RECORDS_DIR . $batchId . '.json';
-    if (file_exists($batchPath)) {
-        $batch = json_decode(file_get_contents($batchPath), true);
-        if ($batch && ($batch['status'] ?? '') === 'in_progress') {
-            $batch = ebr_batch_record_ensure_batch_id($batch);
-            $batch['updatedAt'] = date('c');
-            $batch['lastEntryId'] = $entryId;
-            $batch['lastEntryFilename'] = $filename;
-            file_put_contents($batchPath, json_encode($batch, JSON_PRETTY_PRINT));
-        }
+    try {
+        ebr_db_batch_touch_last_entry($batchId, $entryId, $filename);
+    } catch (Throwable $e) {
+        // Non-fatal: entry file is still saved
     }
 }
 

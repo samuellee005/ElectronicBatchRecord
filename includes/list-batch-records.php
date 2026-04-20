@@ -15,43 +15,30 @@ if (!in_array($status, ['in_progress', 'completed'], true)) {
 
 $filterByCreator = isset($_GET['createdBy']) ? trim($_GET['createdBy']) : '';
 
-$dir = BATCH_RECORDS_DIR;
-$records = [];
-
-if (is_dir($dir)) {
-    $files = glob($dir . '/*.json');
-    foreach ($files as $file) {
-        $data = @json_decode(file_get_contents($file), true);
-        if (!$data || !isset($data['id'])) continue;
-        $data = ebr_batch_record_ensure_batch_id($data);
-        if ($data['status'] !== $status) continue;
-        if ($filterByCreator !== '') {
-            $creator = trim((string) ($data['createdBy'] ?? ''));
-            if (strcasecmp($creator, $filterByCreator) !== 0) {
-                continue;
-            }
-        }
-        $records[] = [
-            'id' => $data['id'],
-            'batchId' => $data['batchId'],
-            'formId' => $data['formId'] ?? '',
-            'formName' => $data['formName'] ?? '',
-            'pdfFile' => $data['pdfFile'] ?? '',
-            'title' => $data['title'] ?? '',
-            'description' => $data['description'] ?? '',
-            'status' => $data['status'] ?? 'in_progress',
-            'createdAt' => $data['createdAt'] ?? '',
-            'updatedAt' => $data['updatedAt'] ?? '',
-            'completedAt' => $data['completedAt'] ?? null,
-            'createdBy' => $data['createdBy'] ?? null,
-        ];
-    }
+try {
+    $records = ebr_db_batch_list($status, $filterByCreator !== '' ? $filterByCreator : null);
+} catch (Throwable $e) {
+    echo json_encode(['success' => false, 'message' => 'Could not load batch records', 'records' => []]);
+    exit;
 }
 
-usort($records, function ($a, $b) {
-    $tA = $a['updatedAt'] ?: $a['createdAt'];
-    $tB = $b['updatedAt'] ?: $b['createdAt'];
-    return strcmp($tB, $tA);
-});
+$out = [];
+foreach ($records as $data) {
+    $data = ebr_batch_record_ensure_batch_id($data);
+    $out[] = [
+        'id' => $data['id'],
+        'batchId' => $data['batchId'],
+        'formId' => $data['formId'] ?? '',
+        'formName' => $data['formName'] ?? '',
+        'pdfFile' => $data['pdfFile'] ?? '',
+        'title' => $data['title'] ?? '',
+        'description' => $data['description'] ?? '',
+        'status' => $data['status'] ?? 'in_progress',
+        'createdAt' => $data['createdAt'] ?? '',
+        'updatedAt' => $data['updatedAt'] ?? '',
+        'completedAt' => $data['completedAt'] ?? null,
+        'createdBy' => $data['createdBy'] ?? null,
+    ];
+}
 
-echo json_encode(['success' => true, 'records' => $records]);
+echo json_encode(['success' => true, 'records' => $out]);

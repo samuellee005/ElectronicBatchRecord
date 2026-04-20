@@ -50,9 +50,14 @@ $record = [
     'lastEntryId' => null,
 ];
 
-$path = BATCH_RECORDS_DIR . $id . '.json';
-if (file_put_contents($path, json_encode($record, JSON_PRETTY_PRINT))) {
-    echo json_encode(['success' => true, 'batchId' => $id, 'batch' => $record]);
-} else {
-    echo json_encode(['success' => false, 'message' => 'Failed to save batch record']);
+try {
+    ebr_db_batch_insert($record);
+} catch (Throwable $e) {
+    echo json_encode([
+        'success' => false,
+        'message' => 'Failed to save batch record to database.',
+    ]);
+    exit;
 }
+
+echo json_encode(['success' => true, 'batchId' => $id, 'batch' => $record]);

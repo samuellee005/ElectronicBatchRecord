@@ -2,8 +2,10 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/db-batch-records.php';
+
 /**
- * Batch record identity helpers (file-backed today; stable batchId for future DB use).
+ * Batch record identity helpers; sequence allocation uses PostgreSQL (ebr_batch_records).
  */
 
 /**
@@ -104,15 +106,10 @@ function ebr_generate_batch_id(?string $createdBy = null): string
     }
 
     try {
-        $max = ebr_max_batch_sequence_for_year_initials($dir, $year, $initials);
+        $max = ebr_db_batch_max_sequence($year, $initials);
         $next = $max + 1;
         $seq = str_pad((string) $next, 5, '0', STR_PAD_LEFT);
         $id = 'BR-' . $year . '-' . $initials . '-' . $seq;
-        if (file_exists($dir . $id . '.json')) {
-            $next++;
-            $seq = str_pad((string) $next, 5, '0', STR_PAD_LEFT);
-            $id = 'BR-' . $year . '-' . $initials . '-' . $seq;
-        }
 
         return $id;
     } finally {
