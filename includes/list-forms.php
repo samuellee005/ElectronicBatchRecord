@@ -1,41 +1,37 @@
 <?php
 /**
- * List all saved forms
+ * List all saved forms (PostgreSQL ebr_forms)
  */
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/db-forms.php';
 
 header('Content-Type: application/json');
 
-$formsDir = FORMS_DIR;
-
-if (!file_exists($formsDir)) {
-    echo json_encode(['success' => true, 'forms' => []]);
+try {
+    $all = ebr_db_forms_all_api();
+} catch (Throwable $e) {
+    echo json_encode(['success' => false, 'forms' => [], 'groupedForms' => [], 'message' => 'Could not load forms']);
     exit;
 }
 
 $forms = [];
-$formFiles = glob($formsDir . '/*.json');
-
-foreach ($formFiles as $formFile) {
-    $formData = json_decode(file_get_contents($formFile), true);
-    if ($formData) {
-        $forms[] = [
-            'id' => $formData['id'] ?? '',
-            'name' => $formData['name'] ?? 'Unnamed Form',
-            'description' => $formData['description'] ?? '',
-            'pdfFile' => $formData['pdfFile'] ?? '',
-            'fieldCount' => count($formData['fields'] ?? []),
-            'version' => round(floatval($formData['version'] ?? 1), 1),
-            'isLatest' => $formData['isLatest'] ?? true,
-            'isCombined' => isset($formData['isCombined']) && $formData['isCombined'] === true,
-            'sourceFormIds' => $formData['sourceFormIds'] ?? [],
-            'createdAt' => $formData['createdAt'] ?? '',
-            'updatedAt' => $formData['updatedAt'] ?? '',
-            'filename' => basename($formFile),
-            'createdBy' => $formData['createdBy'] ?? null,
-            'updatedBy' => $formData['updatedBy'] ?? null
-        ];
-    }
+foreach ($all as $formData) {
+    $forms[] = [
+        'id' => $formData['id'] ?? '',
+        'name' => $formData['name'] ?? 'Unnamed Form',
+        'description' => $formData['description'] ?? '',
+        'pdfFile' => $formData['pdfFile'] ?? '',
+        'fieldCount' => count($formData['fields'] ?? []),
+        'version' => round(floatval($formData['version'] ?? 1), 1),
+        'isLatest' => $formData['isLatest'] ?? true,
+        'isCombined' => isset($formData['isCombined']) && $formData['isCombined'] === true,
+        'sourceFormIds' => $formData['sourceFormIds'] ?? [],
+        'createdAt' => $formData['createdAt'] ?? '',
+        'updatedAt' => $formData['updatedAt'] ?? '',
+        'filename' => $formData['storageFilename'] ?? ($formData['id'] . '.json'),
+        'createdBy' => $formData['createdBy'] ?? null,
+        'updatedBy' => $formData['updatedBy'] ?? null,
+    ];
 }
 
 // Group forms by name and PDF file

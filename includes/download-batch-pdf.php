@@ -5,6 +5,8 @@
  */
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/batch-record.php';
+require_once __DIR__ . '/db-data-entries.php';
+require_once __DIR__ . '/db-forms.php';
 require_once __DIR__ . '/pdf-batch-export.php';
 
 if (!isset($_GET['batchId'])) {
@@ -31,42 +33,20 @@ if ($batch === null || empty($batch['formId'])) {
 
 $batch = ebr_batch_record_ensure_batch_id($batch);
 
-$formData = [];
-$entryRaw = null;
-if (!empty($batch['lastEntryFilename'])) {
-    $entryPath = DATA_DIR . $batch['lastEntryFilename'];
-    if (file_exists($entryPath)) {
-        $entryRaw = json_decode(file_get_contents($entryPath), true);
-        if ($entryRaw && isset($entryRaw['data'])) {
-            $formData = $entryRaw['data'];
-        }
-    }
-}
-if (!$entryRaw) {
-    $files = glob(DATA_DIR . '*.json');
-    foreach ($files as $f) {
-        if (strpos($f, 'batch-records') !== false) {
-            continue;
-        }
-        $data = @json_decode(file_get_contents($f), true);
-        if (!$data || ($data['batchId'] ?? '') !== $batchId) {
-            continue;
-        }
-        $entryRaw = $data;
-        $formData = $data['data'] ?? [];
-        break;
-    }
-}
-
+[$formData, $entryRaw] = ebr_db_entry_resolve_for_batch($batch, $batchId);
 if (!$entryRaw) {
     $formData = [];
 }
 
 $formId = $batch['formId'];
-$formsDir = FORMS_DIR;
 $form = null;
-if (is_dir($formsDir)) {
-    foreach (glob($formsDir . '/*.json') as $formFile) {
+try {
+    $form = ebr_db_forms_fetch_by_id($formId);
+} catch (Throwable $e) {
+    $form = null;
+}
+if (!$form && is_dir(FORMS_DIR)) {
+    foreach (glob(FORMS_DIR . '/*.json') ?: [] as $formFile) {
         $fd = json_decode(file_get_contents($formFile), true);
         if (!$fd || ($fd['id'] ?? '') !== $formId) {
             continue;

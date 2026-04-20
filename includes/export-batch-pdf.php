@@ -4,6 +4,7 @@
  * Body: { "formId", "pdfFile", "data": { ... field entries ... }, "batch": { optional title, completedSignOffBy, ... } }
  */
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/db-forms.php';
 require_once __DIR__ . '/pdf-batch-export.php';
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -30,10 +31,14 @@ if ($formId === '' || $pdfFile === '' || !is_array($data)) {
     exit;
 }
 
-$formsDir = FORMS_DIR;
 $form = null;
-if (is_dir($formsDir)) {
-    foreach (glob($formsDir . '/*.json') as $formFile) {
+try {
+    $form = ebr_db_forms_fetch_by_id($formId);
+} catch (Throwable $e) {
+    $form = null;
+}
+if (!$form && is_dir(FORMS_DIR)) {
+    foreach (glob(FORMS_DIR . '/*.json') ?: [] as $formFile) {
         $fd = json_decode(file_get_contents($formFile), true);
         if (!$fd || ($fd['id'] ?? '') !== $formId) {
             continue;

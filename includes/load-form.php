@@ -1,8 +1,9 @@
 <?php
 /**
- * Load form configuration for a PDF
+ * Load form configuration for a PDF (PostgreSQL ebr_forms)
  */
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/db-forms.php';
 
 header('Content-Type: application/json');
 
@@ -12,32 +13,28 @@ if (!isset($_GET['pdf'])) {
 }
 
 $pdfFile = basename($_GET['pdf']);
-$formsDir = FORMS_DIR;
 
-if (!file_exists($formsDir)) {
-    echo json_encode(['success' => false, 'message' => 'No forms directory']);
+try {
+    $all = ebr_db_forms_all_api();
+} catch (Throwable $e) {
+    echo json_encode(['success' => false, 'message' => 'Could not load forms']);
     exit;
 }
 
-// Find the latest form for this PDF (prefer isLatest, then most recent)
-$forms = glob($formsDir . '/*.json');
 $latestForm = null;
 $latestTime = 0;
 $hasLatestFlag = false;
 
-foreach ($forms as $formFile) {
-    $formData = json_decode(file_get_contents($formFile), true);
+foreach ($all as $formData) {
     if ($formData && isset($formData['pdfFile']) && $formData['pdfFile'] === $pdfFile) {
         $isLatest = isset($formData['isLatest']) && $formData['isLatest'] === true;
         $formTime = strtotime($formData['updatedAt'] ?? $formData['createdAt'] ?? '0');
 
-        // Prefer forms with isLatest flag
         if ($isLatest && (!$hasLatestFlag || $formTime > $latestTime)) {
             $hasLatestFlag = true;
             $latestTime = $formTime;
             $latestForm = $formData;
         } elseif (!$hasLatestFlag && $formTime > $latestTime) {
-            // Fallback to most recent if no isLatest flag found
             $latestTime = $formTime;
             $latestForm = $formData;
         }
@@ -45,7 +42,6 @@ foreach ($forms as $formFile) {
 }
 
 if ($latestForm) {
-    // Ensure version and isLatest properties exist; normalize version to one decimal (e.g. 1.2 not 1.2000000000000002)
     if (!isset($latestForm['version'])) {
         $latestForm['version'] = 1.0;
     }

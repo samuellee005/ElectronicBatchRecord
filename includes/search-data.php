@@ -4,6 +4,8 @@
  */
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/batch-record.php';
+require_once __DIR__ . '/db-data-entries.php';
+require_once __DIR__ . '/db-forms.php';
 
 header('Content-Type: application/json');
 
@@ -60,68 +62,25 @@ function searchDataFormatValue($v)
 
 function searchDataLoadEntryForBatch($batchId, $batch)
 {
-    $formData = [];
-    $entryRaw = null;
-
-    if (!empty($batch['lastEntryFilename'])) {
-        $entryPath = DATA_DIR . $batch['lastEntryFilename'];
-        if (file_exists($entryPath)) {
-            $entryRaw = json_decode(file_get_contents($entryPath), true);
-            if ($entryRaw && isset($entryRaw['data'])) {
-                $formData = $entryRaw['data'];
-            }
-        }
-    }
-
-    if (!$entryRaw && !empty($batch['lastEntryId'])) {
-        $files = glob(DATA_DIR . '*.json');
-        foreach ($files as $f) {
-            if (strpos($f, 'batch-records') !== false) {
-                continue;
-            }
-            $data = @json_decode(file_get_contents($f), true);
-            if (!$data || ($data['id'] ?? '') !== $batch['lastEntryId']) {
-                continue;
-            }
-            $entryRaw = $data;
-            $formData = $data['data'] ?? [];
-            break;
-        }
-    }
-
-    if (!$entryRaw) {
-        $files = glob(DATA_DIR . '*.json');
-        $latest = null;
-        foreach ($files as $f) {
-            if (strpos($f, 'batch-records') !== false) {
-                continue;
-            }
-            $data = @json_decode(file_get_contents($f), true);
-            if (!$data || ($data['batchId'] ?? '') !== $batchId) {
-                continue;
-            }
-            $savedAt = $data['savedAt'] ?? '';
-            if ($latest === null || strcmp($savedAt, $latest['savedAt'] ?? '') > 0) {
-                $latest = $data;
-            }
-        }
-        if ($latest) {
-            $entryRaw = $latest;
-            $formData = $latest['data'] ?? [];
-        }
-    }
-
-    return [$formData, $entryRaw];
+    return ebr_db_entry_resolve_for_batch($batch, $batchId);
 }
 
 function searchDataLoadForm($formId)
 {
+    try {
+        $fromDb = ebr_db_forms_fetch_by_id($formId);
+        if ($fromDb !== null) {
+            return $fromDb;
+        }
+    } catch (Throwable $e) {
+        // fall through to legacy JSON
+    }
     $formsDir = FORMS_DIR;
     if (!is_dir($formsDir)) {
         return null;
     }
     $found = null;
-    foreach (glob($formsDir . '/*.json') as $formFile) {
+    foreach (glob($formsDir . '/*.json') ?: [] as $formFile) {
         $fd = json_decode(file_get_contents($formFile), true);
         if (!$fd || ($fd['id'] ?? '') !== $formId) {
             continue;
@@ -130,6 +89,7 @@ function searchDataLoadForm($formId)
             $found = $fd;
         }
     }
+
     return $found;
 }
 
