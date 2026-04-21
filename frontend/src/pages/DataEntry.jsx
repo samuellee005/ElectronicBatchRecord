@@ -2401,49 +2401,68 @@ export default function DataEntry() {
     pdfRef.current?.goToPage?.(page)
   }, [])
 
-  // Save handler
-  const handleSave = useCallback(async () => {
-    if (!formConfig) return
-    const errors = []
-    formConfig.fields.forEach(f => {
-      if (isRequired(f) && !isFieldValueFilled(f, formDataEffective[f.id])) {
-        errors.push(f.label || f.id)
+  /** Persist current entry to the server (same payload as Save). Used by Save and before Mark complete. */
+  const persistFormData = useCallback(
+    async ({ silentSuccess = false }) => {
+      if (!formConfig) {
+        alert('Form is not loaded yet.')
+        return { ok: false }
       }
-    })
-    if (errors.length) {
-      alert('Please fill in all required fields:\n- ' + errors.join('\n- '))
-      return
-    }
-    setSaving(true)
-    try {
+      const errors = []
+      formConfig.fields.forEach((f) => {
+        if (isRequired(f) && !isFieldValueFilled(f, formDataEffective[f.id])) {
+          errors.push(f.label || f.id)
+        }
+      })
+      if (errors.length) {
+        alert('Please fill in all required fields:\n- ' + errors.join('\n- '))
+        return { ok: false }
+      }
       const body = {
         formId: formConfig.id,
         formName: formConfig.name,
         pdfFile: formConfig.pdfFile,
         data: formData,
         stageCompletion,
-        stages: stages.map(s => ({ stage: s.stage, order: s.order })),
+        stages: stages.map((s) => ({ stage: s.stage, order: s.order })),
         savedAt: new Date().toISOString(),
       }
       if (batchId) body.batchId = batchId
       if (isEbrApiDebug()) {
         const dk = formData && typeof formData === 'object' ? Object.keys(formData) : []
-        console.debug('[EBR DataEntry] save click', {
+        console.debug('[EBR DataEntry] persist form data', {
           formId: formConfig.id,
           batchId: batchId || null,
           dataKeysCount: dk.length,
           stagesCount: stages.length,
+          silentSuccess,
         })
       }
-      const res = await saveData(body)
-      if (res.success) alert('Data saved successfully!')
-      else alert('Error saving data: ' + (res.message || 'Unknown error'))
-    } catch (err) {
-      alert('Error saving data: ' + err.message)
+      try {
+        const res = await saveData(body)
+        if (!res.success) {
+          alert('Error saving data: ' + (res.message || 'Unknown error'))
+          return { ok: false }
+        }
+        if (!silentSuccess) alert('Data saved successfully!')
+        return { ok: true, res }
+      } catch (err) {
+        alert('Error saving data: ' + err.message)
+        return { ok: false }
+      }
+    },
+    [formConfig, formData, formDataEffective, stageCompletion, stages, batchId],
+  )
+
+  const handleSave = useCallback(async () => {
+    if (!formConfig) return
+    setSaving(true)
+    try {
+      await persistFormData({ silentSuccess: false })
     } finally {
       setSaving(false)
     }
-  }, [formConfig, formData, formDataEffective, stageCompletion, stages, batchId])
+  }, [formConfig, persistFormData])
 
   useEffect(() => {
     return () => {
@@ -2503,7 +2522,11 @@ export default function DataEntry() {
   const runCompleteBatch = useCallback(
     async (extra = {}) => {
       if (!batchId) return
+      setSaving(true)
       try {
+        const saved = await persistFormData({ silentSuccess: true })
+        if (!saved.ok) return
+
         const payload = { batchId, status: 'completed', ...extra }
         if (isEbrApiDebug()) {
           console.debug('[EBR DataEntry] mark complete', {
@@ -2520,9 +2543,11 @@ export default function DataEntry() {
         }
       } catch (err) {
         alert('Error completing batch: ' + err.message)
+      } finally {
+        setSaving(false)
       }
     },
-    [batchId, navigate],
+    [batchId, navigate, persistFormData],
   )
 
   const handleComplete = useCallback(async () => {
