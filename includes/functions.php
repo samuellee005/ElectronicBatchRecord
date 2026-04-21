@@ -72,7 +72,11 @@ function handleFileUpload($file) {
 
     $originalName = pathinfo($file['name'], PATHINFO_FILENAME);
     $sanitizedName = preg_replace('/[^a-zA-Z0-9_-]/', '_', $originalName);
-    $uniqueName = $sanitizedName . '_' . time() . '.pdf';
+    if ($sanitizedName === '') {
+        $sanitizedName = 'template';
+    }
+    // UNIQUE(filename): same stem + second can collide; add entropy.
+    $uniqueName = $sanitizedName . '_' . time() . '_' . bin2hex(random_bytes(4)) . '.pdf';
 
     $binary = @file_get_contents($file['tmp_name']);
     if ($binary === false || $binary === '') {
@@ -87,8 +91,21 @@ function handleFileUpload($file) {
     } catch (Throwable $e) {
         error_log('ebr_db_pdf_template_insert: ' . $e->getMessage());
         $hint = '';
-        if (str_contains($e->getMessage(), 'ebr_pdf_templates') && str_contains($e->getMessage(), 'does not exist')) {
+        $msg = $e->getMessage();
+        if (str_contains($msg, 'ebr_pdf_templates') && str_contains($msg, 'does not exist')) {
             $hint = ' Run scripts/apply-schema.php (ensure database/schema.sql includes ebr_pdf_templates).';
+        } elseif (str_contains($msg, '23505') || stripos($msg, 'duplicate key') !== false || stripos($msg, 'unique constraint') !== false) {
+            $hint = ' Duplicate filename; try uploading again.';
+        } elseif (str_contains($msg, 'permission denied') || str_contains($msg, 'must be owner')) {
+            $hint = ' Database user may lack INSERT on ebr_pdf_templates.';
+        }
+        $show = getenv('EBR_SHOW_UPLOAD_ERRORS');
+        if ($show !== false && $show !== '' && strtolower((string) $show) !== '0' && strtolower((string) $show) !== 'false') {
+            return [
+                'success' => false,
+                'message' => 'Failed to store template in database.' . $hint,
+                'detail' => $msg,
+            ];
         }
         return [
             'success' => false,

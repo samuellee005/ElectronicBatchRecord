@@ -8,6 +8,23 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/db.php';
 
+/**
+ * Safe UTF-8 for PostgreSQL TEXT (avoids client_encoding / invalid-byte failures on original filenames).
+ */
+function ebr_db_utf8_safe_filename_meta(?string $s): string
+{
+    $s = (string) $s;
+    if ($s === '') {
+        return '';
+    }
+    if (function_exists('mb_scrub')) {
+        return mb_scrub($s, 'UTF-8');
+    }
+    $conv = @iconv('UTF-8', 'UTF-8//IGNORE', $s);
+
+    return $conv !== false ? $conv : '';
+}
+
 function ebr_db_pdf_template_normalize_filename(string $filename): string
 {
     $b = basename(str_replace('\\', '/', $filename));
@@ -119,7 +136,7 @@ SQL;
     $st = $pdo->prepare($sql);
     $st->bindValue('id', $id);
     $st->bindValue('filename', $fn);
-    $st->bindValue('original_name', $originalName);
+    $st->bindValue('original_name', ebr_db_utf8_safe_filename_meta($originalName));
     $st->bindValue('content_hex', bin2hex($binary));
     $st->bindValue('file_size', strlen($binary), PDO::PARAM_INT);
     $st->execute();
