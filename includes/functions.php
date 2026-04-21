@@ -85,9 +85,14 @@ function handleFileUpload($file) {
     try {
         ebr_db_pdf_template_insert('tpl_' . bin2hex(random_bytes(8)), $uniqueName, (string) ($file['name'] ?? ''), $binary);
     } catch (Throwable $e) {
+        error_log('ebr_db_pdf_template_insert: ' . $e->getMessage());
+        $hint = '';
+        if (str_contains($e->getMessage(), 'ebr_pdf_templates') && str_contains($e->getMessage(), 'does not exist')) {
+            $hint = ' Run scripts/apply-schema.php (ensure database/schema.sql includes ebr_pdf_templates).';
+        }
         return [
             'success' => false,
-            'message' => 'Failed to store template in database.',
+            'message' => 'Failed to store template in database.' . $hint,
         ];
     }
 

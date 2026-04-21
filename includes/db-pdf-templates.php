@@ -111,15 +111,16 @@ function ebr_db_pdf_template_insert(string $id, string $filename, string $origin
         throw new InvalidArgumentException('Invalid template filename');
     }
     $pdo = ebr_pg_pdo();
+    // Hex + decode() avoids PDO/pgsql mis-handling of raw BYTEA parameter binding for binary PDFs.
     $sql = <<<'SQL'
 INSERT INTO ebr_pdf_templates (id, filename, original_name, content, file_size, uploaded_at)
-VALUES (:id, :filename, :original_name, :content, :file_size, NOW())
+VALUES (:id, :filename, :original_name, decode(:content_hex, 'hex'), :file_size, NOW())
 SQL;
     $st = $pdo->prepare($sql);
     $st->bindValue('id', $id);
     $st->bindValue('filename', $fn);
     $st->bindValue('original_name', $originalName);
-    $st->bindValue('content', $binary, PDO::PARAM_STR);
+    $st->bindValue('content_hex', bin2hex($binary));
     $st->bindValue('file_size', strlen($binary), PDO::PARAM_INT);
     $st->execute();
 }
