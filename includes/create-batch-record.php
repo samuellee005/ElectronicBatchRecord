@@ -25,7 +25,8 @@ $description = trim($data['description'] ?? '');
 $formId = $data['formId'];
 $formName = $data['formName'] ?? '';
 $pdfFile = isset($data['pdfFile']) ? basename($data['pdfFile']) : '';
-$createdBy = isset($data['createdBy']) ? trim($data['createdBy']) : null;
+$createdBy = isset($data['createdBy']) ? trim((string) $data['createdBy']) : '';
+$createdBy = $createdBy !== '' ? $createdBy : null;
 
 if ($title === '') {
     echo json_encode(['success' => false, 'message' => 'Title is required']);
@@ -53,10 +54,12 @@ $record = [
 try {
     ebr_db_batch_insert($record);
 } catch (Throwable $e) {
-    echo json_encode([
-        'success' => false,
-        'message' => 'Failed to save batch record to database.',
-    ]);
+    error_log('ebr create-batch-record: ' . $e->getMessage());
+    $msg = 'Failed to save batch record to database.';
+    if (str_contains($e->getMessage(), 'fk_ebr_batch_form') || str_contains($e->getMessage(), 'foreign key')) {
+        $msg = 'This form is not in the database yet. Save the form in the form builder, then create the batch again.';
+    }
+    echo json_encode(['success' => false, 'message' => $msg]);
     exit;
 }
 

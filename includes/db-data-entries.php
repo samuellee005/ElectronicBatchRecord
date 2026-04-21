@@ -9,6 +9,37 @@ declare(strict_types=1);
 require_once __DIR__ . '/db.php';
 
 /**
+ * @param mixed $data
+ */
+function ebr_db_data_json_enc($data): string
+{
+    $flags = JSON_UNESCAPED_UNICODE;
+    if (defined('JSON_INVALID_UTF8_SUBSTITUTE')) {
+        $flags |= JSON_INVALID_UTF8_SUBSTITUTE;
+    }
+    $j = json_encode($data, $flags);
+    if ($j === false) {
+        throw new RuntimeException('JSON encode failed for data entry');
+    }
+
+    return $j;
+}
+
+/** TIMESTAMPTZ NOT NULL for saved_at */
+function ebr_db_data_saved_at_param($v): string
+{
+    if ($v instanceof \DateTimeInterface) {
+        return $v->format('c');
+    }
+    $s = trim((string) $v);
+    if ($s === '') {
+        return date('c');
+    }
+
+    return $s;
+}
+
+/**
  * @param array<string, mixed> $row
  * @return array<string, mixed>
  */
@@ -80,10 +111,10 @@ SQL;
         'form_name' => $dataEntry['formName'] ?? '',
         'pdf_file' => $dataEntry['pdfFile'] ?? '',
         'batch_id' => $dataEntry['batchId'] ?? null,
-        'data' => json_encode($dataEntry['data'] ?? [], JSON_UNESCAPED_UNICODE),
-        'stage_completion' => json_encode($dataEntry['stageCompletion'] ?? [], JSON_UNESCAPED_UNICODE),
-        'stages' => json_encode($dataEntry['stages'] ?? [], JSON_UNESCAPED_UNICODE),
-        'saved_at' => $dataEntry['savedAt'],
+        'data' => ebr_db_data_json_enc($dataEntry['data'] ?? []),
+        'stage_completion' => ebr_db_data_json_enc($dataEntry['stageCompletion'] ?? []),
+        'stages' => ebr_db_data_json_enc($dataEntry['stages'] ?? []),
+        'saved_at' => ebr_db_data_saved_at_param($dataEntry['savedAt'] ?? null),
         'storage_filename' => $dataEntry['filename'] ?? null,
     ]);
 }

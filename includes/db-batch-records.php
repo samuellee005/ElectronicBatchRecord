@@ -23,6 +23,37 @@ function ebr_db_ts_to_iso($v): ?string
     return (string) $v;
 }
 
+/** TIMESTAMPTZ NOT NULL — never pass empty string. */
+function ebr_db_batch_ts_param($v): string
+{
+    if ($v instanceof \DateTimeInterface) {
+        return $v->format('c');
+    }
+    $s = trim((string) $v);
+    if ($s === '') {
+        return date('c');
+    }
+
+    return $s;
+}
+
+/** Nullable timestamptz (completed_at, sign-off). */
+function ebr_db_batch_ts_nullable_param($v): ?string
+{
+    if ($v === null) {
+        return null;
+    }
+    if ($v instanceof \DateTimeInterface) {
+        return $v->format('c');
+    }
+    $s = trim((string) $v);
+    if ($s === '') {
+        return null;
+    }
+
+    return $s;
+}
+
 /**
  * @param array<string, mixed> $row PDO FETCH_ASSOC row from ebr_batch_records
  * @return array<string, mixed>
@@ -85,6 +116,9 @@ INSERT INTO ebr_batch_records (
 )
 SQL;
     $st = $pdo->prepare($sql);
+    $cb = $record['createdBy'] ?? null;
+    $cb = ($cb !== null && trim((string) $cb) !== '') ? trim((string) $cb) : null;
+
     $st->execute([
         'id' => $record['id'],
         'form_id' => $record['formId'],
@@ -93,14 +127,14 @@ SQL;
         'title' => $record['title'],
         'description' => $record['description'] ?? '',
         'status' => $record['status'],
-        'created_at' => $record['createdAt'],
-        'updated_at' => $record['updatedAt'],
-        'completed_at' => $record['completedAt'] ?? null,
-        'created_by' => $record['createdBy'],
+        'created_at' => ebr_db_batch_ts_param($record['createdAt'] ?? null),
+        'updated_at' => ebr_db_batch_ts_param($record['updatedAt'] ?? null),
+        'completed_at' => ebr_db_batch_ts_nullable_param($record['completedAt'] ?? null),
+        'created_by' => $cb,
         'last_entry_id' => $record['lastEntryId'] ?? null,
         'last_entry_filename' => $record['lastEntryFilename'] ?? null,
         'completed_sign_off_by' => $record['completedSignOffBy'] ?? null,
-        'completed_sign_off_at' => $record['completedSignOffAt'] ?? null,
+        'completed_sign_off_at' => ebr_db_batch_ts_nullable_param($record['completedSignOffAt'] ?? null),
     ]);
 }
 
@@ -172,6 +206,9 @@ UPDATE ebr_batch_records SET
 WHERE id = :id
 SQL;
     $st = $pdo->prepare($sql);
+    $cb = $merged['createdBy'] ?? null;
+    $cb = ($cb !== null && trim((string) $cb) !== '') ? trim((string) $cb) : null;
+
     $st->execute([
         'id' => $merged['id'],
         'form_id' => $merged['formId'],
@@ -180,14 +217,14 @@ SQL;
         'title' => $merged['title'],
         'description' => $merged['description'] ?? '',
         'status' => $merged['status'],
-        'created_at' => $merged['createdAt'],
-        'updated_at' => $merged['updatedAt'],
-        'completed_at' => $merged['completedAt'] ?? null,
-        'created_by' => $merged['createdBy'],
+        'created_at' => ebr_db_batch_ts_param($merged['createdAt'] ?? null),
+        'updated_at' => ebr_db_batch_ts_param($merged['updatedAt'] ?? null),
+        'completed_at' => ebr_db_batch_ts_nullable_param($merged['completedAt'] ?? null),
+        'created_by' => $cb,
         'last_entry_id' => $merged['lastEntryId'] ?? null,
         'last_entry_filename' => $merged['lastEntryFilename'] ?? null,
         'completed_sign_off_by' => $merged['completedSignOffBy'] ?? null,
-        'completed_sign_off_at' => $merged['completedSignOffAt'] ?? null,
+        'completed_sign_off_at' => ebr_db_batch_ts_nullable_param($merged['completedSignOffAt'] ?? null),
     ]);
 
     return ebr_db_batch_fetch_by_id($batchId);

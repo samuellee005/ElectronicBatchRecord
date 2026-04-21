@@ -8,9 +8,8 @@ require_once __DIR__ . '/batch-record.php';
 header('Content-Type: application/json');
 
 $status = isset($_GET['status']) ? trim($_GET['status']) : '';
-if (!in_array($status, ['in_progress', 'completed'], true)) {
-    echo json_encode(['success' => true, 'records' => []]);
-    exit;
+if ($status === '' || !in_array($status, ['in_progress', 'completed'], true)) {
+    $status = 'in_progress';
 }
 
 $filterByCreator = isset($_GET['createdBy']) ? trim($_GET['createdBy']) : '';
