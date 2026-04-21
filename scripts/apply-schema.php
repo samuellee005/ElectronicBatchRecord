@@ -42,6 +42,7 @@ if ($doReset) {
             'ebr_batch_records',
             'ebr_forms',
             'ebr_active_users',
+            'ebr_pdf_templates',
         ] as $table) {
             $pdo->exec('DROP TABLE IF EXISTS ' . $table . ' CASCADE');
         }

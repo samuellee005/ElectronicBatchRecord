@@ -7,6 +7,8 @@ if (defined('EBR_PDF_BATCH_EXPORT_LOADED')) {
 }
 define('EBR_PDF_BATCH_EXPORT_LOADED', true);
 
+require_once __DIR__ . '/db-pdf-templates.php';
+
 function ebr_get_effective_value($entry) {
     if ($entry === null || !is_array($entry)) {
         return $entry;
@@ -755,8 +757,10 @@ function ebr_build_batch_pdf_binary($form, $formData, $batch) {
     require_once __DIR__ . '/../vendor/autoload.php';
     require_once __DIR__ . '/EbrFpdi.php';
 
-    $templatePath = UPLOAD_DIR . basename($form['pdfFile']);
-    if (!file_exists($templatePath) || strtolower(pathinfo($templatePath, PATHINFO_EXTENSION)) !== 'pdf') {
+    $templatePath = null;
+    try {
+    $templatePath = ebr_db_pdf_template_materialize_to_temp((string) ($form['pdfFile'] ?? ''));
+    if ($templatePath === null || !is_readable($templatePath)) {
         throw new Exception('Template PDF not found');
     }
 
@@ -870,4 +874,7 @@ function ebr_build_batch_pdf_binary($form, $formData, $batch) {
     }
 
     return $pdf->Output('S');
+    } finally {
+        ebr_db_pdf_template_unlink_temp($templatePath);
+    }
 }

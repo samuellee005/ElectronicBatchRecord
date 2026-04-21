@@ -3,7 +3,7 @@
  * Configuration file for PDF Background Template Application
  */
 
-// Directory where uploaded PDFs will be stored
+// Legacy disk path (optional); template bytes are stored in PostgreSQL (ebr_pdf_templates). GET /uploads/*.pdf is served from the DB via router.php.
 define('UPLOAD_DIR', __DIR__ . '/uploads/');
 
 // Directory where form configurations will be stored
@@ -51,7 +51,7 @@ if (!file_exists(BATCH_RECORDS_DIR)) {
     file_put_contents(BATCH_RECORDS_DIR . '.gitkeep', '');
 }
 
-// Active users for collaborator dropdowns (JSON array)
+// Legacy path: list-active-users migrates this file into ebr_active_users once if the table is empty
 define('ACTIVE_USERS_FILE', DATA_DIR . 'active-users.json');
 
 require_once __DIR__ . '/includes/db.php';

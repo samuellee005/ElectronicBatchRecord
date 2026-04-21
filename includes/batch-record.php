@@ -57,27 +57,6 @@ function ebr_batch_id_initials(?string $displayName): string
 }
 
 /**
- * Highest numeric suffix for IDs matching BR-{year}-{initials}-{NNNNN} in the batch-records dir.
- */
-function ebr_max_batch_sequence_for_year_initials(string $dir, string $year, string $initials): int
-{
-    $prefix = 'BR-' . $year . '-' . $initials . '-';
-    $pattern = $dir . $prefix . '*.json';
-    $max = 0;
-    foreach (glob($pattern) ?: [] as $path) {
-        $base = basename($path, '.json');
-        if (preg_match('/^' . preg_quote($prefix, '/') . '(\d+)$/', $base, $m)) {
-            $n = (int) $m[1];
-            if ($n > $max) {
-                $max = $n;
-            }
-        }
-    }
-
-    return $max;
-}
-
-/**
  * New unique batch identifier (filename stem = this value).
  * Nomenclature: BR-{YEAR}-{INITIALS}-{SEQ} (e.g. BR-2026-SL-00001). SEQ is 5 digits, first batch
  * for that user (initials) in that calendar year is 00001, then 00002, … (per initials+year).

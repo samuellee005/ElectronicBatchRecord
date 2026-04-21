@@ -1,8 +1,9 @@
 <?php
 /**
- * Merge multiple PDF files into one
+ * Merge multiple PDF files into one; inputs and output stored in PostgreSQL (ebr_pdf_templates).
  */
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/db-pdf-templates.php';
 
 header('Content-Type: application/json');
 
@@ -25,69 +26,74 @@ if (count($pdfFiles) < 1) {
     exit;
 }
 
-// If only one PDF, just return it (no merging needed)
+$tempPaths = [];
+$cleanup = static function () use (&$tempPaths) {
+    foreach ($tempPaths as $p) {
+        ebr_db_pdf_template_unlink_temp($p);
+    }
+};
+
 if (count($pdfFiles) === 1) {
-    $singlePdf = basename($pdfFiles[0]);
-    $singlePath = UPLOAD_DIR . $singlePdf;
-    
-    if (file_exists($singlePath) && strtolower(pathinfo($singlePath, PATHINFO_EXTENSION)) === 'pdf') {
-        echo json_encode([
-            'success' => true,
-            'message' => 'Single PDF file (no merging needed)',
-            'filename' => $singlePdf,
-            'method' => 'single'
-        ]);
-        exit;
-    } else {
+    $singlePdf = basename((string) $pdfFiles[0]);
+    if (!ebr_db_pdf_template_exists($singlePdf)) {
         echo json_encode(['success' => false, 'message' => "PDF file not found: {$singlePdf}"]);
         exit;
     }
+    echo json_encode([
+        'success' => true,
+        'message' => 'Single PDF file (no merging needed)',
+        'filename' => $singlePdf,
+        'method' => 'single',
+    ]);
+    exit;
 }
 
-// Validate all PDF files exist
 $validFiles = [];
 foreach ($pdfFiles as $pdfFile) {
-    $filename = basename($pdfFile);
-    $filePath = UPLOAD_DIR . $filename;
-    
-    if (file_exists($filePath) && strtolower(pathinfo($filePath, PATHINFO_EXTENSION)) === 'pdf') {
-        $validFiles[] = $filePath;
-    } else {
+    $filename = basename((string) $pdfFile);
+    $tmp = ebr_db_pdf_template_materialize_to_temp($filename);
+    if ($tmp === null || !is_readable($tmp)) {
+        $cleanup();
         echo json_encode(['success' => false, 'message' => "PDF file not found: {$filename}"]);
         exit;
     }
+    $tempPaths[] = $tmp;
+    $validFiles[] = $tmp;
 }
 
 if (count($validFiles) < 2) {
+    $cleanup();
     echo json_encode(['success' => false, 'message' => 'Not enough valid PDF files']);
     exit;
 }
 
-// Try to merge PDFs using Ghostscript (if available)
 $mergedFilename = 'merged_' . time() . '_' . uniqid() . '.pdf';
-$mergedPath = UPLOAD_DIR . $mergedFilename;
+$mergedTmp = tempnam(sys_get_temp_dir(), 'ebrmergeout');
+if ($mergedTmp === false) {
+    $cleanup();
+    echo json_encode(['success' => false, 'message' => 'Could not create temp file for merge output']);
+    exit;
+}
+$mergedPath = $mergedTmp . '.pdf';
+if (!@rename($mergedTmp, $mergedPath)) {
+    $mergedPath = $mergedTmp;
+}
+$tempPaths[] = $mergedPath;
 
-// Method 1: Try Ghostscript (gs command) - most reliable
-// Try common Ghostscript command paths in order of preference
 $gsPaths = ['gs', '/usr/bin/gs', '/usr/local/bin/gs'];
 $gsCommand = null;
-
 foreach ($gsPaths as $gsPath) {
-    // Check if command exists and is executable
-    $testCommand = "command -v " . escapeshellarg($gsPath) . " 2>/dev/null";
+    $testCommand = 'command -v ' . escapeshellarg($gsPath) . ' 2>/dev/null';
     exec($testCommand, $testOutput, $testReturn);
     if ($testReturn === 0 && !empty($testOutput)) {
         $gsCommand = trim($testOutput[0]);
         break;
     }
-    // Also check if file exists directly
     if (file_exists($gsPath) && is_executable($gsPath)) {
         $gsCommand = $gsPath;
         break;
     }
 }
-
-// Fallback: use 'gs' if nothing found (will work if in PATH)
 if (!$gsCommand) {
     $gsCommand = 'gs';
 }
@@ -96,77 +102,87 @@ $gsCommandFull = $gsCommand . ' -dBATCH -dNOPAUSE -q -sDEVICE=pdfwrite -sOutputF
 exec($gsCommandFull . ' 2>&1', $output, $returnCode);
 
 if ($returnCode === 0 && file_exists($mergedPath) && filesize($mergedPath) > 0) {
+    $bin = (string) file_get_contents($mergedPath);
+    $cleanup();
+    try {
+        ebr_db_pdf_template_insert('tpl_' . bin2hex(random_bytes(8)), $mergedFilename, $mergedFilename, $bin);
+    } catch (Throwable $e) {
+        echo json_encode(['success' => false, 'message' => 'Merge succeeded but failed to store merged PDF in database.']);
+        exit;
+    }
     echo json_encode([
         'success' => true,
         'message' => 'PDFs merged successfully using Ghostscript',
         'filename' => $mergedFilename,
         'method' => 'ghostscript',
-        'gsPath' => $gsCommand
+        'gsPath' => $gsCommand,
     ]);
     exit;
-} else {
-    // Log the error for debugging
-    error_log("Ghostscript merge failed. Command: $gsCommandFull, Return code: $returnCode, Output: " . implode(' ', $output));
 }
 
-// Method 2: Try PDFtk (if available)
-$pdftkCommand = 'pdftk ' . implode(' ', array_map('escapeshellarg', $validFiles)) . ' cat output ' . escapeshellarg($mergedPath);
-exec($pdftkCommand . ' 2>&1', $output, $returnCode);
+error_log('Ghostscript merge failed. Command: ' . $gsCommandFull . ', Return code: ' . $returnCode);
 
-if ($returnCode === 0 && file_exists($mergedPath) && filesize($mergedPath) > 0) {
+$pdftkCommand = 'pdftk ' . implode(' ', array_map('escapeshellarg', $validFiles)) . ' cat output ' . escapeshellarg($mergedPath);
+exec($pdftkCommand . ' 2>&1', $output2, $returnCode2);
+
+if ($returnCode2 === 0 && file_exists($mergedPath) && filesize($mergedPath) > 0) {
+    $bin = (string) file_get_contents($mergedPath);
+    $cleanup();
+    try {
+        ebr_db_pdf_template_insert('tpl_' . bin2hex(random_bytes(8)), $mergedFilename, $mergedFilename, $bin);
+    } catch (Throwable $e) {
+        echo json_encode(['success' => false, 'message' => 'Merge succeeded but failed to store merged PDF in database.']);
+        exit;
+    }
     echo json_encode([
         'success' => true,
         'message' => 'PDFs merged successfully',
         'filename' => $mergedFilename,
-        'method' => 'pdftk'
+        'method' => 'pdftk',
     ]);
     exit;
 }
 
-// Method 3: Try using FPDI if available via Composer
 if (file_exists(__DIR__ . '/../vendor/autoload.php')) {
     require_once __DIR__ . '/../vendor/autoload.php';
-    
     try {
         $pdf = new \setasign\Fpdi\Fpdi();
-        
         foreach ($validFiles as $file) {
             $pageCount = $pdf->setSourceFile($file);
-            
             for ($pageNo = 1; $pageNo <= $pageCount; $pageNo++) {
                 $tplId = $pdf->importPage($pageNo);
                 $size = $pdf->getTemplateSize($tplId);
-                
-                if ($size['width'] > $size['height']) {
-                    $orientation = 'L';
-                } else {
-                    $orientation = 'P';
-                }
-                
+                $orientation = ($size['width'] > $size['height']) ? 'L' : 'P';
                 $pdf->AddPage($orientation, [$size['width'], $size['height']]);
                 $pdf->useTemplate($tplId);
             }
         }
-        
         $pdf->Output('F', $mergedPath);
-        
         if (file_exists($mergedPath) && filesize($mergedPath) > 0) {
+            $bin = (string) file_get_contents($mergedPath);
+            $cleanup();
+            try {
+                ebr_db_pdf_template_insert('tpl_' . bin2hex(random_bytes(8)), $mergedFilename, $mergedFilename, $bin);
+            } catch (Throwable $e) {
+                echo json_encode(['success' => false, 'message' => 'Merge succeeded but failed to store merged PDF in database.']);
+                exit;
+            }
             echo json_encode([
                 'success' => true,
                 'message' => 'PDFs merged successfully',
                 'filename' => $mergedFilename,
-                'method' => 'fpdi'
+                'method' => 'fpdi',
             ]);
             exit;
         }
     } catch (Exception $e) {
-        // Continue to error message
+        // fall through
     }
 }
 
-// If all methods failed
+$cleanup();
 $errorDetails = '';
-if ($output) {
+if (!empty($output)) {
     $errorDetails = ' Details: ' . implode(' ', array_slice($output, 0, 3));
 }
 
@@ -174,5 +190,5 @@ echo json_encode([
     'success' => false,
     'message' => 'Failed to merge PDFs. Please ensure Ghostscript (gs), PDFtk, or FPDI library is installed.' . $errorDetails,
     'error' => 'No PDF merging tool available',
-    'suggestion' => 'On Linux, install Ghostscript with: sudo apt-get install ghostscript (or: sudo yum install ghostscript)'
+    'suggestion' => 'On Linux, install Ghostscript with: sudo apt-get install ghostscript (or: sudo yum install ghostscript)',
 ]);

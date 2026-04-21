@@ -1,5 +1,11 @@
 <?php
-$uri = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
+$uri = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
+
+if (preg_match('#^/uploads/[^/]+\.pdf$#i', $uri)) {
+    require __DIR__ . '/includes/serve-upload-pdf.php';
+    return true;
+}
+
 if ($uri !== '/' && file_exists(__DIR__ . $uri) && !is_dir(__DIR__ . $uri)) {
     return false;
 }

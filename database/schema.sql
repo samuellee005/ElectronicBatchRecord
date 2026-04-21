@@ -1,4 +1,17 @@
 ---STATEMENT---
+CREATE TABLE IF NOT EXISTS ebr_pdf_templates (
+    id TEXT PRIMARY KEY,
+    filename TEXT NOT NULL UNIQUE,
+    original_name TEXT NOT NULL DEFAULT '',
+    content BYTEA NOT NULL,
+    file_size INTEGER NOT NULL,
+    uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+---STATEMENT---
+CREATE INDEX IF NOT EXISTS idx_ebr_pdf_templates_uploaded ON ebr_pdf_templates (uploaded_at DESC);
+
+---STATEMENT---
 CREATE TABLE IF NOT EXISTS ebr_forms (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,

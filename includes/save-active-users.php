@@ -1,8 +1,9 @@
 <?php
 /**
- * Replace full active users list (admin / settings UI).
+ * Replace full active users list (PostgreSQL ebr_active_users).
  */
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/db-active-users.php';
 
 header('Content-Type: application/json');
 
@@ -41,7 +42,9 @@ foreach ($input['users'] as $u) {
     ];
 }
 
-if (!file_put_contents(ACTIVE_USERS_FILE, json_encode($sanitized, JSON_PRETTY_PRINT))) {
+try {
+    ebr_db_active_users_replace_all($sanitized);
+} catch (Throwable $e) {
     echo json_encode(['success' => false, 'message' => 'Failed to save']);
     exit;
 }

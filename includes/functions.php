@@ -4,6 +4,7 @@
  */
 
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/db-pdf-templates.php';
 
 /**
  * True if the file content looks like a PDF (Portable Document Format).
@@ -69,60 +70,54 @@ function handleFileUpload($file) {
         ];
     }
 
-    // Generate unique filename
     $originalName = pathinfo($file['name'], PATHINFO_FILENAME);
     $sanitizedName = preg_replace('/[^a-zA-Z0-9_-]/', '_', $originalName);
     $uniqueName = $sanitizedName . '_' . time() . '.pdf';
-    $targetPath = UPLOAD_DIR . $uniqueName;
 
-    // Move uploaded file
-    if (move_uploaded_file($file['tmp_name'], $targetPath)) {
-        return [
-            'success' => true,
-            'message' => 'PDF uploaded successfully!',
-            'filename' => $uniqueName
-        ];
-    } else {
+    $binary = @file_get_contents($file['tmp_name']);
+    if ($binary === false || $binary === '') {
         return [
             'success' => false,
-            'message' => 'Failed to save file. Please check directory permissions.'
+            'message' => 'Could not read uploaded file.',
         ];
     }
+
+    try {
+        ebr_db_pdf_template_insert('tpl_' . bin2hex(random_bytes(8)), $uniqueName, (string) ($file['name'] ?? ''), $binary);
+    } catch (Throwable $e) {
+        return [
+            'success' => false,
+            'message' => 'Failed to store template in database.',
+        ];
+    }
+
+    return [
+        'success' => true,
+        'message' => 'PDF uploaded successfully!',
+        'filename' => $uniqueName,
+    ];
 }
 
 /**
  * Get list of uploaded PDF templates
  */
-function getUploadedTemplates() {
+function getUploadedTemplates()
+{
+    try {
+        $rows = ebr_db_pdf_template_list_for_api();
+    } catch (Throwable $e) {
+        return [];
+    }
+
     $templates = [];
-
-    if (!is_dir(UPLOAD_DIR)) {
-        return $templates;
+    foreach ($rows as $r) {
+        $templates[] = [
+            'name' => $r['name'],
+            'display_name' => $r['display_name'],
+            'size' => $r['size'],
+            'uploaded' => $r['uploaded'],
+        ];
     }
-
-    $files = scandir(UPLOAD_DIR);
-
-    foreach ($files as $file) {
-        if ($file === '.' || $file === '..' || $file === '.gitkeep') {
-            continue;
-        }
-
-        $filePath = UPLOAD_DIR . $file;
-
-        if (is_file($filePath) && strtolower(pathinfo($file, PATHINFO_EXTENSION)) === 'pdf') {
-            $templates[] = [
-                'name' => $file,
-                'display_name' => pathinfo($file, PATHINFO_FILENAME),
-                'size' => filesize($filePath),
-                'uploaded' => filemtime($filePath)
-            ];
-        }
-    }
-
-    // Sort by upload time (newest first)
-    usort($templates, function($a, $b) {
-        return $b['uploaded'] - $a['uploaded'];
-    });
 
     return $templates;
 }
@@ -145,18 +140,20 @@ function formatFileSize($bytes) {
 /**
  * Validate PDF file exists and is accessible
  */
-function validatePdfFile($filename) {
-    // Sanitize filename to prevent directory traversal
-    $filename = basename($filename);
-    $filePath = UPLOAD_DIR . $filename;
-
-    if (!file_exists($filePath)) {
+function validatePdfFile($filename)
+{
+    $filename = basename((string) $filename);
+    if (strtolower(pathinfo($filename, PATHINFO_EXTENSION)) !== 'pdf') {
         return false;
     }
-
-    if (strtolower(pathinfo($filePath, PATHINFO_EXTENSION)) !== 'pdf') {
+    try {
+        if (ebr_db_pdf_template_exists($filename)) {
+            return true;
+        }
+    } catch (Throwable $e) {
         return false;
     }
+    $legacy = UPLOAD_DIR . $filename;
 
-    return $filePath;
+    return file_exists($legacy) ? $legacy : false;
 }
