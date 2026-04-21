@@ -21,9 +21,18 @@ if (!$data) {
     exit;
 }
 
-if (empty($data['formId']) || empty($data['data'])) {
+if (empty($data['formId']) || !array_key_exists('data', $data)) {
     echo json_encode(['success' => false, 'message' => 'Missing required fields']);
     exit;
+}
+
+// Do not use empty($data['data']) — JSON {} becomes [] in PHP and is incorrectly "empty".
+$dataPayload = $data['data'];
+if ($dataPayload === null) {
+    $dataPayload = [];
+}
+if (!is_array($dataPayload)) {
+    $dataPayload = [];
 }
 
 $sanitizedFormId = preg_replace('/[^a-zA-Z0-9_-]/', '_', $data['formId']);
@@ -41,7 +50,7 @@ $dataEntry = [
     'formName' => $data['formName'] ?? '',
     'pdfFile' => $data['pdfFile'] ?? '',
     'batchId' => $batchId,
-    'data' => $data['data'],
+    'data' => $dataPayload,
     'stageCompletion' => $data['stageCompletion'] ?? [],
     'stages' => $data['stages'] ?? [],
     'savedAt' => $data['savedAt'] ?? date('c'),
@@ -51,7 +60,13 @@ $dataEntry = [
 try {
     ebr_db_data_entry_insert($dataEntry);
 } catch (Throwable $e) {
-    echo json_encode(['success' => false, 'message' => 'Failed to save data to database.']);
+    error_log('ebr save-data: ' . $e->getMessage());
+    $show = getenv('EBR_SHOW_UPLOAD_ERRORS');
+    if ($show !== false && $show !== '' && strtolower((string) $show) !== '0' && strtolower((string) $show) !== 'false') {
+        echo json_encode(['success' => false, 'message' => 'Failed to save data to database.', 'detail' => $e->getMessage()]);
+    } else {
+        echo json_encode(['success' => false, 'message' => 'Failed to save data to database.']);
+    }
     exit;
 }
 

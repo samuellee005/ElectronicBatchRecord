@@ -40,37 +40,48 @@ function ebr_db_data_saved_at_param($v): string
 }
 
 /**
+ * Normalize JSON/JSONB cell from PDO (string, array, or stream resource).
+ *
+ * @return array<string, mixed>
+ */
+function ebr_db_data_jsonb_cell_to_array($v): array
+{
+    if ($v === null) {
+        return [];
+    }
+    if (is_array($v)) {
+        return $v;
+    }
+    if (is_resource($v)) {
+        $v = stream_get_contents($v);
+        if ($v === false) {
+            return [];
+        }
+    }
+    if (is_string($v)) {
+        $d = json_decode($v, true);
+        if (is_array($d)) {
+            return $d;
+        }
+
+        return [];
+    }
+
+    return [];
+}
+
+/**
  * @param array<string, mixed> $row
  * @return array<string, mixed>
  */
 function ebr_db_data_entry_row_to_api(array $row): array
 {
     $json = static function ($key) use ($row) {
-        $v = $row[$key] ?? null;
-        if (is_array($v)) {
-            return $v;
-        }
-        if (is_string($v)) {
-            $d = json_decode($v, true);
-
-            return is_array($d) ? $d : [];
-        }
-
-        return [];
+        return ebr_db_data_jsonb_cell_to_array($row[$key] ?? null);
     };
 
     $obj = static function ($key) use ($row) {
-        $v = $row[$key] ?? null;
-        if (is_array($v)) {
-            return $v;
-        }
-        if (is_string($v)) {
-            $d = json_decode($v, true);
-
-            return is_array($d) ? $d : [];
-        }
-
-        return [];
+        return ebr_db_data_jsonb_cell_to_array($row[$key] ?? null);
     };
 
     return [
