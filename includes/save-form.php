@@ -334,7 +334,13 @@ try {
         ebr_db_forms_insert_api($formConfig, $storageFilename);
     }
 } catch (Throwable $e) {
-    echo json_encode(['success' => false, 'message' => 'Failed to save form to database.']);
+    error_log('ebr save-form: ' . $e->getMessage());
+    $show = getenv('EBR_SHOW_UPLOAD_ERRORS');
+    if ($show !== false && $show !== '' && strtolower((string) $show) !== '0' && strtolower((string) $show) !== 'false') {
+        echo json_encode(['success' => false, 'message' => 'Failed to save form to database.', 'detail' => $e->getMessage()]);
+    } else {
+        echo json_encode(['success' => false, 'message' => 'Failed to save form to database.']);
+    }
     exit;
 }
 

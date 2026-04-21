@@ -9,6 +9,31 @@ declare(strict_types=1);
 require_once __DIR__ . '/db.php';
 
 /**
+ * JSON for jsonb columns; never returns false (UTF-8 safe for PostgreSQL).
+ *
+ * @param mixed $data
+ */
+function ebr_db_forms_json_enc($data): string
+{
+    $flags = JSON_UNESCAPED_UNICODE;
+    if (defined('JSON_INVALID_UTF8_SUBSTITUTE')) {
+        $flags |= JSON_INVALID_UTF8_SUBSTITUTE;
+    }
+    $j = json_encode($data, $flags);
+    if ($j === false) {
+        throw new RuntimeException('JSON encode failed for form payload');
+    }
+
+    return $j;
+}
+
+/** PostgreSQL boolean text for PDO (PHP false must not become ""). */
+function ebr_db_pg_bool_param(bool $v): string
+{
+    return $v ? 't' : 'f';
+}
+
+/**
  * @param array<string, mixed> $row
  * @return array<string, mixed>
  */
@@ -98,12 +123,12 @@ SQL;
         'name' => $form['name'],
         'description' => $form['description'] ?? '',
         'pdf_file' => $form['pdfFile'] ?? '',
-        'fields' => json_encode($form['fields'] ?? [], JSON_UNESCAPED_UNICODE),
+        'fields' => ebr_db_forms_json_enc($form['fields'] ?? []),
         'version' => $form['version'],
-        'is_latest' => !empty($form['isLatest']),
-        'source_form_ids' => json_encode($form['sourceFormIds'] ?? [], JSON_UNESCAPED_UNICODE),
-        'is_combined' => !empty($form['isCombined']),
-        'audit_trail' => json_encode($form['auditTrail'] ?? [], JSON_UNESCAPED_UNICODE),
+        'is_latest' => ebr_db_pg_bool_param(!empty($form['isLatest'])),
+        'source_form_ids' => ebr_db_forms_json_enc($form['sourceFormIds'] ?? []),
+        'is_combined' => ebr_db_pg_bool_param(!empty($form['isCombined'])),
+        'audit_trail' => ebr_db_forms_json_enc($form['auditTrail'] ?? []),
         'created_at' => $form['createdAt'],
         'updated_at' => $form['updatedAt'],
         'created_by' => $form['createdBy'] ?? null,
@@ -144,12 +169,12 @@ SQL;
         'name' => $form['name'],
         'description' => $form['description'] ?? '',
         'pdf_file' => $form['pdfFile'] ?? '',
-        'fields' => json_encode($form['fields'] ?? [], JSON_UNESCAPED_UNICODE),
+        'fields' => ebr_db_forms_json_enc($form['fields'] ?? []),
         'version' => $form['version'],
-        'is_latest' => !empty($form['isLatest']),
-        'source_form_ids' => json_encode($form['sourceFormIds'] ?? [], JSON_UNESCAPED_UNICODE),
-        'is_combined' => !empty($form['isCombined']),
-        'audit_trail' => json_encode($form['auditTrail'] ?? [], JSON_UNESCAPED_UNICODE),
+        'is_latest' => ebr_db_pg_bool_param(!empty($form['isLatest'])),
+        'source_form_ids' => ebr_db_forms_json_enc($form['sourceFormIds'] ?? []),
+        'is_combined' => ebr_db_pg_bool_param(!empty($form['isCombined'])),
+        'audit_trail' => ebr_db_forms_json_enc($form['auditTrail'] ?? []),
         'created_at' => $form['createdAt'],
         'updated_at' => $form['updatedAt'],
         'created_by' => $form['createdBy'] ?? null,
