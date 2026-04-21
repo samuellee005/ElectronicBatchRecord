@@ -34,6 +34,34 @@ function ebr_db_pg_bool_param(bool $v): string
 }
 
 /**
+ * TIMESTAMPTZ NOT NULL — empty string is invalid; avoid silent INSERT/UPDATE failures.
+ */
+function ebr_db_forms_ts_param($v): string
+{
+    if ($v instanceof \DateTimeInterface) {
+        return $v->format('c');
+    }
+    $s = trim((string) $v);
+    if ($s === '') {
+        return date('c');
+    }
+
+    return $s;
+}
+
+/** NUMERIC(10,2) — coerce API float/string to a safe value. */
+function ebr_db_forms_version_param($v): string
+{
+    $n = is_numeric($v) ? (float) $v : 1.0;
+    if (!is_finite($n)) {
+        $n = 1.0;
+    }
+    $n = max(-99999999.99, min(99999999.99, $n));
+
+    return number_format($n, 2, '.', '');
+}
+
+/**
  * @param array<string, mixed> $row
  * @return array<string, mixed>
  */
@@ -124,13 +152,13 @@ SQL;
         'description' => $form['description'] ?? '',
         'pdf_file' => $form['pdfFile'] ?? '',
         'fields' => ebr_db_forms_json_enc($form['fields'] ?? []),
-        'version' => $form['version'],
+        'version' => ebr_db_forms_version_param($form['version'] ?? 1),
         'is_latest' => ebr_db_pg_bool_param(!empty($form['isLatest'])),
         'source_form_ids' => ebr_db_forms_json_enc($form['sourceFormIds'] ?? []),
         'is_combined' => ebr_db_pg_bool_param(!empty($form['isCombined'])),
         'audit_trail' => ebr_db_forms_json_enc($form['auditTrail'] ?? []),
-        'created_at' => $form['createdAt'],
-        'updated_at' => $form['updatedAt'],
+        'created_at' => ebr_db_forms_ts_param($form['createdAt'] ?? null),
+        'updated_at' => ebr_db_forms_ts_param($form['updatedAt'] ?? null),
         'created_by' => $form['createdBy'] ?? null,
         'updated_by' => $form['updatedBy'] ?? null,
         'storage_filename' => $storageFilename,
@@ -170,13 +198,13 @@ SQL;
         'description' => $form['description'] ?? '',
         'pdf_file' => $form['pdfFile'] ?? '',
         'fields' => ebr_db_forms_json_enc($form['fields'] ?? []),
-        'version' => $form['version'],
+        'version' => ebr_db_forms_version_param($form['version'] ?? 1),
         'is_latest' => ebr_db_pg_bool_param(!empty($form['isLatest'])),
         'source_form_ids' => ebr_db_forms_json_enc($form['sourceFormIds'] ?? []),
         'is_combined' => ebr_db_pg_bool_param(!empty($form['isCombined'])),
         'audit_trail' => ebr_db_forms_json_enc($form['auditTrail'] ?? []),
-        'created_at' => $form['createdAt'],
-        'updated_at' => $form['updatedAt'],
+        'created_at' => ebr_db_forms_ts_param($form['createdAt'] ?? null),
+        'updated_at' => ebr_db_forms_ts_param($form['updatedAt'] ?? null),
         'created_by' => $form['createdBy'] ?? null,
         'updated_by' => $form['updatedBy'] ?? null,
         'storage_filename' => $storageFilename,
