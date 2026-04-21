@@ -41,6 +41,7 @@ if ($doReset) {
             'ebr_data_entries',
             'ebr_batch_records',
             'ebr_forms',
+            'ebr_user_preferences',
             'ebr_active_users',
             'ebr_pdf_templates',
         ] as $table) {

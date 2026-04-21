@@ -11,7 +11,7 @@ require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/../includes/db.php';
 
 $pdo = ebr_pg_pdo();
-foreach (['ebr_data_entries', 'ebr_batch_records', 'ebr_forms', 'ebr_active_users', 'ebr_pdf_templates'] as $table) {
+foreach (['ebr_data_entries', 'ebr_batch_records', 'ebr_forms', 'ebr_user_preferences', 'ebr_active_users', 'ebr_pdf_templates'] as $table) {
     $pdo->exec('DROP TABLE IF EXISTS ' . $table . ' CASCADE');
 }
 echo 'Dropped ebr_* tables on database ' . ebr_resolve_pg_database() . ".\n";

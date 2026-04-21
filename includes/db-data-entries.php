@@ -7,6 +7,7 @@ declare(strict_types=1);
  */
 
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/../config.php';
 
 /**
  * @param mixed $data
@@ -195,34 +196,36 @@ function ebr_db_entry_resolve_for_batch(array $batch, string $batchId): array
         $formData = $entryRaw['data'];
     }
 
-    if (!$entryRaw && !empty($batch['lastEntryFilename'])) {
-        $entryPath = DATA_DIR . $batch['lastEntryFilename'];
-        if (file_exists($entryPath)) {
-            $entryRaw = json_decode(file_get_contents($entryPath), true);
-            if ($entryRaw && isset($entryRaw['data'])) {
-                $formData = $entryRaw['data'];
+    if (ebr_legacy_json_fallback_enabled()) {
+        if (!$entryRaw && !empty($batch['lastEntryFilename'])) {
+            $entryPath = DATA_DIR . $batch['lastEntryFilename'];
+            if (file_exists($entryPath)) {
+                $entryRaw = json_decode(file_get_contents($entryPath), true);
+                if ($entryRaw && isset($entryRaw['data'])) {
+                    $formData = $entryRaw['data'];
+                }
             }
         }
-    }
 
-    if (!$entryRaw) {
-        $latest = null;
-        foreach ((glob(DATA_DIR . '*.json') ?: []) as $f) {
-            if (strpos($f, 'batch-records') !== false) {
-                continue;
+        if (!$entryRaw) {
+            $latest = null;
+            foreach ((glob(DATA_DIR . '*.json') ?: []) as $f) {
+                if (strpos($f, 'batch-records') !== false) {
+                    continue;
+                }
+                $data = @json_decode(file_get_contents($f), true);
+                if (!$data || ($data['batchId'] ?? '') !== $batchId) {
+                    continue;
+                }
+                $savedAt = $data['savedAt'] ?? '';
+                if ($latest === null || strcmp($savedAt, $latest['savedAt'] ?? '') > 0) {
+                    $latest = $data;
+                }
             }
-            $data = @json_decode(file_get_contents($f), true);
-            if (!$data || ($data['batchId'] ?? '') !== $batchId) {
-                continue;
+            if ($latest) {
+                $entryRaw = $latest;
+                $formData = $latest['data'] ?? [];
             }
-            $savedAt = $data['savedAt'] ?? '';
-            if ($latest === null || strcmp($savedAt, $latest['savedAt'] ?? '') > 0) {
-                $latest = $data;
-            }
-        }
-        if ($latest) {
-            $entryRaw = $latest;
-            $formData = $latest['data'] ?? [];
         }
     }
 

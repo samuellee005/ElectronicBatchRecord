@@ -100,3 +100,13 @@ CREATE TABLE IF NOT EXISTS ebr_active_users (
 
 ---STATEMENT---
 CREATE INDEX IF NOT EXISTS idx_ebr_active_users_active ON ebr_active_users (active);
+
+---STATEMENT---
+CREATE TABLE IF NOT EXISTS ebr_user_preferences (
+    user_key TEXT PRIMARY KEY,
+    prefs JSONB NOT NULL DEFAULT '{}'::jsonb,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+---STATEMENT---
+CREATE INDEX IF NOT EXISTS idx_ebr_user_preferences_updated ON ebr_user_preferences (updated_at DESC);

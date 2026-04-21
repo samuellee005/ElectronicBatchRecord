@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { listBatchRecords, listForms, getDownloadBatchPdfUrl } from '../api/client'
+import { useUserPrefs } from '../context/UserPrefsContext'
 import './BatchRecord.css'
 
 const filterTitles = { 'in-progress': 'In Progress', 'completed': 'Completed', 'commonly-used': 'Commonly Used' }
@@ -24,15 +25,8 @@ function formatBatchTableDate(d) {
   })
 }
 
-function getFavorites() {
-  try { return JSON.parse(localStorage.getItem('ebrFavorites') || '[]') } catch { return [] }
-}
-
-function getRecentlyUsed() {
-  try { return JSON.parse(localStorage.getItem('ebrRecentlyUsed') || '[]') } catch { return [] }
-}
-
 export default function BatchRecord() {
+  const { prefs } = useUserPrefs()
   const [searchParams] = useSearchParams()
   const filter = searchParams.get('filter') || 'in-progress'
   const [records, setRecords] = useState([])
@@ -82,9 +76,15 @@ export default function BatchRecord() {
     setOpenActionsId((prev) => (prev === recordId ? null : recordId))
   }, [])
 
-  const favorites = getFavorites()
+  const favorites = useMemo(
+    () => (Array.isArray(prefs.ebrFavorites) ? prefs.ebrFavorites : []),
+    [prefs.ebrFavorites],
+  )
   const favForms = forms.filter((f) => favorites.includes(f.id))
-  const recentlyUsed = getRecentlyUsed()
+  const recentlyUsed = useMemo(
+    () => (Array.isArray(prefs.ebrRecentlyUsed) ? prefs.ebrRecentlyUsed : []),
+    [prefs.ebrRecentlyUsed],
+  )
 
   const searchFavLower = searchFav.trim().toLowerCase()
   const filteredFav = searchFavLower

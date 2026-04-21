@@ -60,10 +60,24 @@ $dataEntry = [
     'filename' => $filename,
 ];
 
+if (ebr_debug_save_enabled()) {
+    $dataKeys = is_array($dataPayload) ? array_keys($dataPayload) : [];
+    error_log(
+        'ebr save-data [debug]: insert entry_id=' . $entryId
+        . ' form_id=' . ($data['formId'] ?? '')
+        . ' batch_id=' . ($batchId ?? 'null')
+        . ' data_fields=' . count($dataKeys)
+        . ' sample_keys=' . implode(',', array_slice($dataKeys, 0, 12))
+    );
+}
+
 try {
     ebr_db_data_entry_insert($dataEntry);
 } catch (Throwable $e) {
     error_log('ebr save-data: ' . $e->getMessage());
+    if (ebr_debug_save_enabled()) {
+        error_log('ebr save-data [debug] trace: ' . $e->getFile() . ':' . $e->getLine());
+    }
     http_response_code(500);
     $msg = 'Failed to save data to database.';
     $em = $e->getMessage();
@@ -85,13 +99,29 @@ if ($batchId !== null && $batchId !== '') {
     try {
         ebr_db_batch_touch_last_entry($batchId, $entryId, $filename);
     } catch (Throwable $e) {
+        if (ebr_debug_save_enabled()) {
+            error_log('ebr save-data [debug]: batch_touch_failed batch_id=' . $batchId . ' ' . $e->getMessage());
+        }
         // Non-fatal
     }
 }
 
-echo json_encode([
+$out = [
     'success' => true,
     'message' => 'Data saved successfully',
     'entryId' => $entryId,
     'filename' => $filename,
-]);
+];
+if (ebr_debug_save_enabled()) {
+    $out['debugInfo'] = [
+        'step' => 'saved',
+        'entryId' => $entryId,
+        'formId' => $data['formId'],
+        'batchId' => $batchId,
+        'dataFieldCount' => is_array($dataPayload) ? count($dataPayload) : 0,
+        'storageFilename' => $filename,
+    ];
+    error_log('ebr save-data [debug]: success entry_id=' . $entryId . ' batch_touch=' . ($batchId !== null && $batchId !== '' ? 'yes' : 'skipped'));
+}
+
+echo json_encode($out);

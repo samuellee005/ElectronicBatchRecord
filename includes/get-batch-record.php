@@ -39,7 +39,7 @@ try {
     $foundForm = null;
 }
 
-if (!$foundForm && is_dir(FORMS_DIR)) {
+if (!$foundForm && ebr_legacy_json_fallback_enabled() && is_dir(FORMS_DIR)) {
     foreach (glob(FORMS_DIR . '/*.json') ?: [] as $formFile) {
         $fd = json_decode(file_get_contents($formFile), true);
         if (!$fd || ($fd['id'] ?? '') !== $formId) {

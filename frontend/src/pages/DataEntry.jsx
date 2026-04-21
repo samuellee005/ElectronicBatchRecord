@@ -9,10 +9,12 @@ import {
   saveData,
   createBatchRecord,
   updateBatchRecord,
+  isEbrApiDebug,
   getBatchRecord,
   exportBatchPdfBlob,
   listActiveUsers,
 } from '../api/client'
+import { useUserPrefs } from '../context/UserPrefsContext'
 import './DataEntry.css'
 import { buildTableMergeLayout, tableCellKey } from '../utils/tableMergeLayout'
 
@@ -1874,6 +1876,8 @@ export default function DataEntry() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const pdfRef = useRef(null)
+  const { prefs, mergePrefs } = useUserPrefs()
+  const displayName = useMemo(() => (prefs.ebrUserDisplayName || '').trim(), [prefs.ebrUserDisplayName])
 
   const formId = searchParams.get('form')
   const pdfParam = searchParams.get('pdf')
@@ -1912,28 +1916,29 @@ export default function DataEntry() {
       if (!res.success || !res.form) throw new Error('Form configuration not found')
       setFormConfig(res.form)
 
-      // Update last-seen version
-      try {
+      mergePrefs((prev) => {
         const key = `${res.form.name || ''}|${res.form.pdfFile || ''}`
         const ver = res.form.version || 1
-        const stored = localStorage.getItem('ebrFormLastSeen')
-        const lastSeen = stored ? JSON.parse(stored) : {}
+        const lastSeen =
+          prev.ebrFormLastSeen && typeof prev.ebrFormLastSeen === 'object' && !Array.isArray(prev.ebrFormLastSeen)
+            ? { ...prev.ebrFormLastSeen }
+            : {}
         if (!lastSeen[key] || lastSeen[key] < ver) lastSeen[key] = ver
-        localStorage.setItem('ebrFormLastSeen', JSON.stringify(lastSeen))
-      } catch { }
-
-      // Update recently used (for Commonly Used section)
-      try {
-        const raw = localStorage.getItem('ebrRecentlyUsed')
-        const list = raw ? JSON.parse(raw) : []
-        const entry = { formId: res.form.id, formName: res.form.name || 'Unnamed', pdfFile: res.form.pdfFile || '', openedAt: new Date().toISOString() }
+        const raw = prev.ebrRecentlyUsed
+        const list = Array.isArray(raw) ? raw : []
+        const entry = {
+          formId: res.form.id,
+          formName: res.form.name || 'Unnamed',
+          pdfFile: res.form.pdfFile || '',
+          openedAt: new Date().toISOString(),
+        }
         const merged = [entry, ...list.filter((x) => x.formId !== res.form.id)].slice(0, 30)
-        localStorage.setItem('ebrRecentlyUsed', JSON.stringify(merged))
-      } catch { }
+        return { ...prev, ebrFormLastSeen: lastSeen, ebrRecentlyUsed: merged }
+      })
     })
       .catch(err => setError(err.message))
       .finally(() => setLoading(false))
-  }, [formId, pdfParam])
+  }, [formId, pdfParam, mergePrefs])
 
   // Load batch record when batchId is present (prefill formData, detect completed = read-only)
   useEffect(() => {
@@ -2208,13 +2213,9 @@ export default function DataEntry() {
       formDataRef.current,
       idToNameMap(),
     )
-    setEditorOther(
-      pol
-        ? ''
-        : (typeof localStorage !== 'undefined' && localStorage.getItem('ebrUserDisplayName')) || '',
-    )
+    setEditorOther(pol ? '' : displayName)
     setCorrectionModal({ fieldId, newValue })
-  }, [])
+  }, [displayName])
 
   const confirmCorrectionSave = useCallback(() => {
     if (!correctionModal) return
@@ -2229,10 +2230,7 @@ export default function DataEntry() {
       else if (editorRole === 'secondary') by = policy.secondaryName
       else by = editorOther.trim()
     } else {
-      by =
-        editorOther.trim() ||
-        (typeof localStorage !== 'undefined' && localStorage.getItem('ebrUserDisplayName')) ||
-        ''
+      by = editorOther.trim() || displayName
     }
     if (!by) {
       window.alert('Specify who is making this edit.')
@@ -2248,7 +2246,7 @@ export default function DataEntry() {
     setCorrectionDraft(null)
     setCorrectionModal(null)
     setEditorOther('')
-  }, [correctionModal, editorRole, editorOther])
+  }, [correctionModal, editorRole, editorOther, displayName])
 
   const handleLockField = useCallback((fieldId) => {
     const field = formConfigRef.current?.fields?.find((f) => f.id === fieldId)
@@ -2428,6 +2426,15 @@ export default function DataEntry() {
         savedAt: new Date().toISOString(),
       }
       if (batchId) body.batchId = batchId
+      if (isEbrApiDebug()) {
+        const dk = formData && typeof formData === 'object' ? Object.keys(formData) : []
+        console.debug('[EBR DataEntry] save click', {
+          formId: formConfig.id,
+          batchId: batchId || null,
+          dataKeysCount: dk.length,
+          stagesCount: stages.length,
+        })
+      }
       const res = await saveData(body)
       if (res.success) alert('Data saved successfully!')
       else alert('Error saving data: ' + (res.message || 'Unknown error'))
@@ -2497,7 +2504,15 @@ export default function DataEntry() {
     async (extra = {}) => {
       if (!batchId) return
       try {
-        const res = await updateBatchRecord({ batchId, status: 'completed', ...extra })
+        const payload = { batchId, status: 'completed', ...extra }
+        if (isEbrApiDebug()) {
+          console.debug('[EBR DataEntry] mark complete', {
+            batchId,
+            extraKeys: Object.keys(extra),
+            hasSignOff: !!(extra.completedSignOffBy || extra.completedSignOffAt),
+          })
+        }
+        const res = await updateBatchRecord(payload)
         if (res.success) {
           navigate('/batch?filter=completed')
         } else {
@@ -2545,7 +2560,7 @@ export default function DataEntry() {
         pdfFile: formConfig.pdfFile || '',
         title: batchTitle.trim(),
         description: batchDesc.trim(),
-        createdBy: localStorage.getItem('ebrUserDisplayName') || '',
+        createdBy: displayName,
       })
       if (res.success && res.batchId) {
         const params = new URLSearchParams(searchParams)
@@ -2559,7 +2574,7 @@ export default function DataEntry() {
     } finally {
       setCreatingBatch(false)
     }
-  }, [batchTitle, batchDesc, formConfig, searchParams, navigate])
+  }, [batchTitle, batchDesc, formConfig, searchParams, navigate, displayName])
 
   // ─── No form specified ─────────────────────────────────────────────────
   if (!formId && !pdfParam) {

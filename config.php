@@ -54,4 +54,34 @@ if (!file_exists(BATCH_RECORDS_DIR)) {
 // Legacy path: list-active-users migrates this file into ebr_active_users once if the table is empty
 define('ACTIVE_USERS_FILE', DATA_DIR . 'active-users.json');
 
+/**
+ * When false (default), legacy JSON under FORMS_DIR / DATA_DIR is not read as a fallback — only PostgreSQL.
+ * Set EBR_LEGACY_JSON_FALLBACK=1 during migration from file-based storage.
+ */
+function ebr_legacy_json_fallback_enabled(): bool
+{
+    $v = getenv('EBR_LEGACY_JSON_FALLBACK');
+    if ($v === false || $v === '') {
+        return false;
+    }
+    $s = strtolower(trim((string) $v));
+
+    return $s === '1' || $s === 'true' || $s === 'yes';
+}
+
+/**
+ * Verbose error_log (and optional JSON debugInfo) for save-data / update-batch.
+ * Set EBR_DEBUG_SAVE=1 in the environment.
+ */
+function ebr_debug_save_enabled(): bool
+{
+    $v = getenv('EBR_DEBUG_SAVE');
+    if ($v === false || $v === '') {
+        return false;
+    }
+    $s = strtolower(trim((string) $v));
+
+    return $s === '1' || $s === 'true' || $s === 'yes';
+}
+
 require_once __DIR__ . '/includes/db.php';

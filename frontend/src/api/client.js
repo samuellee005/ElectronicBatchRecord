@@ -5,16 +5,94 @@
 
 const API_BASE = ''
 
+/**
+ * Console debug for save / mark-complete flows. Enable one of:
+ * - `localStorage.setItem('ebrDebug', '1')` then refresh
+ * - `window.__EBR_DEBUG__ = true` in the devtools console
+ * - `.env`: `VITE_EBR_DEBUG=1` (rebuild dev server)
+ */
+export function isEbrApiDebug() {
+  try {
+    if (import.meta.env?.VITE_EBR_DEBUG === '1') return true
+  } catch {
+    /* no vite */
+  }
+  if (typeof localStorage !== 'undefined' && localStorage.getItem('ebrDebug') === '1') return true
+  if (typeof window !== 'undefined' && window.__EBR_DEBUG__) return true
+  return false
+}
+
+function summarizeJsonForDebug(debugLabel, bodyStr) {
+  try {
+    const o = JSON.parse(bodyStr)
+    if (debugLabel === 'save-data') {
+      const keys = o.data && typeof o.data === 'object' && !Array.isArray(o.data) ? Object.keys(o.data) : []
+      return {
+        formId: o.formId,
+        batchId: o.batchId ?? null,
+        dataFieldCount: keys.length,
+        dataFieldIdsSample: keys.slice(0, 16),
+        stageCompletionLen: Array.isArray(o.stageCompletion) ? o.stageCompletion.length : 0,
+        stagesLen: Array.isArray(o.stages) ? o.stages.length : 0,
+        savedAt: o.savedAt,
+      }
+    }
+    if (debugLabel === 'update-batch-record') {
+      return {
+        batchId: o.batchId,
+        status: o.status,
+        completedSignOffBy: o.completedSignOffBy,
+        hasSignOffAt: !!o.completedSignOffAt,
+      }
+    }
+    return { keys: Object.keys(o || {}) }
+  } catch (e) {
+    return { parseError: String(e) }
+  }
+}
+
 async function request(path, options = {}) {
+  const { debugLabel, ...fetchOpts } = options
   const url = path.startsWith('http') ? path : `${API_BASE}${path}`
+  const bodyStr = fetchOpts.body
+
+  if (debugLabel && isEbrApiDebug()) {
+    const summary =
+      typeof bodyStr === 'string' ? summarizeJsonForDebug(debugLabel, bodyStr) : { body: typeof bodyStr }
+    console.debug(`[EBR API] ${debugLabel} request →`, path, summary)
+  }
+
   const res = await fetch(url, {
-    ...options,
+    ...fetchOpts,
     headers: {
       'Content-Type': 'application/json',
-      ...options.headers,
+      ...fetchOpts.headers,
     },
   })
   const data = await res.json().catch(() => ({}))
+
+  if (debugLabel && isEbrApiDebug()) {
+    const line = {
+      httpStatus: res.status,
+      ok: res.ok,
+      success: data.success,
+      message: data.message,
+    }
+    if (data.detail != null) line.detail = data.detail
+    if (data.entryId) line.entryId = data.entryId
+    if (data.filename) line.filename = data.filename
+    if (data.batch && typeof data.batch === 'object') {
+      line.batch = {
+        id: data.batch.id,
+        status: data.batch.status,
+        completedAt: data.batch.completedAt,
+        lastEntryId: data.batch.lastEntryId,
+      }
+    }
+    if (data.debugInfo) line.serverDebug = data.debugInfo
+    console.debug(`[EBR API] ${debugLabel} response ←`, line)
+  }
+
   if (!res.ok) throw new Error(data.message || res.statusText || 'Request failed')
   return data
 }
@@ -38,7 +116,11 @@ export async function saveForm(body) {
 
 // Data entry & batch
 export async function saveData(body) {
-  return request('/includes/save-data.php', { method: 'POST', body: JSON.stringify(body) })
+  return request('/includes/save-data.php', {
+    method: 'POST',
+    body: JSON.stringify(body),
+    debugLabel: 'save-data',
+  })
 }
 
 export async function createBatchRecord(body) {
@@ -54,7 +136,21 @@ export async function listBatchRecords(status, createdBy) {
 }
 
 export async function updateBatchRecord(body) {
-  return request('/includes/update-batch-record.php', { method: 'POST', body: JSON.stringify(body) })
+  return request('/includes/update-batch-record.php', {
+    method: 'POST',
+    body: JSON.stringify(body),
+    debugLabel: 'update-batch-record',
+  })
+}
+
+/** Server-side UI preferences (PostgreSQL ebr_user_preferences), keyed by display name. */
+export async function getUserPreferences(userKey) {
+  const qs = userKey ? `?userKey=${encodeURIComponent(userKey)}` : ''
+  return request(`/includes/get-user-preferences.php${qs}`)
+}
+
+export async function saveUserPreferences(body) {
+  return request('/includes/save-user-preferences.php', { method: 'POST', body: JSON.stringify(body) })
 }
 
 export async function getBatchRecord(batchId) {

@@ -1,24 +1,22 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { StarIcon } from '@heroicons/react/24/solid'
 import { listForms, loadFormById } from '../api/client'
+import { useUserPrefs } from '../context/UserPrefsContext'
 import './FormsList.css'
 
-function getFavorites() {
-  try { return JSON.parse(localStorage.getItem('ebrFavorites') || '[]') } catch { return [] }
-}
-function setFavorites(ids) {
-  try { localStorage.setItem('ebrFavorites', JSON.stringify(ids)) } catch {}
-}
-
 export default function FormsList() {
+  const { prefs, updatePrefs } = useUserPrefs()
   const [data, setData] = useState({ forms: [], groupedForms: {} })
   const [loading, setLoading] = useState(true)
   const [latestOnly, setLatestOnly] = useState(true)
   const [search, setSearch] = useState('')
   const [auditForm, setAuditForm] = useState(null)
   const [auditDetail, setAuditDetail] = useState(null)
-  const [favorites, setFavoritesState] = useState(() => getFavorites())
+  const favorites = useMemo(
+    () => (Array.isArray(prefs.ebrFavorites) ? prefs.ebrFavorites : []),
+    [prefs.ebrFavorites],
+  )
 
   useEffect(() => {
     listForms().then((res) => setData({ forms: res.forms || [], groupedForms: res.groupedForms || {} })).finally(() => setLoading(false))
@@ -35,8 +33,7 @@ export default function FormsList() {
 
   const toggleFav = (id) => {
     const next = favorites.includes(id) ? favorites.filter((x) => x !== id) : [...favorites, id]
-    setFavorites(next)
-    setFavoritesState(next)
+    updatePrefs({ ebrFavorites: next })
   }
 
   if (loading) return <div className="page-content"><h1 className="page-title">Batch Record Forms</h1><p>Loading...</p></div>

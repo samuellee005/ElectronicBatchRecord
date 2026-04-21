@@ -75,6 +75,9 @@ function searchDataLoadForm($formId)
     } catch (Throwable $e) {
         // fall through to legacy JSON
     }
+    if (!ebr_legacy_json_fallback_enabled()) {
+        return null;
+    }
     $formsDir = FORMS_DIR;
     if (!is_dir($formsDir)) {
         return null;

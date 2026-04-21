@@ -1,5 +1,6 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
+import { useUserPrefs } from '../context/UserPrefsContext'
 import {
   HomeIcon,
   RectangleStackIcon,
@@ -12,27 +13,23 @@ import {
 } from '@heroicons/react/24/outline'
 import './Nav.css'
 
-const STORAGE_KEY = 'ebrSidebarCollapsed'
-
 export default function Nav() {
+  const { prefs, updatePrefs } = useUserPrefs()
   const location = useLocation()
   const [openDropdown, setOpenDropdown] = useState(null)
-  const [collapsed, setCollapsed] = useState(() => {
-    try {
-      return localStorage.getItem(STORAGE_KEY) === '1'
-    } catch {
-      return false
-    }
-  })
+  const [collapsed, setCollapsed] = useState(false)
+  useEffect(() => {
+    const v = prefs.ebrSidebarCollapsed
+    if (v === true || v === '1') setCollapsed(true)
+    else if (v === false || v === '0') setCollapsed(false)
+  }, [prefs.ebrSidebarCollapsed])
   const toggleCollapsed = useCallback(() => {
     setCollapsed((prev) => {
       const next = !prev
-      try {
-        localStorage.setItem(STORAGE_KEY, next ? '1' : '0')
-      } catch {}
+      updatePrefs({ ebrSidebarCollapsed: next })
       return next
     })
-  }, [])
+  }, [updatePrefs])
 
   const isActive = (path, match) => {
     if (match === 'batch') return location.pathname === '/batch'

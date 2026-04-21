@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom'
+import { UserPrefsProvider } from './context/UserPrefsContext'
 import Nav from './components/Nav'
 import Dashboard from './pages/Dashboard'
 import FormsList from './pages/FormsList'
@@ -26,6 +27,7 @@ function Layout({ children }) {
 
 export default function App() {
   return (
+    <UserPrefsProvider>
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Layout><Dashboard /></Layout>} />
@@ -41,5 +43,6 @@ export default function App() {
         <Route path="/templates/view" element={<Layout><ViewTemplate /></Layout>} />
       </Routes>
     </BrowserRouter>
+    </UserPrefsProvider>
   )
 }

@@ -18,6 +18,7 @@ import PdfViewer from '../components/PdfViewer'
 import PdfPageScrubber from '../components/PdfPageScrubber'
 import PdfZoomControls from '../components/PdfZoomControls'
 import { listForms, loadFormById, saveForm } from '../api/client'
+import { useUserPrefs } from '../context/UserPrefsContext'
 import { buildTableMergeLayout, tableCellKey } from '../utils/tableMergeLayout'
 import './FormBuilder.css'
 
@@ -71,13 +72,6 @@ const PROPERTIES_PANEL_DEFAULT_W = 320
 const PROPERTIES_PANEL_MIN_W = 260
 const PROPERTIES_PANEL_MAX_W = 640
 const PROPERTIES_PANEL_WIDTH_STORAGE_KEY = 'fb-properties-panel-width'
-
-function readStoredPropertiesPanelWidth() {
-  if (typeof localStorage === 'undefined') return PROPERTIES_PANEL_DEFAULT_W
-  const n = parseInt(localStorage.getItem(PROPERTIES_PANEL_WIDTH_STORAGE_KEY), 10)
-  if (!Number.isFinite(n)) return PROPERTIES_PANEL_DEFAULT_W
-  return Math.min(PROPERTIES_PANEL_MAX_W, Math.max(PROPERTIES_PANEL_MIN_W, n))
-}
 
 const DEFAULT_TABLE_COL_WIDTH = 72
 const DEFAULT_TABLE_ROW_HEIGHT = 28
@@ -571,6 +565,7 @@ function formatDate(dateString) {
 }
 
 export default function FormBuilder() {
+  const { prefs, updatePrefs } = useUserPrefs()
   const [searchParams] = useSearchParams()
   const pdfFile = searchParams.get('file')
   const urlFormId = searchParams.get('formId')
@@ -611,9 +606,9 @@ export default function FormBuilder() {
   const [saving, setSaving] = useState(false)
   const [componentsPanelCollapsed, setComponentsPanelCollapsed] = useState(false)
   const [propertiesPanelCollapsed, setPropertiesPanelCollapsed] = useState(false)
-  const [propertiesPanelWidth, setPropertiesPanelWidth] = useState(readStoredPropertiesPanelWidth)
+  const [propertiesPanelWidth, setPropertiesPanelWidth] = useState(PROPERTIES_PANEL_DEFAULT_W)
   const [propertiesPanelResizing, setPropertiesPanelResizing] = useState(false)
-  const propertiesPanelWidthRef = useRef(readStoredPropertiesPanelWidth())
+  const propertiesPanelWidthRef = useRef(PROPERTIES_PANEL_DEFAULT_W)
   const propertiesResizeRef = useRef({ active: false, startX: 0, startW: PROPERTIES_PANEL_DEFAULT_W })
 
   // Drag/resize state via refs to avoid re-renders during drag
@@ -634,18 +629,25 @@ export default function FormBuilder() {
     propertiesPanelWidthRef.current = propertiesPanelWidth
   }, [propertiesPanelWidth])
 
+  const storedPanelW = prefs[PROPERTIES_PANEL_WIDTH_STORAGE_KEY]
+  useEffect(() => {
+    if (propertiesResizeRef.current.active) return
+    const raw = storedPanelW
+    const n = parseInt(typeof raw === 'string' ? raw : String(raw || ''), 10)
+    if (!Number.isFinite(n)) return
+    const w = Math.min(PROPERTIES_PANEL_MAX_W, Math.max(PROPERTIES_PANEL_MIN_W, n))
+    propertiesPanelWidthRef.current = w
+    setPropertiesPanelWidth(w)
+  }, [storedPanelW])
+
   const endPropertiesResize = useCallback(() => {
     if (!propertiesResizeRef.current.active) return
     propertiesResizeRef.current.active = false
     setPropertiesPanelResizing(false)
     document.body.style.cursor = ''
     document.body.style.userSelect = ''
-    try {
-      localStorage.setItem(PROPERTIES_PANEL_WIDTH_STORAGE_KEY, String(propertiesPanelWidthRef.current))
-    } catch {
-      /* ignore */
-    }
-  }, [])
+    updatePrefs({ [PROPERTIES_PANEL_WIDTH_STORAGE_KEY]: String(propertiesPanelWidthRef.current) })
+  }, [updatePrefs])
 
   useEffect(() => {
     const move = (e) => {
@@ -735,13 +737,11 @@ export default function FormBuilder() {
     }
   }, [urlFormId, pdfFile])
 
-  // Pre-fill user name from localStorage
+  // Pre-fill user name from server-backed prefs
   useEffect(() => {
-    try {
-      const name = localStorage.getItem('ebrUserDisplayName')
-      if (name) setSaveUserName(name)
-    } catch {}
-  }, [])
+    const name = prefs.ebrUserDisplayName
+    if (name) setSaveUserName(String(name))
+  }, [prefs.ebrUserDisplayName])
 
   const handlePageRendered = useCallback(({ page, width, height, totalPages: n }) => {
     setCurrentPage(page)
@@ -1201,9 +1201,7 @@ export default function FormBuilder() {
     if (!saveUserName.trim()) { alert('Please enter your name for the audit trail'); return }
 
     setSaving(true)
-    try {
-      localStorage.setItem('ebrUserDisplayName', saveUserName.trim())
-    } catch {}
+    updatePrefs({ ebrUserDisplayName: saveUserName.trim() })
 
     try {
       const body = {

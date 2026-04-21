@@ -22,8 +22,19 @@ if (!$data || empty($data['batchId'])) {
 
 $batchId = preg_replace('/[^a-zA-Z0-9_-]/', '', $data['batchId']);
 
+if (ebr_debug_save_enabled()) {
+    error_log(
+        'ebr update-batch-record [debug]: request batchId=' . $batchId
+        . ' status=' . ($data['status'] ?? '')
+        . ' keys=' . implode(',', array_keys($data))
+    );
+}
+
 $record = ebr_db_batch_fetch_by_id($batchId);
 if ($record === null) {
+    if (ebr_debug_save_enabled()) {
+        error_log('ebr update-batch-record [debug]: batch not found for id=' . $batchId);
+    }
     echo json_encode(['success' => false, 'message' => 'Batch record not found']);
     exit;
 }
@@ -50,13 +61,40 @@ if (isset($data['lastEntryId'])) {
 try {
     $saved = ebr_db_batch_save_from_api($record);
 } catch (Throwable $e) {
-    echo json_encode(['success' => false, 'message' => 'Failed to update']);
+    error_log('ebr update-batch-record: ' . $e->getMessage());
+    if (ebr_debug_save_enabled()) {
+        error_log('ebr update-batch-record [debug]: ' . $e->getFile() . ':' . $e->getLine() . ' ' . $e->getTraceAsString());
+    }
+    $fail = ['success' => false, 'message' => 'Failed to update'];
+    if (ebr_debug_save_enabled()) {
+        $fail['detail'] = $e->getMessage();
+    }
+    http_response_code(500);
+    echo json_encode($fail);
     exit;
 }
 
 if ($saved === null) {
+    if (ebr_debug_save_enabled()) {
+        error_log('ebr update-batch-record [debug]: ebr_db_batch_save_from_api returned null for batchId=' . $batchId);
+    }
     echo json_encode(['success' => false, 'message' => 'Failed to update']);
     exit;
 }
 
-echo json_encode(['success' => true, 'batch' => $saved]);
+$out = ['success' => true, 'batch' => $saved];
+if (ebr_debug_save_enabled()) {
+    $out['debugInfo'] = [
+        'step' => 'updated',
+        'batchId' => $saved['id'] ?? $batchId,
+        'status' => $saved['status'] ?? null,
+        'completedAt' => $saved['completedAt'] ?? null,
+        'lastEntryId' => $saved['lastEntryId'] ?? null,
+    ];
+    error_log(
+        'ebr update-batch-record [debug]: success id=' . ($saved['id'] ?? '')
+        . ' status=' . ($saved['status'] ?? '')
+    );
+}
+
+echo json_encode($out);

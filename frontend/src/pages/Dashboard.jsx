@@ -2,106 +2,29 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { Bars3Icon, XMarkIcon } from '@heroicons/react/24/outline'
 import { listForms, listBatchRecords, getDownloadBatchPdfUrl } from '../api/client'
+import { useUserPrefs } from '../context/UserPrefsContext'
 import WidgetActionMenu from '../components/WidgetActionMenu'
 import './Dashboard.css'
 
 const WIDGET_LIMIT = 5
 const ALL_WIDGET_IDS = ['favorites', 'myForms', 'openBatches', 'completedBatches', 'reminders']
-const STORAGE_ORDER = 'ebrDashboardOrder'
-const STORAGE_HIDDEN = 'ebrDashboardHidden'
 
-const STORAGE_FAVORITES = 'ebrFavorites'
-const STORAGE_USER = 'ebrUserDisplayName'
-const STORAGE_LAST_SEEN = 'ebrFormLastSeen'
-const STORAGE_RESOLVED = 'ebrFavoriteResolved'
-
-function loadWidgetOrder() {
-  try {
-    const o = JSON.parse(localStorage.getItem(STORAGE_ORDER) || 'null')
-    if (Array.isArray(o) && o.length) {
-      const seen = new Set()
-      const ordered = []
-      for (const id of o) {
-        if (ALL_WIDGET_IDS.includes(id) && !seen.has(id)) {
-          seen.add(id)
-          ordered.push(id)
-        }
-      }
-      for (const id of ALL_WIDGET_IDS) {
-        if (!seen.has(id)) ordered.push(id)
-      }
-      return ordered
+function normalizeWidgetOrder(raw) {
+  if (!Array.isArray(raw) || !raw.length) {
+    return [...ALL_WIDGET_IDS]
+  }
+  const seen = new Set()
+  const ordered = []
+  for (const id of raw) {
+    if (ALL_WIDGET_IDS.includes(id) && !seen.has(id)) {
+      seen.add(id)
+      ordered.push(id)
     }
-  } catch {}
-  return [...ALL_WIDGET_IDS]
-}
-
-function saveWidgetOrder(order) {
-  try {
-    localStorage.setItem(STORAGE_ORDER, JSON.stringify(order))
-  } catch {}
-}
-
-function loadHiddenWidgets() {
-  try {
-    const h = JSON.parse(localStorage.getItem(STORAGE_HIDDEN) || '[]')
-    return Array.isArray(h) ? h.filter((id) => ALL_WIDGET_IDS.includes(id)) : []
-  } catch {
-    return []
   }
-}
-
-function saveHiddenWidgets(hidden) {
-  try {
-    localStorage.setItem(STORAGE_HIDDEN, JSON.stringify(hidden))
-  } catch {}
-}
-
-function getFavorites() {
-  try {
-    const s = localStorage.getItem(STORAGE_FAVORITES)
-    return s ? JSON.parse(s) : []
-  } catch {
-    return []
+  for (const id of ALL_WIDGET_IDS) {
+    if (!seen.has(id)) ordered.push(id)
   }
-}
-function setFavorites(ids) {
-  try {
-    localStorage.setItem(STORAGE_FAVORITES, JSON.stringify(ids))
-  } catch {}
-}
-function getUserName() {
-  try {
-    return localStorage.getItem(STORAGE_USER) || ''
-  } catch {
-    return ''
-  }
-}
-function setUserName(name) {
-  try {
-    localStorage.setItem(STORAGE_USER, (name || '').trim())
-  } catch {}
-}
-function getLastSeen() {
-  try {
-    const s = localStorage.getItem(STORAGE_LAST_SEEN)
-    return s ? JSON.parse(s) : {}
-  } catch {
-    return {}
-  }
-}
-function getResolved() {
-  try {
-    const s = localStorage.getItem(STORAGE_RESOLVED)
-    return s ? JSON.parse(s) : {}
-  } catch {
-    return {}
-  }
-}
-function setResolved(obj) {
-  try {
-    localStorage.setItem(STORAGE_RESOLVED, JSON.stringify(obj))
-  } catch {}
+  return ordered
 }
 
 function buildLatestByKey(groupedForms) {
@@ -145,39 +68,60 @@ const WIDGET_RESTORE_LABELS = {
 }
 
 export default function Dashboard() {
+  const { prefs, ready, updatePrefs } = useUserPrefs()
   const [forms, setForms] = useState([])
   const [groupedForms, setGroupedForms] = useState({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [userName, setUserNameState] = useState(getUserName())
   const [nameInput, setNameInput] = useState('')
   const [favPopover, setFavPopover] = useState(null)
-  const [favorites, setFavoritesState] = useState(() => getFavorites())
   const [removeConfirmForm, setRemoveConfirmForm] = useState(null)
   const [myOpenBatches, setMyOpenBatches] = useState([])
   const [myCompletedBatches, setMyCompletedBatches] = useState([])
   const [batchesLoading, setBatchesLoading] = useState(false)
 
-  const [widgetOrder, setWidgetOrder] = useState(loadWidgetOrder)
-  const [hiddenWidgets, setHiddenWidgets] = useState(loadHiddenWidgets)
   const [dragOverId, setDragOverId] = useState(null)
 
-  const hideWidget = useCallback((id) => {
-    setHiddenWidgets((prev) => {
-      if (prev.includes(id)) return prev
-      const next = [...prev, id]
-      saveHiddenWidgets(next)
-      return next
-    })
-  }, [])
+  const widgetOrder = useMemo(
+    () => normalizeWidgetOrder(prefs.ebrDashboardOrder),
+    [prefs.ebrDashboardOrder],
+  )
+  const hiddenWidgets = useMemo(() => {
+    const h = prefs.ebrDashboardHidden
+    return Array.isArray(h) ? h.filter((id) => ALL_WIDGET_IDS.includes(id)) : []
+  }, [prefs.ebrDashboardHidden])
+  const favorites = useMemo(
+    () => (Array.isArray(prefs.ebrFavorites) ? prefs.ebrFavorites : []),
+    [prefs.ebrFavorites],
+  )
+  const userName = useMemo(() => (prefs.ebrUserDisplayName || '').trim(), [prefs.ebrUserDisplayName])
+  const resolved = useMemo(() => {
+    const r = prefs.ebrFavoriteResolved
+    return r && typeof r === 'object' && !Array.isArray(r) ? r : {}
+  }, [prefs.ebrFavoriteResolved])
+  const lastSeen = useMemo(() => {
+    const s = prefs.ebrFormLastSeen
+    return s && typeof s === 'object' && !Array.isArray(s) ? s : {}
+  }, [prefs.ebrFormLastSeen])
 
-  const restoreWidget = useCallback((id) => {
-    setHiddenWidgets((prev) => {
-      const next = prev.filter((x) => x !== id)
-      saveHiddenWidgets(next)
-      return next
-    })
-  }, [])
+  useEffect(() => {
+    if (ready) setNameInput(prefs.ebrUserDisplayName || '')
+  }, [ready, prefs.ebrUserDisplayName])
+
+  const hideWidget = useCallback(
+    (id) => {
+      if (hiddenWidgets.includes(id)) return
+      updatePrefs({ ebrDashboardHidden: [...hiddenWidgets, id] })
+    },
+    [hiddenWidgets, updatePrefs],
+  )
+
+  const restoreWidget = useCallback(
+    (id) => {
+      updatePrefs({ ebrDashboardHidden: hiddenWidgets.filter((x) => x !== id) })
+    },
+    [hiddenWidgets, updatePrefs],
+  )
 
   const onDragStartWidget = useCallback((e, id) => {
     e.dataTransfer.setData('text/widget-id', id)
@@ -200,13 +144,10 @@ export default function Dashboard() {
       setDragOverId(null)
       const fromId = e.dataTransfer.getData('text/widget-id')
       if (!fromId || fromId === targetId) return
-      setWidgetOrder((prev) => {
-        const next = moveWidgetInOrder(prev, fromId, targetId)
-        saveWidgetOrder(next)
-        return next
-      })
+      const next = moveWidgetInOrder(widgetOrder, fromId, targetId)
+      updatePrefs({ ebrDashboardOrder: next })
     },
-    [],
+    [widgetOrder, updatePrefs],
   )
 
   useEffect(() => {
@@ -287,8 +228,6 @@ export default function Dashboard() {
 
   const favForms = forms.filter((f) => favorites.includes(f.id))
   const latestByKey = buildLatestByKey(groupedForms)
-  const resolved = getResolved()
-  const lastSeen = getLastSeen()
   const myForms = userName ? forms.filter((f) => (f.createdBy || '').trim() === userName) : []
   myForms.sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))
 
@@ -322,27 +261,23 @@ export default function Dashboard() {
   const handleReplaceFav = (oldId, latestId, groupKey, latestVer) => {
     let favs = favorites.filter((id) => id !== oldId)
     if (!favs.includes(latestId)) favs.push(latestId)
-    setFavorites(favs)
-    setFavoritesState(favs)
-    setResolved({ ...getResolved(), [groupKey]: latestVer })
+    updatePrefs({
+      ebrFavorites: favs,
+      ebrFavoriteResolved: { ...resolved, [groupKey]: latestVer },
+    })
     setFavPopover(null)
   }
   const handleDismissNewer = (groupKey, latestVer) => {
-    setResolved({ ...getResolved(), [groupKey]: latestVer })
+    updatePrefs({ ebrFavoriteResolved: { ...resolved, [groupKey]: latestVer } })
     setFavPopover(null)
   }
   const handleRemoveFav = (formId) => {
-    const next = favorites.filter((id) => id !== formId)
-    setFavorites(next)
-    setFavoritesState(next)
+    updatePrefs({ ebrFavorites: favorites.filter((id) => id !== formId) })
     setRemoveConfirmForm(null)
   }
   const handleSaveName = () => {
     const name = nameInput.trim()
-    if (name) {
-      setUserName(name)
-      setUserNameState(name)
-    }
+    if (name) updatePrefs({ ebrUserDisplayName: name })
   }
 
   const visibleWidgetIds = useMemo(
