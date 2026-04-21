@@ -43,6 +43,9 @@ $batchIdRaw = $data['batchId'] ?? null;
 $batchId = ($batchIdRaw !== null && $batchIdRaw !== '')
     ? preg_replace('/[^a-zA-Z0-9_-]/', '', (string) $batchIdRaw)
     : null;
+if ($batchId === '') {
+    $batchId = null;
+}
 
 $dataEntry = [
     'id' => $entryId,
@@ -61,11 +64,19 @@ try {
     ebr_db_data_entry_insert($dataEntry);
 } catch (Throwable $e) {
     error_log('ebr save-data: ' . $e->getMessage());
+    http_response_code(500);
+    $msg = 'Failed to save data to database.';
+    $em = $e->getMessage();
+    if (str_contains($em, '23503') || str_contains($em, 'foreign key')) {
+        $msg = 'Save failed: this form or batch is not in the database (open the latest saved form from Batch Record Forms and use a valid batch).';
+    } elseif (str_contains($em, '23505') || str_contains($em, 'duplicate key') || str_contains($em, 'unique')) {
+        $msg = 'Save failed: duplicate entry. Try saving again.';
+    }
     $show = getenv('EBR_SHOW_UPLOAD_ERRORS');
     if ($show !== false && $show !== '' && strtolower((string) $show) !== '0' && strtolower((string) $show) !== 'false') {
-        echo json_encode(['success' => false, 'message' => 'Failed to save data to database.', 'detail' => $e->getMessage()]);
+        echo json_encode(['success' => false, 'message' => $msg, 'detail' => $em]);
     } else {
-        echo json_encode(['success' => false, 'message' => 'Failed to save data to database.']);
+        echo json_encode(['success' => false, 'message' => $msg]);
     }
     exit;
 }

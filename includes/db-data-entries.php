@@ -25,6 +25,14 @@ function ebr_db_data_json_enc($data): string
     return $j;
 }
 
+/**
+ * UTF-8 JSON as hex for PostgreSQL decode() — avoids PDO/pg quirks with CAST(:x AS jsonb) on bound strings.
+ */
+function ebr_db_data_json_hex_for_pg(string $utf8Json): string
+{
+    return bin2hex($utf8Json);
+}
+
 /** TIMESTAMPTZ NOT NULL for saved_at */
 function ebr_db_data_saved_at_param($v): string
 {
@@ -109,9 +117,9 @@ INSERT INTO ebr_data_entries (
     id, form_id, form_name, pdf_file, batch_id, data, stage_completion, stages, saved_at, storage_filename
 ) VALUES (
     :id, :form_id, :form_name, :pdf_file, :batch_id,
-    CAST(:data AS jsonb),
-    CAST(:stage_completion AS jsonb),
-    CAST(:stages AS jsonb),
+    (convert_from(decode(:data_hex, 'hex'), 'UTF8'))::jsonb,
+    (convert_from(decode(:sc_hex, 'hex'), 'UTF8'))::jsonb,
+    (convert_from(decode(:st_hex, 'hex'), 'UTF8'))::jsonb,
     :saved_at, :storage_filename
 )
 SQL;
@@ -122,9 +130,9 @@ SQL;
         'form_name' => $dataEntry['formName'] ?? '',
         'pdf_file' => $dataEntry['pdfFile'] ?? '',
         'batch_id' => $dataEntry['batchId'] ?? null,
-        'data' => ebr_db_data_json_enc($dataEntry['data'] ?? []),
-        'stage_completion' => ebr_db_data_json_enc($dataEntry['stageCompletion'] ?? []),
-        'stages' => ebr_db_data_json_enc($dataEntry['stages'] ?? []),
+        'data_hex' => ebr_db_data_json_hex_for_pg(ebr_db_data_json_enc($dataEntry['data'] ?? [])),
+        'sc_hex' => ebr_db_data_json_hex_for_pg(ebr_db_data_json_enc($dataEntry['stageCompletion'] ?? [])),
+        'st_hex' => ebr_db_data_json_hex_for_pg(ebr_db_data_json_enc($dataEntry['stages'] ?? [])),
         'saved_at' => ebr_db_data_saved_at_param($dataEntry['savedAt'] ?? null),
         'storage_filename' => $dataEntry['filename'] ?? null,
     ]);
