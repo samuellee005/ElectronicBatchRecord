@@ -64,6 +64,67 @@
   pointer-events: none;
 }
 
+.app-nav-user {
+  flex-shrink: 0;
+  padding: 10px 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.app-nav-user-name {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #fff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-nav-user-role {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.app-nav-logout {
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 6px 10px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.15);
+  color: #fff;
+  cursor: pointer;
+}
+
+.app-nav-logout:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.app-nav--collapsed .app-nav-user-name,
+.app-nav--collapsed .app-nav-user-role {
+  display: none;
+}
+
+.app-nav--collapsed .app-nav-logout {
+  font-size: 0;
+  padding: 8px;
+  width: 100%;
+  align-self: stretch;
+}
+
+.app-nav--collapsed .app-nav-logout::after {
+  content: '⎋';
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
 .app-nav-footer {
   flex-shrink: 0;
   margin-top: auto;

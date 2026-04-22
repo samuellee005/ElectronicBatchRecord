@@ -3,6 +3,7 @@
  * GET userKey — returns merged prefs JSON for that display-name key.
  */
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/require-login.php';
 require_once __DIR__ . '/db-user-preferences.php';
 
 header('Content-Type: application/json');

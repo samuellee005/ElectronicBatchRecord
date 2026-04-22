@@ -3,6 +3,7 @@
  * Load form configuration for a PDF (PostgreSQL ebr_forms)
  */
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/require-login.php';
 require_once __DIR__ . '/db-forms.php';
 
 header('Content-Type: application/json');

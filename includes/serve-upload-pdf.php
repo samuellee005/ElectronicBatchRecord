@@ -7,6 +7,7 @@ declare(strict_types=1);
  */
 
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/require-login.php';
 require_once __DIR__ . '/db-pdf-templates.php';
 
 $uri = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';

@@ -1,6 +1,7 @@
-import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom'
+import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { UserPrefsProvider } from './context/UserPrefsContext'
-import Nav from './components/Nav'
+import { AuthProvider } from './context/AuthContext'
+import ProtectedLayout from './components/ProtectedLayout'
 import Dashboard from './pages/Dashboard'
 import FormsList from './pages/FormsList'
 import BatchRecord from './pages/BatchRecord'
@@ -12,37 +13,31 @@ import UploadTemplate from './pages/UploadTemplate'
 import ViewTemplate from './pages/ViewTemplate'
 import DataSearch from './pages/DataSearch'
 import ActiveUsers from './pages/ActiveUsers'
-
-function Layout({ children }) {
-  const { pathname } = useLocation()
-  const wideMain =
-    pathname.startsWith('/forms/builder') || pathname.startsWith('/forms/entry')
-  return (
-    <div className="app-shell">
-      <Nav />
-      <main className={wideMain ? 'main main--wide' : 'main'}>{children}</main>
-    </div>
-  )
-}
+import Login from './pages/Login'
 
 export default function App() {
   return (
     <UserPrefsProvider>
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<Layout><Dashboard /></Layout>} />
-        <Route path="/forms" element={<Layout><FormsList /></Layout>} />
-        <Route path="/data-search" element={<Layout><DataSearch /></Layout>} />
-        <Route path="/active-users" element={<Layout><ActiveUsers /></Layout>} />
-        <Route path="/forms/build" element={<Layout><BuildForm /></Layout>} />
-        <Route path="/forms/builder" element={<Layout><FormBuilder /></Layout>} />
-        <Route path="/forms/entry" element={<Layout><DataEntry /></Layout>} />
-        <Route path="/batch" element={<Layout><BatchRecord /></Layout>} />
-        <Route path="/templates" element={<Layout><Templates /></Layout>} />
-        <Route path="/templates/upload" element={<Layout><UploadTemplate /></Layout>} />
-        <Route path="/templates/view" element={<Layout><ViewTemplate /></Layout>} />
-      </Routes>
-    </BrowserRouter>
+      <AuthProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route element={<ProtectedLayout />}>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/forms" element={<FormsList />} />
+              <Route path="/data-search" element={<DataSearch />} />
+              <Route path="/active-users" element={<ActiveUsers />} />
+              <Route path="/forms/build" element={<BuildForm />} />
+              <Route path="/forms/builder" element={<FormBuilder />} />
+              <Route path="/forms/entry" element={<DataEntry />} />
+              <Route path="/batch" element={<BatchRecord />} />
+              <Route path="/templates" element={<Templates />} />
+              <Route path="/templates/upload" element={<UploadTemplate />} />
+              <Route path="/templates/view" element={<ViewTemplate />} />
+            </Route>
+          </Routes>
+        </BrowserRouter>
+      </AuthProvider>
     </UserPrefsProvider>
   )
 }

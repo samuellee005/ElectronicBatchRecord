@@ -194,7 +194,7 @@ export default function Dashboard() {
 
   const downloadBatchPdf = (batchId, title) => {
     const url = getDownloadBatchPdfUrl(batchId)
-    fetch(url)
+    fetch(url, { credentials: 'include' })
       .then((res) => {
         const ct = res.headers.get('Content-Type') || ''
         if (ct.includes('application/json')) {

@@ -1,55 +1,68 @@
+
 # syntax=docker/dockerfile:1.6
 
 # ---------- Stage 1: build the React/Vite frontend ----------
-    FROM node:20-alpine AS frontend-build
-    WORKDIR /build
+FROM node:20-alpine AS frontend-build
+WORKDIR /build
 
-    COPY frontend/package.json frontend/package-lock.json ./
-    RUN npm ci
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
 
-    COPY frontend/ ./
-    RUN npm run build
+COPY frontend/ ./
+RUN npm run build
 
-    # ---------- Stage 2: PHP runtime serving the built app ----------
-    FROM php:8.3-cli-alpine AS runtime
+# ---------- Stage 2: PHP runtime serving the built app ----------
+FROM php:8.3-cli-alpine AS runtime
 
-    # Ghostscript is used by includes/merge-pdfs.php and related PDF tooling.
-    # fontconfig/ttf-dejavu give gs usable fonts for PDF rasterization.
-    RUN apk add --no-cache \
-          ghostscript \
-          fontconfig \
-          ttf-dejavu \
-          poppler-utils
+# Install Composer from the official Composer image
+COPY --from=composer:2 /usr/bin/composer /usr/local/bin/composer
 
-    # PHP extensions used by the app (FPDI/FPDF are pure-PHP).
-    # libzip stays installed at runtime; libzip-dev/zlib-dev are build-only.
-    RUN apk add --no-cache libzip \
-     && apk add --no-cache --virtual .build-deps $PHPIZE_DEPS libzip-dev zlib-dev \
-     && docker-php-ext-install zip \
-     && apk del .build-deps
+# Runtime packages
+RUN apk add --no-cache \
+      ghostscript \
+      fontconfig \
+      ttf-dejavu \
+      poppler-utils \
+      libzip \
+      libpq \
+      libpng \
+      freetype \
+      libjpeg-turbo
 
-    # PostgreSQL (PDO) — database name is resolved in includes/db.php (db4 vs dev).
-    RUN apk add --no-cache --virtual .pgsql-build-deps $PHPIZE_DEPS postgresql-dev \
-     && docker-php-ext-install pdo_pgsql \
-     && apk del .pgsql-build-deps \
-     && apk add --no-cache libpq
+# Build/install PHP extensions
+RUN apk add --no-cache --virtual .build-deps \
+      $PHPIZE_DEPS \
+      libzip-dev \
+      zlib-dev \
+      postgresql-dev \
+      libpng-dev \
+      freetype-dev \
+      libjpeg-turbo-dev \
+ && docker-php-ext-configure gd --with-freetype --with-jpeg \
+ && docker-php-ext-install zip pdo_pgsql gd \
+ && apk del .build-deps
 
-    WORKDIR /app
+WORKDIR /app
 
-    # Allow PDF templates up to app limit (default PHP is often 2M, which breaks larger PDFs).
-    COPY docker/php-ebr.ini /usr/local/etc/php/conf.d/ebr-uploads.ini
+# Allow PDF templates up to app limit
+COPY docker/php-ebr.ini /usr/local/etc/php/conf.d/ebr-uploads.ini
 
-    # Copy application source (respects .dockerignore)
-    COPY . /app
+# Copy composer files first for layer caching
+COPY composer.json composer.lock /app/
 
-    # Overlay the freshly built frontend bundle
-    COPY --from=frontend-build /build/dist /app/frontend/dist
+# Install PHP deps
+RUN composer install --no-dev --optimize-autoloader --no-interaction
 
-    # Ensure writable dirs exist; baked into the image (no persistence requested).
-    RUN mkdir -p /app/uploads /app/forms /app/data/batch-records \
-     && chmod -R 0777 /app/uploads /app/forms /app/data
+# Copy application source
+COPY . /app
 
-    EXPOSE 8080
+# Overlay the freshly built frontend bundle
+COPY --from=frontend-build /build/dist /app/frontend/dist
 
-    # router.php serves built assets from frontend/dist and routes /includes, /uploads, etc.
-    CMD ["php", "-S", "0.0.0.0:8080", "router.php"]
+# Ensure writable dirs exist
+RUN mkdir -p /app/uploads /app/forms /app/data/batch-records \
+ && chmod -R 0777 /app/uploads /app/forms /app/data
+
+EXPOSE 8080
+
+CMD ["php", "-S", "0.0.0.0:8080", "router.php"]

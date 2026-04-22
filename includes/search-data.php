@@ -3,6 +3,7 @@
  * Search batch records by title and/or form name; return rows with flattened field values for dynamic table columns.
  */
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/require-login.php';
 require_once __DIR__ . '/batch-record.php';
 require_once __DIR__ . '/db-data-entries.php';
 require_once __DIR__ . '/db-forms.php';

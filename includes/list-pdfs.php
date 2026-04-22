@@ -3,6 +3,7 @@
  * List uploaded PDF templates (PostgreSQL ebr_pdf_templates).
  */
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/require-login.php';
 require_once __DIR__ . '/db-pdf-templates.php';
 
 header('Content-Type: application/json');

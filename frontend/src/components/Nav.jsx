@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react'
-import { Link, useLocation } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useUserPrefs } from '../context/UserPrefsContext'
+import { useAuth } from '../context/AuthContext'
 import {
   HomeIcon,
   RectangleStackIcon,
@@ -15,7 +16,9 @@ import './Nav.css'
 
 export default function Nav() {
   const { prefs, updatePrefs } = useUserPrefs()
+  const { user, logout } = useAuth()
   const location = useLocation()
+  const navigate = useNavigate()
   const [openDropdown, setOpenDropdown] = useState(null)
   const [collapsed, setCollapsed] = useState(false)
   useEffect(() => {
@@ -149,6 +152,25 @@ export default function Nav() {
           </Link>
         </li>
       </ul>
+
+      {user ? (
+        <div className="app-nav-user">
+          <span className="app-nav-user-name" title={user.username}>
+            {user.displayName || user.username}
+          </span>
+          <span className="app-nav-user-role">{user.role}</span>
+          <button
+            type="button"
+            className="app-nav-logout"
+            onClick={async () => {
+              await logout()
+              navigate('/login', { replace: true })
+            }}
+          >
+            Sign out
+          </button>
+        </div>
+      ) : null}
 
       <div className="app-nav-footer">
         <button

@@ -3,6 +3,7 @@
  * Create a new batch record (in progress)
  */
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/require-login.php';
 require_once __DIR__ . '/batch-record.php';
 
 header('Content-Type: application/json');

@@ -3,6 +3,7 @@
  * POST { "userKey": string, "prefs": object } — full replace for that user_key row.
  */
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/require-login.php';
 require_once __DIR__ . '/db-user-preferences.php';
 
 header('Content-Type: application/json');

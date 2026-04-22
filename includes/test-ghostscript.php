@@ -3,6 +3,7 @@
  * Test if Ghostscript is available
  */
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/require-login.php';
 
 header('Content-Type: application/json');
 

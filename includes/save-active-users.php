@@ -3,6 +3,7 @@
  * Replace full active users list (PostgreSQL ebr_active_users).
  */
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/require-login.php';
 require_once __DIR__ . '/db-active-users.php';
 
 header('Content-Type: application/json');

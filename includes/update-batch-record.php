@@ -3,6 +3,7 @@
  * Update batch record (e.g. set status to completed, or update lastEntryId on data save)
  */
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/require-login.php';
 require_once __DIR__ . '/batch-record.php';
 
 header('Content-Type: application/json');

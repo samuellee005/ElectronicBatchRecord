@@ -110,3 +110,5 @@ CREATE TABLE IF NOT EXISTS ebr_user_preferences (
 
 ---STATEMENT---
 CREATE INDEX IF NOT EXISTS idx_ebr_user_preferences_updated ON ebr_user_preferences (updated_at DESC);
+
+-- db_user: shared enterprise login table (see database/db_user.sql). This app only SELECTs it; do not create it here.

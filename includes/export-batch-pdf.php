@@ -4,6 +4,7 @@
  * Body: { "formId", "pdfFile", "data": { ... field entries ... }, "batch": { optional title, completedSignOffBy, ... } }
  */
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/require-login.php';
 require_once __DIR__ . '/db-forms.php';
 require_once __DIR__ . '/pdf-batch-export.php';
 

@@ -64,12 +64,23 @@ async function request(path, options = {}) {
 
   const res = await fetch(url, {
     ...fetchOpts,
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
       ...fetchOpts.headers,
     },
   })
   const data = await res.json().catch(() => ({}))
+
+  if (
+    res.status === 401 &&
+    data?.code === 'auth_required' &&
+    typeof window !== 'undefined' &&
+    !url.includes('auth-me.php') &&
+    !url.includes('login.php')
+  ) {
+    window.location.assign(`${window.location.origin}/login`)
+  }
 
   if (debugLabel && isEbrApiDebug()) {
     const line = {
@@ -95,6 +106,22 @@ async function request(path, options = {}) {
 
   if (!res.ok) throw new Error(data.message || res.statusText || 'Request failed')
   return data
+}
+
+/** Current PHP session user (always 200; check authenticated). */
+export async function authMe() {
+  return request('/includes/auth-me.php')
+}
+
+export async function apiLogin(body) {
+  return request('/includes/login.php', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+export async function apiLogout() {
+  return request('/includes/logout.php', { method: 'POST', body: '{}' })
 }
 
 // Forms
@@ -178,6 +205,7 @@ export function getDownloadBatchPdfUrl(batchId) {
 export async function exportBatchPdfBlob(body) {
   const res = await fetch(`${API_BASE}/includes/export-batch-pdf.php`, {
     method: 'POST',
+    credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
@@ -229,6 +257,7 @@ export async function uploadTemplate(file) {
   form.append('pdf_file', file)
   const res = await fetch(`${API_BASE}/includes/upload-template-api.php`, {
     method: 'POST',
+    credentials: 'include',
     body: form,
   })
   const data = await res.json().catch(() => ({}))
