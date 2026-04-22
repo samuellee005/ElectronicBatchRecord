@@ -2408,9 +2408,15 @@ export default function DataEntry() {
         alert('Form is not loaded yet.')
         return { ok: false }
       }
+      // Always read from formDataRef so we save the latest values even if React state has not
+      // re-rendered yet (common when clicking Save / Mark complete right after editing).
+      const snapshot = { ...formDataRef.current }
+      const effectiveMap = Object.fromEntries(
+        (formConfig.fields || []).map((f) => [f.id, getEffectiveValue(snapshot[f.id])]),
+      )
       const errors = []
       formConfig.fields.forEach((f) => {
-        if (isRequired(f) && !isFieldValueFilled(f, formDataEffective[f.id])) {
+        if (isRequired(f) && !isFieldValueFilled(f, effectiveMap[f.id])) {
           errors.push(f.label || f.id)
         }
       })
@@ -2418,21 +2424,23 @@ export default function DataEntry() {
         alert('Please fill in all required fields:\n- ' + errors.join('\n- '))
         return { ok: false }
       }
+      const stageCompletionPayload = computeStageCompletion(stages, effectiveMap)
+      const bid = batchIdRef.current || batchId
       const body = {
         formId: formConfig.id,
         formName: formConfig.name,
         pdfFile: formConfig.pdfFile,
-        data: formData,
-        stageCompletion,
+        data: snapshot,
+        stageCompletion: stageCompletionPayload,
         stages: stages.map((s) => ({ stage: s.stage, order: s.order })),
         savedAt: new Date().toISOString(),
       }
-      if (batchId) body.batchId = batchId
+      if (bid) body.batchId = bid
       if (isEbrApiDebug()) {
-        const dk = formData && typeof formData === 'object' ? Object.keys(formData) : []
+        const dk = snapshot && typeof snapshot === 'object' ? Object.keys(snapshot) : []
         console.debug('[EBR DataEntry] persist form data', {
           formId: formConfig.id,
-          batchId: batchId || null,
+          batchId: bid || null,
           dataKeysCount: dk.length,
           stagesCount: stages.length,
           silentSuccess,
@@ -2451,7 +2459,7 @@ export default function DataEntry() {
         return { ok: false }
       }
     },
-    [formConfig, formData, formDataEffective, stageCompletion, stages, batchId],
+    [formConfig, stages, batchId],
   )
 
   const handleSave = useCallback(async () => {
@@ -2521,16 +2529,20 @@ export default function DataEntry() {
 
   const runCompleteBatch = useCallback(
     async (extra = {}) => {
-      if (!batchId) return
+      const effectiveBatchId = batchIdRef.current || batchId
+      if (!effectiveBatchId) {
+        alert('No batch record is open. Create or open a batch before marking complete.')
+        return
+      }
       setSaving(true)
       try {
         const saved = await persistFormData({ silentSuccess: true })
         if (!saved.ok) return
 
-        const payload = { batchId, status: 'completed', ...extra }
+        const payload = { batchId: effectiveBatchId, status: 'completed', ...extra }
         if (isEbrApiDebug()) {
           console.debug('[EBR DataEntry] mark complete', {
-            batchId,
+            batchId: effectiveBatchId,
             extraKeys: Object.keys(extra),
             hasSignOff: !!(extra.completedSignOffBy || extra.completedSignOffAt),
           })
