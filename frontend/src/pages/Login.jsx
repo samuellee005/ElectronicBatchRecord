@@ -13,6 +13,7 @@ export default function Login() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [requirePassword, setRequirePassword] = useState(false)
+  const [bypassDb, setBypassDb] = useState(false)
   const [configLoading, setConfigLoading] = useState(true)
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -22,7 +23,10 @@ export default function Login() {
     ;(async () => {
       try {
         const cfg = await getLoginConfig()
-        if (ok) setRequirePassword(!!cfg.requirePassword)
+        if (ok) {
+          setRequirePassword(!!cfg.requirePassword)
+          setBypassDb(!!cfg.bypassDb)
+        }
       } catch {
         if (ok) setRequirePassword(false)
       } finally {
@@ -60,7 +64,15 @@ export default function Login() {
         : { username: u }
       const res = await apiLogin(body)
       if (!res.success) {
-        setError(res.message || 'Login failed')
+        const msg = res.message || 'Login failed'
+        // If /includes/login-config.php was missing or failed, we may not show a password
+        // field even when the server has EBR_REQUIRE_PASSWORD=1 — recover on first attempt.
+        if (!requirePassword && /password is required/i.test(String(msg))) {
+          setRequirePassword(true)
+          setError('This server requires a password. Enter it below and try again.')
+          return
+        }
+        setError(msg)
         return
       }
       await refresh()
@@ -113,9 +125,22 @@ export default function Login() {
           </button>
         </form>
         <p className="login-hint">
-          Sign-in checks the read-only <code>db_user</code> table; users are not created or changed in this app. Set{' '}
-          <code>EBR_ADMIN_USERNAMES=user1,user2</code> for admin in the UI. Use <code>EBR_REQUIRE_LOGIN=1</code> to require
-          a session for API calls. Set <code>EBR_REQUIRE_PASSWORD=1</code> to require a password (production).
+          {bypassDb
+            ? (
+              <span>
+                <strong>Dev server:</strong> <code>EBR_LOGIN_BYPASS_DB=1</code> is on — enter any username to
+                sign in. When you move to production, turn off bypass and use the <code>db_user</code> table. Set{' '}
+                <code>EBR_ADMIN_USERNAMES</code> for admin in the UI. Use <code>EBR_REQUIRE_LOGIN=1</code> to
+                require a session for API calls.
+              </span>
+            ) : (
+              <span>
+                Sign-in uses the read-only <code>db_user</code> table; users are not created in this app. Set{' '}
+                <code>EBR_ADMIN_USERNAMES=user1,user2</code> for admin. On a dev server without
+                that table, set <code>EBR_LOGIN_BYPASS_DB=1</code>. Use <code>EBR_REQUIRE_LOGIN=1</code> for
+                protected APIs; <code>EBR_REQUIRE_PASSWORD=1</code> to require a password.
+              </span>
+            )}
         </p>
       </div>
     </div>

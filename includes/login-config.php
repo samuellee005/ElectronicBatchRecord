@@ -9,4 +9,12 @@ require_once __DIR__ . '/session.php';
 header('Content-Type: application/json');
 ebr_session_start();
 
-echo json_encode(['requirePassword' => ebr_login_requires_password()], JSON_UNESCAPED_SLASHES);
+$bypass = ebr_login_bypass_db_user();
+$requirePassword = !$bypass && ebr_login_requires_password();
+echo json_encode(
+    [
+        'requirePassword' => $requirePassword,
+        'bypassDb' => $bypass,
+    ],
+    JSON_UNESCAPED_SLASHES
+);

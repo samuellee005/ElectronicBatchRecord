@@ -1,4 +1,7 @@
 # PostgreSQL: set EBR_PG_HOST, EBR_PG_USER, EBR_PG_PASSWORD when you have credentials.
+# This compose file is intended for the dev server: we default EBR_LOGIN_BYPASS_DB=1 so any
+# username can sign in without the enterprise `db_user` table. When you go live, use a
+# production stack without bypass and connect to the real `db_user` (see includes/session.php).
 # Arcturus → database db4 when EBR_DEPLOYMENT=arcturus, or EBR_ARCTURUS_APP_IPS matches
 # this host, or EBR_ARCTURUS_HTTP_HOSTS matches HTTP Host (see includes/db.php).
 services:
@@ -11,6 +14,9 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      # Dev server: sign in with any username. Override in .env with EBR_LOGIN_BYPASS_DB=0 when this environment uses `db_user`.
+      EBR_LOGIN_BYPASS_DB: "1"
     # Bind to loopback only — Apache on the host reverse-proxies :5173 -> here.
     ports:
       - "127.0.0.1:8080:8080"

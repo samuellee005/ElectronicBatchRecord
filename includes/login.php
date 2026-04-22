@@ -1,8 +1,9 @@
 <?php
 /**
  * POST JSON { "username", "password?" } — sets PHP session on success.
- * Password is required only when EBR_REQUIRE_PASSWORD=1.
- * Reads enterprise table `db_user` only (no writes to that table).
+ * Password is required only when EBR_REQUIRE_PASSWORD=1 (and not EBR_LOGIN_BYPASS_DB=1).
+ * When EBR_LOGIN_BYPASS_DB=1 (e.g. dev server), any non-empty username is accepted; no `db_user` read.
+ * Otherwise reads enterprise table `db_user` only (no writes to that table).
  */
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/session.php';
@@ -25,10 +26,34 @@ if (!is_array($raw)) {
 
 $username = trim((string) ($raw['username'] ?? ''));
 $password = (string) ($raw['password'] ?? '');
-$requirePassword = ebr_login_requires_password();
+$bypassDb = ebr_login_bypass_db_user();
+$requirePassword = !$bypassDb && ebr_login_requires_password();
 
 if ($username === '') {
     echo json_encode(['success' => false, 'message' => 'Username is required']);
+    exit;
+}
+if (strlen($username) > 200) {
+    echo json_encode(['success' => false, 'message' => 'Username is too long.']);
+    exit;
+}
+
+if ($bypassDb) {
+    if (function_exists('session_regenerate_id')) {
+        session_regenerate_id(true);
+    }
+    $_SESSION['ebr_user'] = ebr_db_user_synthetic_session_payload($username);
+    $u = $_SESSION['ebr_user'];
+    echo json_encode([
+        'success' => true,
+        'bypassDb' => true,
+        'user' => [
+            'id' => $u['id'],
+            'username' => $u['username'],
+            'displayName' => $u['display_name'],
+            'role' => $u['role'],
+        ],
+    ]);
     exit;
 }
 
@@ -45,8 +70,21 @@ try {
     exit;
 }
 
-if ($row === null || ebr_db_user_is_disabled($row)) {
-    echo json_encode(['success' => false, 'message' => 'Invalid username or password']);
+if ($row === null) {
+    echo json_encode([
+        'success' => false,
+        'code' => 'user_not_found',
+        'message' => 'That username was not found in the database (table db_user). The user must exist in the PostgreSQL database this EBR instance uses — check the spelling, and settings such as EBR_PG_DATABASE, EBR_DEPLOYMENT, and EBR_PG_HOST.',
+    ]);
+    exit;
+}
+
+if (ebr_db_user_is_disabled($row)) {
+    echo json_encode([
+        'success' => false,
+        'code' => 'user_disabled',
+        'message' => 'This account is disabled in db_user (disabled = Y).',
+    ]);
     exit;
 }
 

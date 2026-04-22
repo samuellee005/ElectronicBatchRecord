@@ -61,3 +61,19 @@ function ebr_login_requires_password(): bool
 
     return $s === '1' || $s === 'true' || $s === 'yes' || $s === 'on';
 }
+
+/**
+ * When true, login accepts any non-empty username without reading `db_user`
+ * (no PostgreSQL user table required). Intended for the dev server; when you go live, leave
+ * this unset and sign in using the real `db_user` table.
+ */
+function ebr_login_bypass_db_user(): bool
+{
+    $v = getenv('EBR_LOGIN_BYPASS_DB');
+    if ($v === false || $v === '') {
+        return false;
+    }
+    $s = strtolower(trim((string) $v));
+
+    return $s === '1' || $s === 'true' || $s === 'yes' || $s === 'on';
+}
