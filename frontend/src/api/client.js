@@ -113,6 +113,11 @@ export async function authMe() {
   return request('/includes/auth-me.php')
 }
 
+/** Public: whether the server expects a password on login. */
+export async function getLoginConfig() {
+  return request('/includes/login-config.php')
+}
+
 export async function apiLogin(body) {
   return request('/includes/login.php', {
     method: 'POST',

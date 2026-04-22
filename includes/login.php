@@ -1,6 +1,7 @@
 <?php
 /**
- * POST JSON { "username", "password" } — sets PHP session on success.
+ * POST JSON { "username", "password?" } — sets PHP session on success.
+ * Password is required only when EBR_REQUIRE_PASSWORD=1.
  * Reads enterprise table `db_user` only (no writes to that table).
  */
 require_once __DIR__ . '/../config.php';
@@ -24,9 +25,15 @@ if (!is_array($raw)) {
 
 $username = trim((string) ($raw['username'] ?? ''));
 $password = (string) ($raw['password'] ?? '');
+$requirePassword = ebr_login_requires_password();
 
-if ($username === '' || $password === '') {
-    echo json_encode(['success' => false, 'message' => 'Username and password are required']);
+if ($username === '') {
+    echo json_encode(['success' => false, 'message' => 'Username is required']);
+    exit;
+}
+
+if ($requirePassword && $password === '') {
+    echo json_encode(['success' => false, 'message' => 'Password is required']);
     exit;
 }
 
@@ -43,9 +50,11 @@ if ($row === null || ebr_db_user_is_disabled($row)) {
     exit;
 }
 
-if (!ebr_db_user_verify_password($password, $row['password'] ?? null)) {
-    echo json_encode(['success' => false, 'message' => 'Invalid username or password']);
-    exit;
+if ($requirePassword) {
+    if (!ebr_db_user_verify_password($password, $row['password'] ?? null)) {
+        echo json_encode(['success' => false, 'message' => 'Invalid username or password']);
+        exit;
+    }
 }
 
 if (function_exists('session_regenerate_id')) {

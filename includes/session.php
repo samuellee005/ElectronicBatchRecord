@@ -45,3 +45,19 @@ function ebr_api_requires_session(): bool
 
     return $s === '1' || $s === 'true' || $s === 'yes' || $s === 'on';
 }
+
+/**
+ * When true, /includes/login.php checks password against `db_user.password`.
+ * Unset = username-only (testing; user must still exist in `db_user` and not be disabled).
+ * Set EBR_REQUIRE_PASSWORD=1 in production before connecting to the main app auth.
+ */
+function ebr_login_requires_password(): bool
+{
+    $v = getenv('EBR_REQUIRE_PASSWORD');
+    if ($v === false || $v === '') {
+        return false;
+    }
+    $s = strtolower(trim((string) $v));
+
+    return $s === '1' || $s === 'true' || $s === 'yes' || $s === 'on';
+}

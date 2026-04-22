@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { apiLogin } from '../api/client'
+import { apiLogin, getLoginConfig } from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import { useUserPrefs } from '../context/UserPrefsContext'
 import './Login.css'
@@ -12,8 +12,27 @@ export default function Login() {
   const { updatePrefs } = useUserPrefs()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [requirePassword, setRequirePassword] = useState(false)
+  const [configLoading, setConfigLoading] = useState(true)
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+
+  useEffect(() => {
+    let ok = true
+    ;(async () => {
+      try {
+        const cfg = await getLoginConfig()
+        if (ok) setRequirePassword(!!cfg.requirePassword)
+      } catch {
+        if (ok) setRequirePassword(false)
+      } finally {
+        if (ok) setConfigLoading(false)
+      }
+    })()
+    return () => {
+      ok = false
+    }
+  }, [])
 
   useEffect(() => {
     if (ready && authenticated) {
@@ -26,13 +45,20 @@ export default function Login() {
     e.preventDefault()
     setError('')
     const u = username.trim()
-    if (!u || !password) {
-      setError('Enter username and password.')
+    if (!u) {
+      setError('Enter a username.')
+      return
+    }
+    if (requirePassword && !password) {
+      setError('Enter your password.')
       return
     }
     setSubmitting(true)
     try {
-      const res = await apiLogin({ username: u, password })
+      const body = requirePassword
+        ? { username: u, password }
+        : { username: u }
+      const res = await apiLogin(body)
       if (!res.success) {
         setError(res.message || 'Login failed')
         return
@@ -64,30 +90,32 @@ export default function Login() {
               autoComplete="username"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              disabled={submitting}
+              disabled={submitting || configLoading}
             />
           </label>
-          <label className="login-label">
-            Password
-            <input
-              className="login-input"
-              type="password"
-              name="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              disabled={submitting}
-            />
-          </label>
+          {requirePassword ? (
+            <label className="login-label">
+              Password
+              <input
+                className="login-input"
+                type="password"
+                name="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                disabled={submitting}
+              />
+            </label>
+          ) : null}
           {error ? <p className="login-error" role="alert">{error}</p> : null}
-          <button type="submit" className="login-submit" disabled={submitting}>
-            {submitting ? 'Signing in…' : 'Sign in'}
+          <button type="submit" className="login-submit" disabled={submitting || configLoading}>
+            {submitting ? 'Signing in…' : configLoading ? 'Loading…' : 'Sign in'}
           </button>
         </form>
         <p className="login-hint">
           Sign-in checks the read-only <code>db_user</code> table; users are not created or changed in this app. Set{' '}
           <code>EBR_ADMIN_USERNAMES=user1,user2</code> for admin in the UI. Use <code>EBR_REQUIRE_LOGIN=1</code> to require
-          a session for API calls.
+          a session for API calls. Set <code>EBR_REQUIRE_PASSWORD=1</code> to require a password (production).
         </p>
       </div>
     </div>
