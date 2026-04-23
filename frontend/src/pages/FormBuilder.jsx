@@ -25,15 +25,15 @@ import { DEFAULT_TABLE_COL_WIDTH, DEFAULT_TABLE_ROW_HEIGHT, tableColWidthPx, tab
 import './FormBuilder.css'
 
 const COMPONENT_TYPES = [
-  { type: 'text', Icon: PencilSquareIcon, name: 'Text Entry' },
-  { type: 'date', Icon: CalendarIcon, name: 'Date Entry' },
-  { type: 'number', Icon: HashtagIcon, name: 'Number Entry' },
+  { type: 'text', Icon: PencilSquareIcon, name: 'Text' },
+  { type: 'date', Icon: CalendarIcon, name: 'Date' },
+  { type: 'number', Icon: HashtagIcon, name: 'Number' },
   { type: 'dropdown', Icon: ChevronUpDownIcon, name: 'Dropdown' },
   { type: 'checkbox', Icon: CheckIcon, name: 'Checkbox' },
-  { type: 'time', Icon: ClockIcon, name: 'Time Entry' },
+  { type: 'time', Icon: ClockIcon, name: 'Time' },
   { type: 'radio', Icon: StopCircleIcon, name: 'Radio Group' },
   { type: 'multiselect', Icon: Squares2X2Icon, name: 'Multi Select' },
-  { type: 'collaborator', Icon: UserGroupIcon, name: 'Collaborator Entry' },
+  { type: 'collaborator', Icon: UserGroupIcon, name: 'Collaborator' },
   { type: 'table', Icon: TableCellsIcon, name: 'Data Table' },
 ]
 
@@ -118,6 +118,159 @@ function applyStageNameOrderToFields(orderedNames) {
 function getComponentTypeLabel(type) {
   const c = COMPONENT_TYPES.find((x) => x.type === type)
   return c ? c.name : (type || 'Field')
+}
+
+/** Unassigned and each stage are separate groups: order 1..n in the Stages list + properties. */
+function stageKey(f) {
+  return (f?.stageInProcess && String(f.stageInProcess).trim()) || ''
+}
+
+function maxStageOrderInForm(fields) {
+  let max = 0
+  for (const f of fields || []) {
+    const n = Number(f?.stageOrder)
+    if (Number.isFinite(n) && n > max) max = n
+  }
+  return max
+}
+
+function nextUnusedStageOrder(fields) {
+  return maxStageOrderInForm(fields) + 1
+}
+
+function sortFieldsInGroupList(fields, key) {
+  return fields
+    .filter((f) => stageKey(f) === key)
+    .sort((a, b) => {
+      const oa = Number(a.orderInGroup)
+      const ob = Number(b.orderInGroup)
+      const aOk = Number.isFinite(oa) && oa > 0
+      const bOk = Number.isFinite(ob) && ob > 0
+      if (aOk && bOk && oa !== ob) return oa - ob
+      if (aOk && !bOk) return -1
+      if (!aOk && bOk) return 1
+      return a.id.localeCompare(b.id)
+    })
+}
+
+function sortFieldIdsInGroup(fields, key) {
+  return sortFieldsInGroupList(fields, key).map((f) => f.id)
+}
+
+/**
+ * Apply new `orderInGroup` for a moved/reordered field and renumber affected groups.
+ * `oldKey` is the field's group before the move (required when that differs from key in `prev` for the field,
+ * e.g. after a partial merge). `patch` merges onto the moved field (e.g. `stageOrder` from the properties form).
+ */
+function applyFieldGroupPlacement(prev, fieldId, newKey, orderedIds, oldKey, patch) {
+  const nk = (newKey || '').trim()
+  const newOrderMap = new Map(orderedIds.map((id, i) => [id, i + 1]))
+  let oldOrderMap = null
+  if (oldKey !== nk) {
+    const oldIds = sortFieldIdsInGroup(prev, oldKey).filter((id) => id !== fieldId)
+    oldOrderMap = new Map(oldIds.map((id, i) => [id, i + 1]))
+  }
+  return prev.map((f) => {
+    if (f.id === fieldId) {
+      const og = newOrderMap.get(f.id)
+      if (og == null) return f
+      if (oldKey === nk) {
+        const n = f.orderInGroup === og ? f : { ...f, orderInGroup: og }
+        return patch && Object.keys(patch).length ? { ...n, ...patch } : n
+      }
+      if (!nk) {
+        const o = { ...f, orderInGroup: og, stageInProcess: '', stageOrder: null }
+        return patch && Object.keys(patch).length ? { ...o, ...patch } : o
+      }
+      const peer = prev.find(
+        (x) => x.id !== fieldId && String(x.stageInProcess || '').trim() === nk,
+      )
+      const so =
+        patch && patch.stageOrder != null
+          ? Number(patch.stageOrder)
+          : peer != null && Number.isFinite(Number(peer.stageOrder))
+            ? Number(peer.stageOrder)
+            : nextUnusedStageOrder(prev.filter((x) => x.id !== fieldId))
+      const o = { ...f, orderInGroup: og, stageInProcess: nk, stageOrder: so }
+      if (patch && Object.keys(patch).length) {
+        const p = { ...o, ...patch, orderInGroup: og, stageInProcess: nk }
+        if (patch.stageOrder != null) p.stageOrder = patch.stageOrder
+        return p
+      }
+      return o
+    }
+    if (oldKey !== nk) {
+      const sk = stageKey(f)
+      if (sk === oldKey && oldOrderMap && oldOrderMap.has(f.id)) {
+        const o = oldOrderMap.get(f.id)
+        return f.orderInGroup === o ? f : { ...f, orderInGroup: o }
+      }
+      if (sk === nk && newOrderMap.has(f.id)) {
+        const o = newOrderMap.get(f.id)
+        return f.orderInGroup === o ? f : { ...f, orderInGroup: o }
+      }
+    } else if (newOrderMap.has(f.id)) {
+      const o = newOrderMap.get(f.id)
+      return f.orderInGroup === o ? f : { ...f, orderInGroup: o }
+    }
+    return f
+  })
+}
+
+/**
+ * @param {object | null} patch - merged onto the moved field (e.g. from properties when `stageInProcess` changes)
+ * @param {string | null} oldKeyOverride - if set, use as previous group (when `prev` was already updated)
+ */
+function placeFieldInGroupOrder(
+  prev,
+  fieldId,
+  newKey,
+  anchorFieldId,
+  insertBefore,
+  oldKeyOverride = null,
+  patch = null,
+) {
+  const nk = (newKey || '').trim()
+  const f0 = prev.find((f) => f.id === fieldId)
+  if (!f0) return prev
+  const oldKey = oldKeyOverride != null && oldKeyOverride !== undefined ? String(oldKeyOverride) : stageKey(f0)
+  let newGroupIds = sortFieldIdsInGroup(prev, nk).filter((id) => id !== fieldId)
+  let insertAt = newGroupIds.length
+  if (anchorFieldId && newGroupIds.includes(anchorFieldId)) {
+    const ai = newGroupIds.indexOf(anchorFieldId)
+    insertAt = insertBefore ? ai : ai + 1
+  }
+  newGroupIds = [...newGroupIds.slice(0, insertAt), fieldId, ...newGroupIds.slice(insertAt)]
+  return applyFieldGroupPlacement(prev, fieldId, nk, newGroupIds, oldKey, patch)
+}
+
+function normalizeFieldGroupOrder(fields) {
+  if (!fields?.length) return fields
+  const byKey = new Map()
+  for (const f of fields) {
+    const k = stageKey(f)
+    if (!byKey.has(k)) byKey.set(k, [])
+    byKey.get(k).push(f)
+  }
+  const idToOrder = new Map()
+  for (const arr of byKey.values()) {
+    arr.sort((a, b) => {
+      const oa = Number(a.orderInGroup)
+      const ob = Number(b.orderInGroup)
+      const aOk = Number.isFinite(oa) && oa > 0
+      const bOk = Number.isFinite(ob) && ob > 0
+      if (aOk && bOk && oa !== ob) return oa - ob
+      if (aOk && !bOk) return -1
+      if (!aOk && bOk) return 1
+      return a.id.localeCompare(b.id)
+    })
+    arr.forEach((x, i) => idToOrder.set(x.id, i + 1))
+  }
+  return fields.map((f) => {
+    const o = idToOrder.get(f.id)
+    if (f.orderInGroup === o) return f
+    return { ...f, orderInGroup: o }
+  })
 }
 
 /** Split total between two sizes by delta; enforce minimum. */
@@ -606,6 +759,7 @@ export default function FormBuilder() {
   const canvasScrollRef = useRef(null)
   /** Saved when changing pages; applied in handlePageRendered after the new page paints (avoids jump on first load). */
   const pendingCanvasScrollRestoreRef = useRef(null)
+  const pendingFieldScrollToRef = useRef(null)
 
   const [fields, setFields] = useState([])
   const [selectedFieldId, setSelectedFieldId] = useState(null)
@@ -761,7 +915,11 @@ export default function FormBuilder() {
         if (data.success && data.form?.fields) {
           setLoadedFormName(data.form.name || null)
           setSourceFormIds(data.form.sourceFormIds?.length ? data.form.sourceFormIds : [urlFormId])
-          setFields(data.form.fields.map((f) => ({ ...f, page: f.page || 1 })))
+          setFields(
+            normalizeFieldGroupOrder(
+              data.form.fields.map((f) => ({ ...f, page: f.page || 1 })),
+            ),
+          )
         }
       })
     }
@@ -779,6 +937,7 @@ export default function FormBuilder() {
     if (n != null) setTotalPages(n)
 
     const saved = pendingCanvasScrollRestoreRef.current
+    const hadSavedScroll = saved != null
     if (saved != null) {
       pendingCanvasScrollRestoreRef.current = null
       const scrollRef = canvasScrollRef
@@ -801,12 +960,49 @@ export default function FormBuilder() {
         })
       })
     }
+
+    const scrollToField = pendingFieldScrollToRef.current
+    if (scrollToField) {
+      const fieldIdToScroll = scrollToField
+      pendingFieldScrollToRef.current = null
+      const doScroll = () => {
+        const el = document.querySelector(`[data-fb-field-id="${fieldIdToScroll}"]`)
+        el?.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' })
+      }
+      const base = hadSavedScroll ? 450 : 0
+      setTimeout(doScroll, base)
+      setTimeout(doScroll, base + 100)
+      setTimeout(doScroll, base + 400)
+    }
   }, [])
 
   const goToPdfPage = useCallback((page) => {
     pendingCanvasScrollRestoreRef.current = canvasScrollRef.current?.scrollTop ?? 0
     pdfRef.current?.goToPage?.(page)
   }, [])
+
+  const focusFieldOnCanvas = useCallback(
+    (field) => {
+      if (!field) return
+      setSelectedFieldId(field.id)
+      const p = field.page || 1
+      if (p !== currentPage) {
+        pendingFieldScrollToRef.current = field.id
+        goToPdfPage(p)
+      } else {
+        const doScroll = () => {
+          const el = document.querySelector(`[data-fb-field-id="${field.id}"]`)
+          el?.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' })
+        }
+        requestAnimationFrame(() => {
+          doScroll()
+          setTimeout(doScroll, 0)
+          setTimeout(doScroll, 100)
+        })
+      }
+    },
+    [currentPage, goToPdfPage],
+  )
 
   // Zoom handlers
   const zoomIn = () => setScale((s) => Math.min(s + 0.25, 3.0))
@@ -824,7 +1020,7 @@ export default function FormBuilder() {
         if (showSaveModal) setShowSaveModal(false)
       }
       if (e.key === 'Delete' && selectedFieldId) {
-        setFields((prev) => prev.filter((f) => f.id !== selectedFieldId))
+        setFields((prev) => normalizeFieldGroupOrder(prev.filter((f) => f.id !== selectedFieldId)))
         setSelectedFieldId(null)
       }
     }
@@ -877,16 +1073,32 @@ export default function FormBuilder() {
       ]
       newField.tableMerges = []
     }
-    setFields((prev) => [...prev, newField])
+    setFields((prev) => {
+      const maxO = prev
+        .filter((f) => !f.stageInProcess?.trim())
+        .reduce((m, f) => Math.max(m, Number(f.orderInGroup) || 0), 0)
+      return [...prev, { ...newField, orderInGroup: maxO + 1 }]
+    })
     setSelectedFieldId(newField.id)
   }, [canvasSize, scale])
 
   const updateField = useCallback((id, updates) => {
-    setFields((prev) => prev.map((f) => (f.id === id ? { ...f, ...updates } : f)))
+    setFields((prev) => {
+      const f0 = prev.find((f) => f.id === id)
+      if (!f0) return prev
+      if (updates.stageInProcess === undefined) {
+        return prev.map((f) => (f.id === id ? { ...f, ...updates } : f))
+      }
+      const newStage = (updates.stageInProcess || '').trim()
+      if (stageKey(f0) === newStage) {
+        return prev.map((f) => (f.id === id ? { ...f, ...updates } : f))
+      }
+      return placeFieldInGroupOrder(prev, id, newStage, null, true, stageKey(f0), updates)
+    })
   }, [])
 
   const deleteField = useCallback((id) => {
-    setFields((prev) => prev.filter((f) => f.id !== id))
+    setFields((prev) => normalizeFieldGroupOrder(prev.filter((f) => f.id !== id)))
     setSelectedFieldId((prev) => (prev === id ? null : prev))
   }, [])
 
@@ -1175,7 +1387,11 @@ export default function FormBuilder() {
           setSourceFormIds(
             data.form.sourceFormIds?.length ? data.form.sourceFormIds : [selectionFormId],
           )
-          setFields(data.form.fields.map((f) => ({ ...f, page: f.page || 1 })))
+          setFields(
+            normalizeFieldGroupOrder(
+              data.form.fields.map((f) => ({ ...f, page: f.page || 1 })),
+            ),
+          )
         }
       })
     }
@@ -1264,29 +1480,14 @@ export default function FormBuilder() {
   // -- Stages (order matches form; used in properties + left panel) --
 
   const existingStages = useMemo(() => buildOrderedStageNames(fields), [fields])
-  const unassignedFields = useMemo(
-    () => fields.filter((f) => !f.stageInProcess?.trim()),
-    [fields],
-  )
+  const unassignedFields = useMemo(() => sortFieldsInGroupList(fields, ''), [fields])
 
   const dragFieldIdRef = useRef(null)
   const dragStageNameRef = useRef(null)
 
   const moveFieldToStageById = useCallback((fieldId, targetStageName) => {
-    const trimmed = String(targetStageName || '').trim()
     setFields((prev) =>
-      prev.map((f) => {
-        if (f.id !== fieldId) return f
-        if (!trimmed) {
-          return { ...f, stageInProcess: '', stageOrder: null }
-        }
-        const peer = prev.find((x) => x.id !== fieldId && x.stageInProcess?.trim() === trimmed)
-        const so =
-          peer != null && Number.isFinite(Number(peer.stageOrder))
-            ? Number(peer.stageOrder)
-            : nextUnusedStageOrder(prev.filter((x) => x.id !== fieldId))
-        return { ...f, stageInProcess: trimmed, stageOrder: so }
-      }),
+      placeFieldInGroupOrder(prev, fieldId, String(targetStageName || '').trim(), null, true),
     )
   }, [])
 
@@ -1363,8 +1564,9 @@ export default function FormBuilder() {
                   <section className="fb-stages-section" aria-label="Form stages">
                     <h2 className="fb-components-section-title">Stages</h2>
                     <p className="fb-stages-hint">
-                      Drag a stage by its handle to change order. Drag a field name into another stage to
-                      reassign.
+                      Use the grip to drag a field. Drop on a row to insert before or after that field; drop
+                      on an area below the list to add to the end. Click a field name to show it on the
+                      PDF. Drag a stage header to reorder stages.
                     </p>
                     <div className="fb-stages-section-scroll">
                       <div
@@ -1388,23 +1590,77 @@ export default function FormBuilder() {
                           <span className="fb-stage-block-count">{unassignedFields.length}</span>
                         </div>
                         {unassignedFields.length === 0 ? (
-                          <p className="fb-stage-block-empty">Drop a field here to clear its stage.</p>
+                          <p
+                            className="fb-stage-block-empty"
+                            onDragOver={(e) => {
+                              e.preventDefault()
+                              e.dataTransfer.dropEffect = 'move'
+                            }}
+                          >
+                            Drop a field here to clear its stage.
+                          </p>
                         ) : (
-                          <ul className="fb-stage-field-list">
+                          <ul
+                            className="fb-stage-field-list"
+                            onDragOver={(e) => {
+                              e.preventDefault()
+                              e.dataTransfer.dropEffect = 'move'
+                            }}
+                            onDrop={(e) => {
+                              if (e.target !== e.currentTarget) return
+                              e.preventDefault()
+                              e.stopPropagation()
+                              const id = dragFieldIdRef.current
+                              if (id) {
+                                setFields((prev) => placeFieldInGroupOrder(prev, id, '', null, true))
+                                clearPanelDragRefs()
+                              }
+                            }}
+                          >
                             {unassignedFields.map((f) => (
-                              <li key={f.id} className="fb-stage-field-item">
-                                <span
-                                  className="fb-stage-field-pill"
-                                  draggable
-                                  onDragStart={(e) => {
-                                    e.stopPropagation()
-                                    dragFieldIdRef.current = f.id
-                                    e.dataTransfer.effectAllowed = 'move'
-                                    e.dataTransfer.setData('text/plain', f.id)
-                                  }}
-                                  onDragEnd={clearPanelDragRefs}
-                                >
-                                  {f.label || getComponentTypeLabel(f.type)}
+                              <li
+                                key={f.id}
+                                className="fb-stage-field-item"
+                                onDragOver={(e) => {
+                                  e.preventDefault()
+                                  e.dataTransfer.dropEffect = 'move'
+                                }}
+                                onDrop={(e) => {
+                                  e.preventDefault()
+                                  e.stopPropagation()
+                                  const id = dragFieldIdRef.current
+                                  if (!id || id === f.id) {
+                                    clearPanelDragRefs()
+                                    return
+                                  }
+                                  const rect = e.currentTarget.getBoundingClientRect()
+                                  const before = e.clientY < rect.top + rect.height / 2
+                                  setFields((prev) => placeFieldInGroupOrder(prev, id, '', f.id, before))
+                                  clearPanelDragRefs()
+                                }}
+                              >
+                                <span className="fb-stage-field-pill">
+                                  <span
+                                    className="fb-stage-field-pill-grip"
+                                    draggable
+                                    onDragStart={(e) => {
+                                      e.stopPropagation()
+                                      dragFieldIdRef.current = f.id
+                                      e.dataTransfer.effectAllowed = 'move'
+                                      e.dataTransfer.setData('text/plain', f.id)
+                                    }}
+                                    onDragEnd={clearPanelDragRefs}
+                                    title="Drag to move or reorder"
+                                  >
+                                    <Bars3Icon className="fb-stage-pill-grip-icon" aria-hidden />
+                                  </span>
+                                  <button
+                                    type="button"
+                                    className="fb-stage-field-pill-label"
+                                    onClick={() => focusFieldOnCanvas(f)}
+                                  >
+                                    {f.label || getComponentTypeLabel(f.type)}
+                                  </button>
                                 </span>
                               </li>
                             ))}
@@ -1413,7 +1669,7 @@ export default function FormBuilder() {
                       </div>
 
                       {existingStages.map((stageName) => {
-                        const inStage = fields.filter((f) => f.stageInProcess?.trim() === stageName)
+                        const inStage = sortFieldsInGroupList(fields, stageName)
                         return (
                           <div
                             key={stageName}
@@ -1455,21 +1711,71 @@ export default function FormBuilder() {
                               </span>
                               <span className="fb-stage-block-count">{inStage.length}</span>
                             </div>
-                            <ul className="fb-stage-field-list">
+                            <ul
+                              className="fb-stage-field-list"
+                              onDragOver={(e) => {
+                                e.preventDefault()
+                                e.dataTransfer.dropEffect = 'move'
+                              }}
+                              onDrop={(e) => {
+                                if (e.target !== e.currentTarget) return
+                                e.preventDefault()
+                                e.stopPropagation()
+                                const id = dragFieldIdRef.current
+                                if (id) {
+                                  setFields((prev) =>
+                                    placeFieldInGroupOrder(prev, id, stageName, null, true),
+                                  )
+                                  clearPanelDragRefs()
+                                }
+                              }}
+                            >
                               {inStage.map((f) => (
-                                <li key={f.id} className="fb-stage-field-item">
-                                  <span
-                                    className="fb-stage-field-pill"
-                                    draggable
-                                    onDragStart={(e) => {
-                                      e.stopPropagation()
-                                      dragFieldIdRef.current = f.id
-                                      e.dataTransfer.effectAllowed = 'move'
-                                      e.dataTransfer.setData('text/plain', f.id)
-                                    }}
-                                    onDragEnd={clearPanelDragRefs}
-                                  >
-                                    {f.label || getComponentTypeLabel(f.type)}
+                                <li
+                                  key={f.id}
+                                  className="fb-stage-field-item"
+                                  onDragOver={(e) => {
+                                    e.preventDefault()
+                                    e.dataTransfer.dropEffect = 'move'
+                                  }}
+                                  onDrop={(e) => {
+                                    e.preventDefault()
+                                    e.stopPropagation()
+                                    const id = dragFieldIdRef.current
+                                    if (!id || id === f.id) {
+                                      clearPanelDragRefs()
+                                      return
+                                    }
+                                    const rect = e.currentTarget.getBoundingClientRect()
+                                    const before = e.clientY < rect.top + rect.height / 2
+                                    setFields((prev) =>
+                                      placeFieldInGroupOrder(prev, id, stageName, f.id, before),
+                                    )
+                                    clearPanelDragRefs()
+                                  }}
+                                >
+                                  <span className="fb-stage-field-pill">
+                                    <span
+                                      className="fb-stage-field-pill-grip"
+                                      draggable
+                                      onDragStart={(e) => {
+                                        e.stopPropagation()
+                                        dragFieldIdRef.current = f.id
+                                        e.dataTransfer.effectAllowed = 'move'
+                                        e.dataTransfer.setData('text/plain', f.id)
+                                      }}
+                                      onDragEnd={clearPanelDragRefs}
+                                      title="Drag to move or reorder"
+                                    >
+                                      <Bars3Icon className="fb-stage-pill-grip-icon" aria-hidden />
+                                    </span>
+                                    <button
+                                      type="button"
+                                      className="fb-stage-field-pill-label"
+                                      onClick={() => focusFieldOnCanvas(f)}
+                                    >
+                                      {f.label || getComponentTypeLabel(f.type)}
+                                    </button>
                                   </span>
                                 </li>
                               ))}
@@ -1999,6 +2305,7 @@ function FormField({ field, selected, scaleFactor = 1, onFieldUpdate, onMouseDow
   return (
     <div
       className={`fb-field ${selected ? 'selected' : ''}`}
+      data-fb-field-id={field.id}
       aria-label={field.label || 'Field'}
       style={{
         left: field.x * scaleFactor,
@@ -2161,21 +2468,6 @@ function FieldPreview({ field, selected, onFieldUpdate }) {
 
 // -- Properties Form sub-component --
 
-/** Max numeric stageOrder across all fields (0 if none set). */
-function maxStageOrderInForm(fields) {
-  let max = 0
-  for (const f of fields || []) {
-    const n = Number(f?.stageOrder)
-    if (Number.isFinite(n) && n > max) max = n
-  }
-  return max
-}
-
-/** Next order for a brand-new stage (max + 1, or 1 if empty). */
-function nextUnusedStageOrder(fields) {
-  return maxStageOrderInForm(fields) + 1
-}
-
 /** If another field already uses this stage name, return its stageOrder so new fields stay aligned. */
 function stageOrderForExistingStageName(fields, stageNameTrimmed, excludeFieldId) {
   const sn = String(stageNameTrimmed || '').trim()
@@ -2302,6 +2594,20 @@ function PropertiesForm({ field, existingStages, fields, onUpdate }) {
         <small className="fb-hint">
           Sequential order (1, 2, 3…). Choosing a stage sets this automatically: same number as other
           fields in that stage, or the next free number for a new stage (placeholder shows the next free).
+        </small>
+      </div>
+
+      <div className="fb-form-group">
+        <label>Order in Stages list:</label>
+        <input
+          type="number"
+          value={field.orderInGroup ?? ''}
+          readOnly
+          className="fb-disabled-input"
+        />
+        <small className="fb-hint">
+          Position within Unassigned or within the same stage (1, 2, 3…). Reorder by dragging fields in
+          the left Stages panel.
         </small>
       </div>
 

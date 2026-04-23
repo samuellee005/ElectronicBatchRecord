@@ -2137,11 +2137,7 @@ button.de-signature-correction-link {
   font-size: inherit;
 }
 
-/* Percent row heights match canvas only if cell content has no extra min-height (inputs default ~1.25em). */
-.overlay-field--compact .overlay-table-data-only tbody {
-  height: 100%;
-}
-
+/* Row heights come from <tr> styles (px on overlay via TableFieldInput + ResizeObserver). */
 .overlay-field--compact .overlay-table-data-only th,
 .overlay-field--compact .overlay-table-data-only td {
   min-width: 0;

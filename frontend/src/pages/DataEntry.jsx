@@ -1391,6 +1391,30 @@ function tableHeaderLabel(entity, idFallback) {
   return t || idFallback
 }
 
+/**
+ * Split a measured pixel height across data rows in the same ratios as the form row weights.
+ * % heights on <tr> are unreliable when the table sits in the PDF overlay (absolute layout); px matches Form Builder.
+ */
+function distributeTableRowHeightsPx(rows, totalRowWeight, contentHeightPx) {
+  const n = rows.length
+  if (n === 0 || totalRowWeight <= 0 || !Number.isFinite(contentHeightPx) || contentHeightPx < 1) {
+    return null
+  }
+  const target = Math.max(0, Math.floor(contentHeightPx))
+  const weights = rows.map((r) => tableRowHeightPx(r))
+  const sumW = weights.reduce((a, b) => a + b, 0) || 1
+  const flo = weights.map((w) => {
+    return Math.max(0, Math.floor((w / sumW) * target))
+  })
+  let s = flo.reduce((a, b) => a + b, 0)
+  let rem = target - s
+  for (let i = 0; i < n && rem > 0; i++) {
+    flo[i] += 1
+    rem--
+  }
+  return flo
+}
+
 function TableFieldInput({
   field,
   value,
@@ -1401,10 +1425,19 @@ function TableFieldInput({
   /** When true (PDF overlay), row/column weights fill the field frame like Form Builder preview. */
   fillParent = false,
 }) {
+  const scrollRef = useRef(null)
   const { cells } = normalizeTableValue(value)
   const cols = field.tableColumns || []
   const rows = field.tableRows || []
   const { rowIds, colIds, covered, spanOf } = buildTableMergeLayout(field)
+  const [rowHeightsPx, setRowHeightsPx] = useState(null)
+  const tableRowsKey = useMemo(
+    () =>
+      (field.tableRows || [])
+        .map((r) => `${r.id ?? ''}:${r.height ?? ''}`)
+        .join(','),
+    [field.tableRows],
+  )
 
   const setCell = (key, text) => {
     if (readOnly) return
@@ -1420,6 +1453,35 @@ function TableFieldInput({
   const totalColW = cols.reduce((s, c) => s + tableColWidthPx(c), 0)
   const totalRowH = rows.reduce((s, r) => s + tableRowHeightPx(r), 0)
 
+  // PDF overlay: use measured pixel row heights; % on <tr> is inconsistent under absolute/fixed + table fixed layout.
+  const usePixelRowHeights = fillParent && !showRowColumnLabels && totalRowH > 0
+  useLayoutEffect(() => {
+    if (!usePixelRowHeights) {
+      setRowHeightsPx(null)
+      return
+    }
+    const el = scrollRef.current
+    if (!el) {
+      setRowHeightsPx(null)
+      return
+    }
+    const measure = () => {
+      const cs = getComputedStyle(el)
+      const pt = parseFloat(cs.paddingTop) || 0
+      const pb = parseFloat(cs.paddingBottom) || 0
+      const innerH = el.clientHeight - pt - pb
+      if (innerH < 1) {
+        setRowHeightsPx(null)
+        return
+      }
+      setRowHeightsPx(distributeTableRowHeightsPx(rows, totalRowH, innerH))
+    }
+    measure()
+    const ro = new ResizeObserver(() => measure())
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [usePixelRowHeights, field.id, tableRowsKey, totalRowH, rows.length])
+
   const tableStyle = fillParent
     ? { tableLayout: 'fixed', width: '100%', height: '100%' }
     : { tableLayout: 'fixed', width: '100%' }
@@ -1431,7 +1493,10 @@ function TableFieldInput({
     return { width: tableColWidthPx(c) }
   }
 
-  const rowHeightStyle = (row) => {
+  const rowHeightStyle = (row, ri) => {
+    if (usePixelRowHeights && rowHeightsPx && rowHeightsPx[ri] != null) {
+      return { height: rowHeightsPx[ri] }
+    }
     if (fillParent && totalRowH > 0) {
       return { height: `${(tableRowHeightPx(row) / totalRowH) * 100}%` }
     }
@@ -1443,7 +1508,7 @@ function TableFieldInput({
     : 'overlay-table overlay-table-data-only'
 
   return (
-    <div className={`overlay-table-scroll${readOnly ? ' overlay-table-scroll-readonly' : ''}`}>
+    <div ref={scrollRef} className={`overlay-table-scroll${readOnly ? ' overlay-table-scroll-readonly' : ''}`}>
       <table className={tableClass} style={tableStyle}>
         <colgroup>
           {showRowColumnLabels && <col className="overlay-table-col-rowlabels" />}
@@ -1470,7 +1535,7 @@ function TableFieldInput({
         )}
         <tbody>
           {rows.map((row, ri) => (
-            <tr key={row.id} style={rowHeightStyle(row)}>
+            <tr key={row.id} style={rowHeightStyle(row, ri)}>
               {showRowColumnLabels && (
                 <th scope="row" className="overlay-table-row-header">
                   {tableHeaderLabel(row, row.id)}
