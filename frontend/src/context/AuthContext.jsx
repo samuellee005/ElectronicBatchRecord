@@ -1,5 +1,4 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
-import { isViteAuthBypass, VITE_BYPASS_USER } from '../authDev'
 import { authMe, apiLogout } from '../api/client'
 
 const AuthContext = createContext(null)
@@ -9,11 +8,6 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
 
   const refresh = useCallback(async () => {
-    if (isViteAuthBypass()) {
-      setUser(VITE_BYPASS_USER)
-      setReady(true)
-      return
-    }
     try {
       const res = await authMe()
       if (res.success && res.authenticated && res.user) {
@@ -33,10 +27,6 @@ export function AuthProvider({ children }) {
   }, [refresh])
 
   const logout = useCallback(async () => {
-    if (isViteAuthBypass()) {
-      setUser(VITE_BYPASS_USER)
-      return
-    }
     try {
       await apiLogout()
     } catch {

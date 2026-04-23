@@ -2529,7 +2529,7 @@ export default function DataEntry() {
 
   /** Persist current entry to the server (same payload as Save). Used by Save and before Mark complete. */
   const persistFormData = useCallback(
-    async ({ silentSuccess = false }) => {
+    async ({ silentSuccess = false, requireAllRequired = false } = {}) => {
       if (!formConfig) {
         alert('Form is not loaded yet.')
         return { ok: false }
@@ -2540,15 +2540,17 @@ export default function DataEntry() {
       const effectiveMap = Object.fromEntries(
         (formConfig.fields || []).map((f) => [f.id, getEffectiveValue(snapshot[f.id])]),
       )
-      const errors = []
-      formConfig.fields.forEach((f) => {
-        if (isRequired(f) && !isFieldValueFilled(f, effectiveMap[f.id])) {
-          errors.push(f.label || f.id)
+      if (requireAllRequired) {
+        const errors = []
+        formConfig.fields.forEach((f) => {
+          if (isRequired(f) && !isFieldValueFilled(f, effectiveMap[f.id])) {
+            errors.push(f.label || f.id)
+          }
+        })
+        if (errors.length) {
+          alert('Please fill in all required fields:\n- ' + errors.join('\n- '))
+          return { ok: false }
         }
-      })
-      if (errors.length) {
-        alert('Please fill in all required fields:\n- ' + errors.join('\n- '))
-        return { ok: false }
       }
       const stageCompletionPayload = computeStageCompletion(stages, effectiveMap)
       const bid = batchIdRef.current || batchId
@@ -2662,7 +2664,7 @@ export default function DataEntry() {
       }
       setSaving(true)
       try {
-        const saved = await persistFormData({ silentSuccess: true })
+        const saved = await persistFormData({ silentSuccess: true, requireAllRequired: true })
         if (!saved.ok) return
 
         const payload = { batchId: effectiveBatchId, status: 'completed', ...extra }
@@ -3019,7 +3021,11 @@ export default function DataEntry() {
         {!isCompleted && (
           <div className="de-save-section">
             <div className="de-card">
-              <p>Save your progress or mark the record as complete when all required fields are filled.</p>
+              <p>
+                <strong>Save Data</strong> stores your current progress; you can save with some fields
+                still empty. <strong>Mark as Complete</strong> is available only when every required
+                field is filled.
+              </p>
               <div className="de-save-actions">
                 <button className="btn btn-save" style={{ background: '#667eea', color: '#fff' }} disabled={saving} onClick={handleSave}>
                   {saving ? 'Saving...' : 'Save Data'}
