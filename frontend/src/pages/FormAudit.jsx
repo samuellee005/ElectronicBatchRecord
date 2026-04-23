@@ -182,21 +182,58 @@ export default function FormAudit() {
         {auditBlocks.length === 0 ? (
           <p className="form-audit-empty">No audit entries for this version.</p>
         ) : (
-          <ul className="form-audit-list">
-            {auditBlocks.map((b) => (
-              <li key={b.key} className="form-audit-card">
-                <div className="form-audit-card-headline">{b.headline}</div>
-                <div className="form-audit-card-meta">{b.meta}</div>
-                {b.bodyLines.length > 0 ? (
-                  <ul className="form-audit-card-details">
-                    {b.bodyLines.map((line, j) => (
-                      <li key={j}>{line}</li>
-                    ))}
-                  </ul>
-                ) : null}
-              </li>
-            ))}
-          </ul>
+          <div className="form-audit-table-wrap">
+            <table className="form-audit-table">
+              <thead>
+                <tr>
+                  <th className="form-audit-th form-audit-th--num" scope="col">
+                    #
+                  </th>
+                  <th className="form-audit-th form-audit-th--when" scope="col">
+                    When
+                  </th>
+                  <th className="form-audit-th form-audit-th--user" scope="col">
+                    User
+                  </th>
+                  <th className="form-audit-th form-audit-th--type" scope="col">
+                    Type
+                  </th>
+                  <th className="form-audit-th" scope="col">
+                    Event
+                  </th>
+                  <th className="form-audit-th" scope="col">
+                    Details
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {auditBlocks.map((b, i) => (
+                  <tr key={b.key}>
+                    <td className="form-audit-td form-audit-td--num">{i + 1}</td>
+                    <td className="form-audit-td form-audit-td--when">
+                      <span className="form-audit-time" title={b.at}>
+                        {b.at}
+                      </span>
+                    </td>
+                    <td className="form-audit-td form-audit-td--user">{b.user}</td>
+                    <td className="form-audit-td form-audit-td--type">{b.eventTypeLabel}</td>
+                    <td className="form-audit-td form-audit-td--headline">{b.headline}</td>
+                    <td className="form-audit-td form-audit-td--details">
+                      {b.bodyLines.length > 0 ? (
+                        <ul className="form-audit-details-list">
+                          {b.bodyLines.map((line, j) => (
+                            <li key={j}>{line}</li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <span className="form-audit-details-empty">—</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </section>
     </div>

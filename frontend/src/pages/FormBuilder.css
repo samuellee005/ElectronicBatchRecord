@@ -1271,6 +1271,8 @@
 .fb-table-preview-data-only td {
   padding: 0;
   vertical-align: middle;
+  /* Let colgroup % control columns (th,td rule has min-width: 28px — too high for data-only) */
+  min-width: 0;
 }
 
 .fb-table-preview-cell {

@@ -1,5 +1,5 @@
 .form-audit-page {
-  max-width: 960px;
+  max-width: min(1200px, 100%);
 }
 
 .form-audit-header {
@@ -87,42 +87,106 @@
   margin: 0;
 }
 
-.form-audit-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
+.form-audit-table-wrap {
+  overflow-x: auto;
+  border: 1px solid #e0e4ed;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
-.form-audit-card {
-  border-left: 4px solid #667eea;
-  padding: 14px 16px;
-  background: #f8f9fc;
-  border-radius: 0 8px 8px 0;
-}
-
-.form-audit-card-headline {
-  font-weight: 600;
-  color: #1a1a1a;
-  font-size: 0.95rem;
-  margin-bottom: 6px;
-}
-
-.form-audit-card-meta {
-  font-size: 0.8rem;
-  color: #666;
-}
-
-.form-audit-card-details {
-  margin: 10px 0 0;
-  padding-left: 18px;
+.form-audit-table {
+  width: 100%;
+  min-width: 640px;
+  border-collapse: collapse;
   font-size: 0.86rem;
-  color: #333;
-  line-height: 1.45;
+  line-height: 1.4;
 }
 
-.form-audit-card-details li {
-  margin-bottom: 4px;
+.form-audit-th,
+.form-audit-td {
+  padding: 10px 12px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid #e8eaef;
+}
+
+.form-audit-th {
+  background: #f0f2f7;
+  font-weight: 600;
+  color: #2a2d36;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.form-audit-table tbody tr:hover {
+  background: #f8f9fc;
+}
+
+.form-audit-table tbody tr:last-child .form-audit-td {
+  border-bottom: none;
+}
+
+.form-audit-th--num,
+.form-audit-td--num {
+  width: 2.25rem;
+  text-align: right;
+  color: #6b7280;
+  font-variant-numeric: tabular-nums;
+}
+
+.form-audit-th--when,
+.form-audit-td--when {
+  white-space: nowrap;
+  font-size: 0.82rem;
+  color: #374151;
+}
+
+.form-audit-time {
+  font-variant-numeric: tabular-nums;
+}
+
+.form-audit-th--user,
+.form-audit-td--user {
+  max-width: 8rem;
+  word-break: break-word;
+  color: #374151;
+}
+
+.form-audit-th--type,
+.form-audit-td--type {
+  max-width: 7.5rem;
+  font-size: 0.8rem;
+  color: #4b5563;
+}
+
+.form-audit-td--headline {
+  font-weight: 600;
+  color: #111827;
+  min-width: 9rem;
+}
+
+.form-audit-td--details {
+  color: #1f2937;
+  min-width: 10rem;
+}
+
+.form-audit-details-list {
+  margin: 0;
+  padding-left: 1.15em;
+  color: #374151;
+}
+
+.form-audit-details-list li {
+  margin-bottom: 0.2em;
+}
+
+.form-audit-details-list li:last-child {
+  margin-bottom: 0;
+}
+
+.form-audit-details-empty {
+  color: #9ca3af;
 }
