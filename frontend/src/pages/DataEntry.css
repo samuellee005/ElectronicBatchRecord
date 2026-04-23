@@ -2120,6 +2120,12 @@ button.de-signature-correction-link {
   height: 100%;
   min-height: 0;
   box-sizing: border-box;
+  /*
+   * Inset to match FormBuilder: .fb-field has 2px border (border-box) and FieldPreview uses 2px
+   * padding; the table grid only occupies the inner box. Without this, the overlay stretched the
+   * grid to the full field rect and cell sizes / lines did not match the builder or print.
+   */
+  padding: 4px;
 }
 
 .overlay-field--compact .overlay-table-scroll .overlay-table {

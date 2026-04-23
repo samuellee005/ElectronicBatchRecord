@@ -17,6 +17,7 @@ import {
 import { useUserPrefs } from '../context/UserPrefsContext'
 import './DataEntry.css'
 import { buildTableMergeLayout, tableCellKey } from '../utils/tableMergeLayout'
+import { tableColWidthPx, tableRowHeightPx } from '../utils/tableFieldDims'
 
 /** Default matches FormBuilder `DEFAULT_INPUT_FONT_PX` when `inputFontSize` is unset. */
 const OVERLAY_DEFAULT_INPUT_FONT_PX = 13
@@ -103,19 +104,6 @@ function parseMultiselectValue(v) {
     } catch { /* ignore */ }
   }
   return []
-}
-
-const DEFAULT_TABLE_COL_WIDTH = 72
-const DEFAULT_TABLE_ROW_HEIGHT = 28
-
-function tableColWidthPx(c) {
-  const n = Number(c?.width)
-  return Number.isFinite(n) && n >= 12 ? Math.round(n) : DEFAULT_TABLE_COL_WIDTH
-}
-
-function tableRowHeightPx(r) {
-  const n = Number(r?.height)
-  return Number.isFinite(n) && n >= 12 ? Math.round(n) : DEFAULT_TABLE_ROW_HEIGHT
 }
 
 function normalizeTableValue(v) {

@@ -20,6 +20,7 @@ import PdfZoomControls from '../components/PdfZoomControls'
 import { listForms, loadFormById, saveForm } from '../api/client'
 import { useUserPrefs } from '../context/UserPrefsContext'
 import { buildTableMergeLayout, tableCellKey } from '../utils/tableMergeLayout'
+import { DEFAULT_TABLE_COL_WIDTH, DEFAULT_TABLE_ROW_HEIGHT, tableColWidthPx, tableRowHeightPx } from '../utils/tableFieldDims'
 import './FormBuilder.css'
 
 const COMPONENT_TYPES = [
@@ -73,21 +74,8 @@ const PROPERTIES_PANEL_MIN_W = 260
 const PROPERTIES_PANEL_MAX_W = 640
 const PROPERTIES_PANEL_WIDTH_STORAGE_KEY = 'fb-properties-panel-width'
 
-const DEFAULT_TABLE_COL_WIDTH = 72
-const DEFAULT_TABLE_ROW_HEIGHT = 28
-
 function newTablePartId() {
   return 't_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8)
-}
-
-function tableColWidthPx(c) {
-  const w = parseInt(c?.width, 10)
-  return Number.isFinite(w) && w >= 12 ? w : DEFAULT_TABLE_COL_WIDTH
-}
-
-function tableRowHeightPx(r) {
-  const h = parseInt(r?.height, 10)
-  return Number.isFinite(h) && h >= 12 ? h : DEFAULT_TABLE_ROW_HEIGHT
 }
 
 /** Split total between two sizes by delta; enforce minimum. */
