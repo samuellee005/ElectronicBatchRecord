@@ -58,8 +58,8 @@ function ebr_batch_id_initials(?string $displayName): string
 
 /**
  * New unique batch identifier (filename stem = this value).
- * Nomenclature: BR-{YEAR}-{INITIALS}-{SEQ} (e.g. BR-2026-SL-00001). SEQ is 5 digits, first batch
- * for that user (initials) in that calendar year is 00001, then 00002, … (per initials+year).
+ * Nomenclature: BR-{YEAR}-{INITIALS}-{SEQ} (e.g. BR-2026-SL-001). SEQ is 3 digits, first batch
+ * for that user (initials) in that calendar year is 001, then 002, … (per initials+year).
  *
  * @param string|null $createdBy Display name from client; drives initials when present
  */
@@ -87,7 +87,7 @@ function ebr_generate_batch_id(?string $createdBy = null): string
     try {
         $max = ebr_db_batch_max_sequence($year, $initials);
         $next = $max + 1;
-        $seq = str_pad((string) $next, 5, '0', STR_PAD_LEFT);
+        $seq = str_pad((string) $next, 3, '0', STR_PAD_LEFT);
         $id = 'BR-' . $year . '-' . $initials . '-' . $seq;
 
         return $id;

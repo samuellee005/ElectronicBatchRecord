@@ -1,11 +1,9 @@
-/* Top bar account control — parent: .app-topbar (flex-end) */
+/* Fixed viewport corner — no app header; stacks above sidebar (z-index) */
 .user-menu {
-  position: relative;
-  flex-shrink: 0;
-}
-
-.user-menu--topbar {
-  margin-left: auto;
+  position: fixed;
+  top: max(12px, env(safe-area-inset-top, 0px));
+  right: max(16px, env(safe-area-inset-right, 0px));
+  z-index: 260;
 }
 
 .user-menu__trigger {

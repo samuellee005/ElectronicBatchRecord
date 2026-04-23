@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { StarIcon } from '@heroicons/react/24/solid'
-import { listForms, loadFormById } from '../api/client'
+import { listForms } from '../api/client'
 import { useUserPrefs } from '../context/UserPrefsContext'
 import './FormsList.css'
 
@@ -11,8 +11,6 @@ export default function FormsList() {
   const [loading, setLoading] = useState(true)
   const [latestOnly, setLatestOnly] = useState(true)
   const [search, setSearch] = useState('')
-  const [auditForm, setAuditForm] = useState(null)
-  const [auditDetail, setAuditDetail] = useState(null)
   const favorites = useMemo(
     () => (Array.isArray(prefs.ebrFavorites) ? prefs.ebrFavorites : []),
     [prefs.ebrFavorites],
@@ -21,11 +19,6 @@ export default function FormsList() {
   useEffect(() => {
     listForms().then((res) => setData({ forms: res.forms || [], groupedForms: res.groupedForms || {} })).finally(() => setLoading(false))
   }, [])
-
-  useEffect(() => {
-    if (!auditForm) return
-    loadFormById(auditForm.id).then((res) => setAuditDetail(res.form)).catch(() => setAuditDetail(null))
-  }, [auditForm])
 
   const forms = latestOnly ? (data.forms || []).filter((f) => f.isLatest) : (data.forms || [])
   const q = search.trim().toLowerCase()
@@ -77,7 +70,9 @@ export default function FormsList() {
                       View form
                     </Link>
                   )}
-                  <button type="button" className="audit-btn" onClick={() => setAuditForm(form)}>Audit</button>
+                  <Link to={`/forms/audit?form=${encodeURIComponent(form.id)}`} className="audit-btn">
+                    Audit
+                  </Link>
                 </td>
               </tr>
             ))}
@@ -85,18 +80,6 @@ export default function FormsList() {
         </table>
       </div>
       {data.forms && data.forms.length === 0 && <div className="empty-state"><p>No forms yet. <Link to="/forms/build">Build Form</Link></p></div>}
-      {auditForm && (
-        <div className="audit-modal" onClick={() => setAuditForm(null)}>
-          <div className="audit-content" onClick={(e) => e.stopPropagation()}>
-            <h2>Audit: {auditForm.name}</h2>
-            {auditDetail && <p>Version: {auditDetail.version ?? 1}</p>}
-            {auditDetail && auditDetail.auditTrail && auditDetail.auditTrail.length > 0
-              ? auditDetail.auditTrail.map((entry, i) => <div key={i} className="audit-entry">{entry.type} - {entry.user}</div>)
-              : <p>No audit entries.</p>}
-            <button type="button" className="btn btn-primary" style={{ marginTop: 16 }} onClick={() => setAuditForm(null)}>Close</button>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

@@ -378,9 +378,16 @@
 
 /* ── Stage panel ────────────────────────────────────────── */
 .stages-panel h3 {
-  margin: 0 0 14px;
+  margin: 0 0 8px;
   font-size: 1rem;
   color: #333;
+}
+
+.stages-panel-hint {
+  margin: 0 0 12px;
+  font-size: 0.78rem;
+  color: #666;
+  line-height: 1.35;
 }
 
 .stage-item {
@@ -393,6 +400,19 @@
   border-left: 4px solid #ccc;
   background: #fafafa;
   transition: border-color 0.2s, background 0.2s;
+}
+
+.stage-item--nav {
+  cursor: pointer;
+}
+
+.stage-item--nav:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.stage-item--nav:focus-visible {
+  outline: 2px solid #667eea;
+  outline-offset: 2px;
 }
 
 .stage-item.completed {
@@ -1288,6 +1308,12 @@ button.de-signature-correction-link {
   justify-content: center;
   align-items: flex-end;
   box-sizing: border-box;
+}
+
+/* Data tables after Submit field: locked-inner flex is for bottom-aligned text/signature; tables need
+   normal block layout so colgroup % widths and row % heights match Form Builder / pre-submit overlay. */
+.overlay-field-input-container--compact.overlay-field-locked-inner.overlay-field-audit-table {
+  display: block;
 }
 
 .overlay-field-ref-badge--compact {

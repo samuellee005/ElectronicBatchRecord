@@ -32,14 +32,10 @@ export default function ProtectedLayout() {
   return (
     <div className="app-shell">
       <Nav />
-      <div className="app-main-column">
-        <header className="app-topbar">
-          <UserMenu />
-        </header>
-        <main className={wideMain ? 'main main--wide' : 'main'}>
-          <Outlet />
-        </main>
-      </div>
+      <main className={wideMain ? 'main main--wide' : 'main'}>
+        <Outlet />
+      </main>
+      <UserMenu />
     </div>
   )
 }

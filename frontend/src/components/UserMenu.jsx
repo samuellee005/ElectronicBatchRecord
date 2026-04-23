@@ -6,7 +6,7 @@ import { getUserInitials } from '../utils/userInitials'
 import './UserMenu.css'
 
 /**
- * Top-right account menu (avatar, profile, sign out). Rendered in `ProtectedLayout` app top bar.
+ * Fixed top-right account menu (avatar, profile, sign out). Rendered in `ProtectedLayout` after main.
  * @param {{ onOpenMenu?: () => void }} [props]
  */
 export default function UserMenu({ onOpenMenu }) {
@@ -53,7 +53,7 @@ export default function UserMenu({ onOpenMenu }) {
   }
 
   return (
-    <div ref={wrapRef} className={`user-menu user-menu--topbar${open ? ' user-menu--open' : ''}`}>
+    <div ref={wrapRef} className={`user-menu${open ? ' user-menu--open' : ''}`}>
       <button
         type="button"
         className="user-menu__trigger"

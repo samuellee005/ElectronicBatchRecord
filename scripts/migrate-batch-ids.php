@@ -1,6 +1,6 @@
 <?php
 /**
- * One-time migration: rename legacy batch record IDs to BR-{YEAR}-{INITIALS}-{#####}
+ * One-time migration: rename legacy batch record IDs to BR-{YEAR}-{INITIALS}-{###}
  * and update batchId references in data entry JSON files under data/.
  *
  * Usage (from project root):
@@ -16,7 +16,7 @@ require_once __DIR__ . '/../includes/batch-record.php';
 
 function ebr_migrate_is_canonical_batch_id(string $id): bool
 {
-    return (bool) preg_match('/^BR-\d{4}-[A-Z]{2,4}-\d{5}$/', $id);
+    return (bool) preg_match('/^BR-\d{4}-[A-Z]{2,4}-\d{3,5}$/', $id);
 }
 
 function ebr_migrate_batch_year(array $record, string $path): string
@@ -95,7 +95,7 @@ function ebr_migrate_build_map(array $items): array
         $maxSeq = 0;
         $nonCanonical = [];
         foreach ($groupItems as $it) {
-            if ($it['canonical'] && preg_match('/^BR-\d{4}-[A-Z]{2,4}-(\d{5})$/', $it['id'], $m)) {
+            if ($it['canonical'] && preg_match('/^BR-\d{4}-[A-Z]{2,4}-(\d{3,5})$/', $it['id'], $m)) {
                 $maxSeq = max($maxSeq, (int) $m[1]);
             } elseif (!$it['canonical']) {
                 $nonCanonical[] = $it;
@@ -113,7 +113,7 @@ function ebr_migrate_build_map(array $items): array
         foreach ($nonCanonical as $it) {
             ++$maxSeq;
             [$year, $initials] = explode('|', $key, 2);
-            $newId = sprintf('BR-%s-%s-%05d', $year, $initials, $maxSeq);
+            $newId = sprintf('BR-%s-%s-%03d', $year, $initials, $maxSeq);
             $mappings[$it['id']] = $newId;
         }
     }

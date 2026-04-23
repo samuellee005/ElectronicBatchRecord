@@ -81,13 +81,18 @@ function ebr_db_batch_row_to_api(array $row): array
 }
 
 /**
- * Highest numeric suffix for BR-{year}-{initials}-NNNNN in the database.
+ * Highest numeric suffix for BR-{year}-{initials}-{digits} in the database (trailing digits only).
  */
 function ebr_db_batch_max_sequence(string $year, string $initials): int
 {
     $pdo = ebr_pg_pdo();
     $pattern = 'BR-' . $year . '-' . $initials . '-%';
-    $sql = 'SELECT COALESCE(MAX(CAST(RIGHT(id, 5) AS INTEGER)), 0) FROM ebr_batch_records WHERE id LIKE :p';
+    $sql = <<<'SQL'
+SELECT COALESCE(MAX(CAST(substring(id from '([0-9]+)$') AS INTEGER)), 0)
+FROM ebr_batch_records
+WHERE id LIKE :p
+  AND substring(id from '([0-9]+)$') IS NOT NULL
+SQL;
     $st = $pdo->prepare($sql);
     $st->execute(['p' => $pattern]);
     $n = $st->fetchColumn();

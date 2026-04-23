@@ -1531,6 +1531,7 @@ export default function FormBuilder() {
                   <PropertiesForm
                     field={selectedField}
                     existingStages={existingStages}
+                    fields={fields}
                     onUpdate={(updates) => updateField(selectedField.id, updates)}
                   />
                 </div>
@@ -1960,7 +1961,35 @@ function FieldPreview({ field, selected, onFieldUpdate }) {
 
 // -- Properties Form sub-component --
 
-function PropertiesForm({ field, existingStages, onUpdate }) {
+/** Max numeric stageOrder across all fields (0 if none set). */
+function maxStageOrderInForm(fields) {
+  let max = 0
+  for (const f of fields || []) {
+    const n = Number(f?.stageOrder)
+    if (Number.isFinite(n) && n > max) max = n
+  }
+  return max
+}
+
+/** Next order for a brand-new stage (max + 1, or 1 if empty). */
+function nextUnusedStageOrder(fields) {
+  return maxStageOrderInForm(fields) + 1
+}
+
+/** If another field already uses this stage name, return its stageOrder so new fields stay aligned. */
+function stageOrderForExistingStageName(fields, stageNameTrimmed, excludeFieldId) {
+  const sn = String(stageNameTrimmed || '').trim()
+  if (!sn) return null
+  for (const f of fields || []) {
+    if (f.id === excludeFieldId) continue
+    if (String(f.stageInProcess || '').trim() !== sn) continue
+    const n = Number(f.stageOrder)
+    if (Number.isFinite(n)) return n
+  }
+  return null
+}
+
+function PropertiesForm({ field, existingStages, fields, onUpdate }) {
   const [stageMode, setStageMode] = useState(
     field.stageInProcess && !existingStages.includes(field.stageInProcess) ? 'new' : 'select',
   )
@@ -1976,6 +2005,8 @@ function PropertiesForm({ field, existingStages, onUpdate }) {
     setStageMode(field.stageInProcess && !isExisting ? 'new' : 'select')
     setNewStageValue(field.stageInProcess && !isExisting ? field.stageInProcess : '')
   }, [field.id, field.stageInProcess, existingStages])
+
+  const suggestedNextOrder = useMemo(() => nextUnusedStageOrder(fields), [fields])
 
   return (
     <div className="fb-properties-form">
@@ -1997,8 +2028,17 @@ function PropertiesForm({ field, existingStages, onUpdate }) {
               if (e.target.value === '__NEW__') {
                 setStageMode('new')
                 setNewStageValue('')
+              } else if (e.target.value === '') {
+                onUpdate({ stageInProcess: '', stageOrder: null })
               } else {
-                onUpdate({ stageInProcess: e.target.value })
+                const name = e.target.value
+                if (name === field.stageInProcess) return
+                const shared = stageOrderForExistingStageName(fields, name, field.id)
+                const next = nextUnusedStageOrder(fields)
+                onUpdate({
+                  stageInProcess: name,
+                  stageOrder: shared != null ? shared : next,
+                })
               }
             }}
           >
@@ -2020,10 +2060,15 @@ function PropertiesForm({ field, existingStages, onUpdate }) {
               onBlur={(e) => {
                 const v = e.target.value.trim()
                 if (v) {
-                  onUpdate({ stageInProcess: v })
+                  const shared = stageOrderForExistingStageName(fields, v, field.id)
+                  const next = nextUnusedStageOrder(fields)
+                  onUpdate({
+                    stageInProcess: v,
+                    stageOrder: shared != null ? shared : next,
+                  })
                 } else {
                   setStageMode('select')
-                  onUpdate({ stageInProcess: '' })
+                  onUpdate({ stageInProcess: '', stageOrder: null })
                 }
               }}
               autoFocus
@@ -2032,7 +2077,7 @@ function PropertiesForm({ field, existingStages, onUpdate }) {
               className="fb-link-btn"
               onClick={() => {
                 setStageMode('select')
-                if (!newStageValue.trim()) onUpdate({ stageInProcess: '' })
+                if (!newStageValue.trim()) onUpdate({ stageInProcess: '', stageOrder: null })
               }}
             >
               Back to list
@@ -2049,13 +2094,14 @@ function PropertiesForm({ field, existingStages, onUpdate }) {
         <input
           type="number"
           value={field.stageOrder ?? ''}
-          placeholder="Leave empty if not sequential"
+          placeholder={String(suggestedNextOrder)}
           onChange={(e) =>
             onUpdate({ stageOrder: e.target.value === '' ? null : parseInt(e.target.value, 10) })
           }
         />
         <small className="fb-hint">
-          Order number for sequential stages (1, 2, 3...).
+          Sequential order (1, 2, 3…). Choosing a stage sets this automatically: same number as other
+          fields in that stage, or the next free number for a new stage (placeholder shows the next free).
         </small>
       </div>
 

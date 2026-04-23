@@ -4,6 +4,7 @@ import { AuthProvider } from './context/AuthContext'
 import ProtectedLayout from './components/ProtectedLayout'
 import Dashboard from './pages/Dashboard'
 import FormsList from './pages/FormsList'
+import FormAudit from './pages/FormAudit'
 import BatchRecord from './pages/BatchRecord'
 import BuildForm from './pages/BuildForm'
 import FormBuilder from './pages/FormBuilder'
@@ -26,6 +27,7 @@ export default function App() {
             <Route element={<ProtectedLayout />}>
               <Route path="/" element={<Dashboard />} />
               <Route path="/forms" element={<FormsList />} />
+              <Route path="/forms/audit" element={<FormAudit />} />
               <Route path="/data-search" element={<DataSearch />} />
               <Route path="/active-users" element={<ActiveUsers />} />
               <Route path="/profile" element={<Profile />} />

@@ -109,13 +109,13 @@ const DEFAULT_TABLE_COL_WIDTH = 72
 const DEFAULT_TABLE_ROW_HEIGHT = 28
 
 function tableColWidthPx(c) {
-  const w = parseInt(c?.width, 10)
-  return Number.isFinite(w) && w >= 12 ? w : DEFAULT_TABLE_COL_WIDTH
+  const n = Number(c?.width)
+  return Number.isFinite(n) && n >= 12 ? Math.round(n) : DEFAULT_TABLE_COL_WIDTH
 }
 
 function tableRowHeightPx(r) {
-  const h = parseInt(r?.height, 10)
-  return Number.isFinite(h) && h >= 12 ? h : DEFAULT_TABLE_ROW_HEIGHT
+  const n = Number(r?.height)
+  return Number.isFinite(n) && n >= 12 ? Math.round(n) : DEFAULT_TABLE_ROW_HEIGHT
 }
 
 function normalizeTableValue(v) {
@@ -468,6 +468,41 @@ function getPageFieldsSpatialOrder(allFields, page) {
       if (dx !== 0) return dx
       return String(a.id ?? '').localeCompare(String(b.id ?? ''), undefined, { numeric: true })
     })
+}
+
+function getMaxFieldPage(allFields) {
+  let m = 1
+  for (const f of allFields || []) m = Math.max(m, f.page || 1)
+  return m
+}
+
+/** Fields in a stage in document order (page ascending, then spatial order on each page). */
+function getFieldsInStageDocumentOrder(allFields, stageName) {
+  const sn = String(stageName)
+  const maxP = getMaxFieldPage(allFields)
+  const out = []
+  for (let p = 1; p <= maxP; p++) {
+    for (const f of getPageFieldsSpatialOrder(allFields, p)) {
+      if ((f.stageInProcess || 'Default Stage') === sn) out.push(f)
+    }
+  }
+  return out
+}
+
+function findFirstUnfilledFieldInStage(allFields, stageName, formData) {
+  for (const f of getFieldsInStageDocumentOrder(allFields, stageName)) {
+    const v = getEffectiveValue(formData[f.id])
+    if (!isFieldValueFilled(f, v)) return f
+  }
+  return null
+}
+
+/** Next field to fill in this stage, or first field in the stage if all are filled (for review). */
+function findTargetFieldForStageNavigation(allFields, stageName, formData) {
+  const u = findFirstUnfilledFieldInStage(allFields, stageName, formData)
+  if (u) return u
+  const ordered = getFieldsInStageDocumentOrder(allFields, stageName)
+  return ordered[0] || null
 }
 
 // Build ref numbers for fields that have corrections (side panel + overlay badges).
@@ -1876,6 +1911,8 @@ export default function DataEntry() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const pdfRef = useRef(null)
+  /** Set before goToPage: open this field after the PDF paints (runs after page-change effect clears the panel). */
+  const pendingStageFieldFocusRef = useRef(null)
   const { prefs, mergePrefs } = useUserPrefs()
   const displayName = useMemo(() => (prefs.ebrUserDisplayName || '').trim(), [prefs.ebrUserDisplayName])
 
@@ -2372,6 +2409,19 @@ export default function DataEntry() {
     if (n != null) setTotalPages(n)
     if (width > 0 && height > 0) setPdfPageSize({ width, height })
 
+    const pend = pendingStageFieldFocusRef.current
+    if (pend && pend.page === page) {
+      pendingStageFieldFocusRef.current = null
+      const { fieldId } = pend
+      window.setTimeout(() => {
+        setFieldInfoPanelId(fieldId)
+        document.querySelector(overlayFieldSelector(fieldId))?.scrollIntoView({
+          block: 'nearest',
+          behavior: 'smooth',
+        })
+      }, 0)
+    }
+
     const savedY = pendingWindowScrollRestoreRef.current
     if (savedY != null && typeof window !== 'undefined') {
       pendingWindowScrollRestoreRef.current = null
@@ -2400,6 +2450,29 @@ export default function DataEntry() {
     }
     pdfRef.current?.goToPage?.(page)
   }, [])
+
+  /** Stages card: go to next unfilled field in that stage (document order), or first field if all filled. */
+  const focusStageNextField = useCallback(
+    (stage) => {
+      if (!formConfig?.fields?.length) return
+      const target = findTargetFieldForStageNavigation(formConfig.fields, stage.stage, formData)
+      if (!target) return
+      const page = target.page || 1
+      if (page === currentPage) {
+        setFieldInfoPanelId(target.id)
+        window.requestAnimationFrame(() => {
+          document.querySelector(overlayFieldSelector(target.id))?.scrollIntoView({
+            block: 'nearest',
+            behavior: 'smooth',
+          })
+        })
+      } else {
+        pendingStageFieldFocusRef.current = { fieldId: target.id, page }
+        goToPdfPage(page)
+      }
+    },
+    [formConfig, formData, currentPage, goToPdfPage],
+  )
 
   /** Persist current entry to the server (same payload as Save). Used by Save and before Mark complete. */
   const persistFormData = useCallback(
@@ -2777,6 +2850,7 @@ export default function DataEntry() {
           {stages.length > 0 && (
             <div className="de-card stages-panel">
               <h3>Stages</h3>
+              <p className="stages-panel-hint">Click a stage to open the next unfilled field on the form (or the first field if that stage is complete).</p>
               {stages.map(stage => {
                 const completed = stageCompletion[stage.stage]
                 const accessible = isStageAccessible(stage, stages, stageCompletion)
@@ -2787,7 +2861,19 @@ export default function DataEntry() {
                 else if (!accessible) cls = 'locked'
 
                 return (
-                  <div key={stage.stage} className={`stage-item ${cls}`}>
+                  <div
+                    key={stage.stage}
+                    role="button"
+                    tabIndex={0}
+                    className={`stage-item stage-item--nav${cls ? ` ${cls}` : ''}`}
+                    onClick={() => focusStageNextField(stage)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        focusStageNextField(stage)
+                      }
+                    }}
+                  >
                     <div className="stage-info">
                       <div className="stage-name">{stage.stage}</div>
                       <div className="stage-order">
