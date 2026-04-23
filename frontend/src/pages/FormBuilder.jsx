@@ -13,6 +13,7 @@ import {
   Squares2X2Icon,
   UserGroupIcon,
   TableCellsIcon,
+  Bars3Icon,
 } from '@heroicons/react/24/outline'
 import PdfViewer from '../components/PdfViewer'
 import PdfPageScrubber from '../components/PdfPageScrubber'
@@ -76,6 +77,47 @@ const PROPERTIES_PANEL_WIDTH_STORAGE_KEY = 'fb-properties-panel-width'
 
 function newTablePartId() {
   return 't_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8)
+}
+
+/** Unique stage names in process order (by stageOrder across fields in that stage). */
+function buildOrderedStageNames(fields) {
+  const seen = new Map()
+  for (const f of fields || []) {
+    const n = f.stageInProcess?.trim()
+    if (!n) continue
+    const o = Number(f.stageOrder)
+    const ord = Number.isFinite(o) && o > 0 ? o : 9999
+    if (!seen.has(n) || seen.get(n) > ord) seen.set(n, ord)
+  }
+  return [...seen.entries()]
+    .sort((a, b) => a[1] - b[1] || a[0].localeCompare(b[0]))
+    .map(([name]) => name)
+}
+
+function reorderStringArray(arr, fromIndex, toIndex) {
+  if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0) return [...arr]
+  if (fromIndex >= arr.length || toIndex >= arr.length) return [...arr]
+  const a = [...arr]
+  const [it] = a.splice(fromIndex, 1)
+  a.splice(toIndex, 0, it)
+  return a
+}
+
+function applyStageNameOrderToFields(orderedNames) {
+  const m = new Map(orderedNames.map((n, i) => [n, i + 1]))
+  return (prev) =>
+    prev.map((f) => {
+      const n = f.stageInProcess?.trim()
+      if (!n) return f
+      const o = m.get(n)
+      if (o == null) return f
+      return f.stageOrder === o ? f : { ...f, stageOrder: o }
+    })
+}
+
+function getComponentTypeLabel(type) {
+  const c = COMPONENT_TYPES.find((x) => x.type === type)
+  return c ? c.name : (type || 'Field')
 }
 
 /** Split total between two sizes by delta; enforce minimum. */
@@ -1219,15 +1261,53 @@ export default function FormBuilder() {
     }
   }
 
-  // -- Existing stages from fields --
+  // -- Stages (order matches form; used in properties + left panel) --
 
-  const existingStages = useMemo(() => {
-    const set = new Set()
-    fields.forEach((f) => {
-      if (f.stageInProcess?.trim()) set.add(f.stageInProcess.trim())
+  const existingStages = useMemo(() => buildOrderedStageNames(fields), [fields])
+  const unassignedFields = useMemo(
+    () => fields.filter((f) => !f.stageInProcess?.trim()),
+    [fields],
+  )
+
+  const dragFieldIdRef = useRef(null)
+  const dragStageNameRef = useRef(null)
+
+  const moveFieldToStageById = useCallback((fieldId, targetStageName) => {
+    const trimmed = String(targetStageName || '').trim()
+    setFields((prev) =>
+      prev.map((f) => {
+        if (f.id !== fieldId) return f
+        if (!trimmed) {
+          return { ...f, stageInProcess: '', stageOrder: null }
+        }
+        const peer = prev.find((x) => x.id !== fieldId && x.stageInProcess?.trim() === trimmed)
+        const so =
+          peer != null && Number.isFinite(Number(peer.stageOrder))
+            ? Number(peer.stageOrder)
+            : nextUnusedStageOrder(prev.filter((x) => x.id !== fieldId))
+        return { ...f, stageInProcess: trimmed, stageOrder: so }
+      }),
+    )
+  }, [])
+
+  const reorderStagesByName = useCallback((sourceName, targetName) => {
+    if (!sourceName || !targetName || sourceName === targetName) return
+    setFields((prev) => {
+      const list = buildOrderedStageNames(prev)
+      const from = list.indexOf(sourceName)
+      const to = list.indexOf(targetName)
+      if (from < 0 || to < 0) return prev
+      const next = reorderStringArray(list, from, to)
+      return applyStageNameOrderToFields(next)(prev)
     })
-    return [...set].sort()
-  }, [fields])
+  }, [])
+
+  const clearPanelDragRefs = useCallback(() => {
+    dragFieldIdRef.current = null
+    dragStageNameRef.current = null
+  }, [])
+
+  const showStagesSection = fields.length > 0
 
   // -- Grouped forms for selection modal --
 
@@ -1278,28 +1358,160 @@ export default function FormBuilder() {
         <div className={`fb-components-panel ${componentsPanelCollapsed ? 'fb-components-panel-collapsed' : ''}`}>
           {!componentsPanelCollapsed && (
             <div className="fb-components-panel-content">
-              <h2 className="fb-components-panel-title">Components</h2>
-              {canvasSize.width > 0 && canvasSize.height > 0 && (
-                <p className="fb-drag-hint">Drag onto the PDF to add a field.</p>
-              )}
-              {COMPONENT_TYPES.map((c) => {
-                const Icon = c.Icon
-                return (
-                  <div
-                    key={c.type}
-                    className="fb-component-item"
-                    draggable="true"
-                    onDragStart={(e) => {
-                      e.dataTransfer.setData('component-type', c.type)
-                      e.dataTransfer.setData('text/plain', c.type)
-                      e.dataTransfer.effectAllowed = 'copy'
-                    }}
-                  >
-                    <Icon className="fb-component-icon" />
-                    <span className="fb-component-name">{c.name}</span>
+              <div className="fb-components-panel-inner">
+                {showStagesSection && (
+                  <section className="fb-stages-section" aria-label="Form stages">
+                    <h2 className="fb-components-section-title">Stages</h2>
+                    <p className="fb-stages-hint">
+                      Drag a stage by its handle to change order. Drag a field name into another stage to
+                      reassign.
+                    </p>
+                    <div className="fb-stages-section-scroll">
+                      <div
+                        className="fb-stage-block"
+                        data-stage=""
+                        onDragOver={(e) => {
+                          e.preventDefault()
+                          e.dataTransfer.dropEffect = 'move'
+                        }}
+                        onDrop={(e) => {
+                          e.preventDefault()
+                          const id = dragFieldIdRef.current
+                          if (id) {
+                            moveFieldToStageById(id, '')
+                            clearPanelDragRefs()
+                          }
+                        }}
+                      >
+                        <div className="fb-stage-block-header fb-stage-block-header--static">
+                          <span className="fb-stage-block-title">Unassigned</span>
+                          <span className="fb-stage-block-count">{unassignedFields.length}</span>
+                        </div>
+                        {unassignedFields.length === 0 ? (
+                          <p className="fb-stage-block-empty">Drop a field here to clear its stage.</p>
+                        ) : (
+                          <ul className="fb-stage-field-list">
+                            {unassignedFields.map((f) => (
+                              <li key={f.id} className="fb-stage-field-item">
+                                <span
+                                  className="fb-stage-field-pill"
+                                  draggable
+                                  onDragStart={(e) => {
+                                    e.stopPropagation()
+                                    dragFieldIdRef.current = f.id
+                                    e.dataTransfer.effectAllowed = 'move'
+                                    e.dataTransfer.setData('text/plain', f.id)
+                                  }}
+                                  onDragEnd={clearPanelDragRefs}
+                                >
+                                  {f.label || getComponentTypeLabel(f.type)}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+
+                      {existingStages.map((stageName) => {
+                        const inStage = fields.filter((f) => f.stageInProcess?.trim() === stageName)
+                        return (
+                          <div
+                            key={stageName}
+                            className="fb-stage-block"
+                            data-stage={stageName}
+                            onDragOver={(e) => {
+                              e.preventDefault()
+                              e.dataTransfer.dropEffect = 'move'
+                            }}
+                            onDrop={(e) => {
+                              e.preventDefault()
+                              const id = dragFieldIdRef.current
+                              if (id) {
+                                moveFieldToStageById(id, stageName)
+                                clearPanelDragRefs()
+                                return
+                              }
+                              const src = dragStageNameRef.current
+                              if (src && src !== stageName) {
+                                reorderStagesByName(src, stageName)
+                                clearPanelDragRefs()
+                              }
+                            }}
+                          >
+                            <div
+                              className="fb-stage-block-header"
+                              draggable
+                              onDragStart={(e) => {
+                                e.stopPropagation()
+                                dragStageNameRef.current = stageName
+                                e.dataTransfer.effectAllowed = 'move'
+                                e.dataTransfer.setData('text/plain', `stage:${stageName}`)
+                              }}
+                              onDragEnd={clearPanelDragRefs}
+                            >
+                              <Bars3Icon className="fb-stage-grip" aria-hidden />
+                              <span className="fb-stage-block-title" title="Drag to reorder stages">
+                                {stageName}
+                              </span>
+                              <span className="fb-stage-block-count">{inStage.length}</span>
+                            </div>
+                            <ul className="fb-stage-field-list">
+                              {inStage.map((f) => (
+                                <li key={f.id} className="fb-stage-field-item">
+                                  <span
+                                    className="fb-stage-field-pill"
+                                    draggable
+                                    onDragStart={(e) => {
+                                      e.stopPropagation()
+                                      dragFieldIdRef.current = f.id
+                                      e.dataTransfer.effectAllowed = 'move'
+                                      e.dataTransfer.setData('text/plain', f.id)
+                                    }}
+                                    onDragEnd={clearPanelDragRefs}
+                                  >
+                                    {f.label || getComponentTypeLabel(f.type)}
+                                  </span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )
+                      })}
+
+                    </div>
+                  </section>
+                )}
+
+                <section
+                  className="fb-palette-section"
+                  aria-label="Field components to place on the PDF"
+                >
+                  <h2 className="fb-components-section-title">Components</h2>
+                  {canvasSize.width > 0 && canvasSize.height > 0 && (
+                    <p className="fb-drag-hint">Drag onto the PDF to add a field.</p>
+                  )}
+                  <div className="fb-palette-list">
+                    {COMPONENT_TYPES.map((c) => {
+                      const Icon = c.Icon
+                      return (
+                        <div
+                          key={c.type}
+                          className="fb-component-item"
+                          draggable
+                          onDragStart={(e) => {
+                            e.dataTransfer.setData('component-type', c.type)
+                            e.dataTransfer.setData('text/plain', c.type)
+                            e.dataTransfer.effectAllowed = 'copy'
+                          }}
+                        >
+                          <Icon className="fb-component-icon" />
+                          <span className="fb-component-name">{c.name}</span>
+                        </div>
+                      )
+                    })}
                   </div>
-                )
-              })}
+                </section>
+              </div>
             </div>
           )}
           <button
