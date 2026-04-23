@@ -1,6 +1,7 @@
 import { Navigate, Outlet, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import Nav from './Nav'
+import UserMenu from './UserMenu'
 
 /**
  * Shell with nav; redirects to /login until the PHP session is authenticated.
@@ -31,9 +32,14 @@ export default function ProtectedLayout() {
   return (
     <div className="app-shell">
       <Nav />
-      <main className={wideMain ? 'main main--wide' : 'main'}>
-        <Outlet />
-      </main>
+      <div className="app-main-column">
+        <header className="app-topbar">
+          <UserMenu />
+        </header>
+        <main className={wideMain ? 'main main--wide' : 'main'}>
+          <Outlet />
+        </main>
+      </div>
     </div>
   )
 }

@@ -14,6 +14,7 @@ import ViewTemplate from './pages/ViewTemplate'
 import DataSearch from './pages/DataSearch'
 import ActiveUsers from './pages/ActiveUsers'
 import Login from './pages/Login'
+import Profile from './pages/Profile'
 
 export default function App() {
   return (
@@ -27,6 +28,7 @@ export default function App() {
               <Route path="/forms" element={<FormsList />} />
               <Route path="/data-search" element={<DataSearch />} />
               <Route path="/active-users" element={<ActiveUsers />} />
+              <Route path="/profile" element={<Profile />} />
               <Route path="/forms/build" element={<BuildForm />} />
               <Route path="/forms/builder" element={<FormBuilder />} />
               <Route path="/forms/entry" element={<DataEntry />} />
