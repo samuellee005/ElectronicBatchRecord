@@ -3,6 +3,8 @@
  * In dev, Vite proxies /includes, /uploads, /data, /forms to the PHP server.
  */
 
+import { isViteAuthBypass } from '../authDev'
+
 const API_BASE = ''
 
 /**
@@ -77,7 +79,8 @@ async function request(path, options = {}) {
     data?.code === 'auth_required' &&
     typeof window !== 'undefined' &&
     !url.includes('auth-me.php') &&
-    !url.includes('login.php')
+    !url.includes('login.php') &&
+    !isViteAuthBypass()
   ) {
     window.location.assign(`${window.location.origin}/login`)
   }

@@ -506,27 +506,16 @@ function TableFieldProperties({ field, onUpdate }) {
       <div className="fb-form-group">
         <label>Columns</label>
         <p className="fb-hint">
-          Labels and keys are not shown on the PDF overlay—only for merges, exports, and this panel. Set width
-          (px) here, or select the field and drag the vertical handles on the table on the canvas.
+          Column names are for this panel and data entry, not the PDF. Set width (px) or drag the vertical
+          handles on the table in the builder.
         </p>
         {cols.map((c, i) => (
           <div key={c.id} className="fb-table-axis-row">
             <input
               type="text"
-              placeholder="Label"
               value={c.label}
               onChange={(e) => {
                 const next = cols.map((x, j) => (j === i ? { ...x, label: e.target.value } : x))
-                setCols(next)
-              }}
-            />
-            <input
-              type="text"
-              className="fb-table-key"
-              placeholder="Key (optional)"
-              value={c.key || ''}
-              onChange={(e) => {
-                const next = cols.map((x, j) => (j === i ? { ...x, key: e.target.value } : x))
                 setCols(next)
               }}
             />
@@ -583,20 +572,9 @@ function TableFieldProperties({ field, onUpdate }) {
           <div key={r.id} className="fb-table-axis-row">
             <input
               type="text"
-              placeholder="Label"
               value={r.label}
               onChange={(e) => {
                 const next = rows.map((x, j) => (j === i ? { ...x, label: e.target.value } : x))
-                setRows(next)
-              }}
-            />
-            <input
-              type="text"
-              className="fb-table-key"
-              placeholder="Key (optional)"
-              value={r.key || ''}
-              onChange={(e) => {
-                const next = rows.map((x, j) => (j === i ? { ...x, key: e.target.value } : x))
                 setRows(next)
               }}
             />
@@ -1563,11 +1541,6 @@ export default function FormBuilder() {
                 {showStagesSection && (
                   <section className="fb-stages-section" aria-label="Form stages">
                     <h2 className="fb-components-section-title">Stages</h2>
-                    <p className="fb-stages-hint">
-                      Use the grip to drag a field. Drop on a row to insert before or after that field; drop
-                      on an area below the list to add to the end. Click a field name to show it on the
-                      PDF. Drag a stage header to reorder stages.
-                    </p>
                     <div className="fb-stages-section-scroll">
                       <div
                         className="fb-stage-block"
@@ -2606,8 +2579,8 @@ function PropertiesForm({ field, existingStages, fields, onUpdate }) {
           className="fb-disabled-input"
         />
         <small className="fb-hint">
-          Position within Unassigned or within the same stage (1, 2, 3…). Reorder by dragging fields in
-          the left Stages panel.
+          Row-major order in the Stages panel: 1 = top-left, then left to right; the next row continues
+          the sequence (1, 2, 3…). Reorder by dragging.
         </small>
       </div>
 
