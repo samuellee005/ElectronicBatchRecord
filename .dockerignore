@@ -1,0 +1,47 @@
+# Source control
+.git
+.gitignore
+.gitattributes
+
+# Editors / OS
+.vscode
+.idea
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Build artefacts that the image rebuilds itself
+node_modules
+frontend/node_modules
+frontend/dist
+vendor
+__pycache__
+*.pyc
+*.pyo
+.venv
+venv
+pdf_field_service/.venv
+pdf_field_service/__pycache__
+pdf_field_service/app/__pycache__
+pdf_field_service/tests/__pycache__
+
+# Runtime state — should live in volumes, not the image
+uploads/*.pdf
+forms/*.json
+data/*.json
+data/batch-records
+
+# Detector diagnostic artefacts
+data/imgs/*__detected.pdf
+data/imgs/eq_section_*.png
+data/imgs/equipment_used_section.png
+data/imgs/Print*.PNG
+
+# Logs / env
+*.log
+.env
+.env.local
+
+# Tests are not needed in the runtime image
+pdf_field_service/tests

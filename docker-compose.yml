@@ -1,9 +1,5 @@
-# PostgreSQL: set EBR_PG_HOST, EBR_PG_USER, EBR_PG_PASSWORD when you have credentials.
-# This compose file is intended for the dev server: we default EBR_LOGIN_BYPASS_DB=1 so any
-# username can sign in without the enterprise `db_user` table. When you go live, use a
-# production stack without bypass and connect to the real `db_user` (see includes/session.php).
-# Arcturus → database db4 when EBR_DEPLOYMENT=arcturus, or EBR_ARCTURUS_APP_IPS matches
-# this host, or EBR_ARCTURUS_HTTP_HOSTS matches HTTP Host (see includes/db.php).
+# Postgres credentials live in .env (EBR_PG_HOST/USER/PASSWORD).
+# Dev default: EBR_LOGIN_BYPASS_DB=1 lets any username sign in.
 services:
   ebr:
     build:
@@ -15,16 +11,13 @@ services:
     env_file:
       - .env
     environment:
-      # Dev server: sign in with any username. Override in .env with EBR_LOGIN_BYPASS_DB=0 when this environment uses `db_user`.
       EBR_LOGIN_BYPASS_DB: "1"
-      # PDF detection on the host (uvicorn or Docker publishing :8000). Overrides .env for this service only.
-      EBR_PDF_DETECT_URL: "http://host.docker.internal:8000"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    # Bind to loopback only — Apache on the host reverse-proxies :5173 -> here.
+      # Inter-container DNS — reaches pdf-detect over the compose network.
+      EBR_PDF_DETECT_URL: "http://pdf-detect:8000"
+    depends_on:
+      - pdf-detect
     ports:
       - "127.0.0.1:8080:8080"
-    # Also supported in .env: EBR_DEPLOYMENT=arcturus | EBR_ARCTURUS_APP_IPS | EBR_ARCTURUS_HTTP_HOSTS
 
   pdf-detect:
     build:
