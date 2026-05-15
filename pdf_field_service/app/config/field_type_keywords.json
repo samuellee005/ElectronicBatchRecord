@@ -1,0 +1,62 @@
+{
+  "checkbox": [
+    "verified",
+    "yes",
+    "no",
+    "pass",
+    "fail",
+    "n/a",
+    "y/n",
+    "☐",
+    "□"
+  ],
+  "date": [
+    "date",
+    "mfg date",
+    "manufacturing date",
+    "expiration date",
+    "due date",
+    "month/day",
+    "day/month"
+  ],
+  "time": [
+    "time",
+    "clock",
+    "hour",
+    "hh:mm"
+  ],
+  "number": [
+    "weight",
+    "quantity",
+    "qty",
+    "amount",
+    "pressure",
+    "temperature",
+    "volume",
+    "lot",
+    "batch",
+    "id",
+    "#",
+    "ph",
+    "ppm",
+    "%",
+    "degrees",
+    "number",
+    "no."
+  ],
+  "signature": [
+    "signature",
+    "sign",
+    "authorize",
+    "approval",
+    "witness"
+  ],
+  "text": [
+    "initial",
+    "initials",
+    "operator",
+    "performed by",
+    "completed by",
+    "verified by"
+  ]
+}

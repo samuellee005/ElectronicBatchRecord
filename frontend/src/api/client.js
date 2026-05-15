@@ -271,3 +271,27 @@ export async function uploadTemplate(file) {
   }
   return data
 }
+
+/**
+ * Suggested writable regions from the Python detection service (proxied by PHP).
+ * @param {File} file
+ * @param {{ includeDebug?: boolean }} [opts]
+ * @returns {Promise<{ success: boolean, suggestions: object[], pagesAnalyzed?: number, warnings?: string[] }>}
+ */
+export async function detectPdfFields(file, opts = {}) {
+  const form = new FormData()
+  form.append('pdf_file', file)
+  if (opts.includeDebug) form.append('include_debug', '1')
+  const res = await fetch(`${API_BASE}/includes/pdf-detect-api.php`, {
+    method: 'POST',
+    credentials: 'include',
+    body: form,
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok || !data.success) {
+    const err = new Error(data.message || res.statusText || 'Field detection failed')
+    if (data.code) err.code = data.code
+    throw err
+  }
+  return data
+}

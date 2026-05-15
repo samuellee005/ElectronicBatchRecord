@@ -40,3 +40,12 @@ forms/*.json
 # Data entries (keep directory structure)
 data/*.json
 !data/.gitkeep
+
+# Detector diagnostic artifacts
+data/imgs/*__detected.pdf
+data/imgs/eq_section_*.png
+data/imgs/equipment_used_section.png
+
+# Python virtualenvs
+.venv/
+venv/

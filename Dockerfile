@@ -27,7 +27,8 @@ RUN apk add --no-cache \
       libpq \
       libpng \
       freetype \
-      libjpeg-turbo
+      libjpeg-turbo \
+      curl
 
 # Build/install PHP extensions
 RUN apk add --no-cache --virtual .build-deps \
@@ -38,8 +39,9 @@ RUN apk add --no-cache --virtual .build-deps \
       libpng-dev \
       freetype-dev \
       libjpeg-turbo-dev \
+      curl-dev \
  && docker-php-ext-configure gd --with-freetype --with-jpeg \
- && docker-php-ext-install zip pdo_pgsql gd \
+ && docker-php-ext-install zip pdo_pgsql gd curl \
  && apk del .build-deps
 
 WORKDIR /app

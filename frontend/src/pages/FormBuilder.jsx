@@ -18,10 +18,13 @@ import {
 import PdfViewer from '../components/PdfViewer'
 import PdfPageScrubber from '../components/PdfPageScrubber'
 import PdfZoomControls from '../components/PdfZoomControls'
+import FieldPreview from '../components/forms/FieldPreview'
 import { listForms, loadFormById, saveForm } from '../api/client'
 import { useUserPrefs } from '../context/UserPrefsContext'
 import { buildTableMergeLayout, tableCellKey } from '../utils/tableMergeLayout'
 import { DEFAULT_TABLE_COL_WIDTH, DEFAULT_TABLE_ROW_HEIGHT, tableColWidthPx, tableRowHeightPx } from '../utils/tableFieldDims'
+import { FORM_FIELD_DEFAULTS, DEFAULT_INPUT_FONT_PX } from '../utils/formFieldDefaults'
+import { EBR_PENDING_SUGGESTIONS_KEY } from '../utils/pdfDesignCoords'
 import './FormBuilder.css'
 
 const COMPONENT_TYPES = [
@@ -37,27 +40,7 @@ const COMPONENT_TYPES = [
   { type: 'table', Icon: TableCellsIcon, name: 'Data Table' },
 ]
 
-const DEFAULT_CONFIGS = {
-  text: { width: 200, height: 35, label: 'Text Field', placeholder: 'Enter text' },
-  date: { width: 200, height: 35, label: 'Date Field', placeholder: 'Select date' },
-  number: { width: 200, height: 35, label: 'Number Field', placeholder: 'Enter number', unit: '' },
-  /* Not in COMPONENT_TYPES (hidden from palette); kept for existing forms / future re-enable */
-  signature: { width: 300, height: 100, label: 'Signature Field', placeholder: 'Sign here' },
-  /* Not in COMPONENT_TYPES (hidden from palette); kept for existing forms / future re-enable */
-  textarea: { width: 300, height: 100, label: 'Text Area', placeholder: 'Enter text' },
-  dropdown: { width: 200, height: 35, label: 'Dropdown Field', options: ['Option 1', 'Option 2'] },
-  checkbox: { width: 150, height: 30, label: 'Checkbox Field' },
-  time: { width: 220, height: 42, label: 'Time', placeholder: 'HH:MM' },
-  radio: { width: 280, height: 100, label: 'Radio Group', options: ['Option A', 'Option B', 'Option C'] },
-  multiselect: { width: 280, height: 120, label: 'Multi select', options: ['Item 1', 'Item 2', 'Item 3'] },
-  collaborator: {
-    width: 320,
-    height: 140,
-    label: 'Collaborators',
-    helpText: 'Designate primary analyst and secondary reviewer from Active Users.',
-  },
-  table: { width: 420, height: 240, label: 'Data table' },
-}
+const DEFAULT_CONFIGS = { ...FORM_FIELD_DEFAULTS }
 
 const UNIT_OPTIONS = ['', 'kg', 'g', 'mg', 'L', 'mL', '\u00B0C', '\u00B0F', '%', 'ppm', 'pH']
 
@@ -67,8 +50,6 @@ const RULER_LABEL_INTERVAL = 100
 const RULER_SIZE = 24
 // Scale at which field coordinates are stored; overlay positions scale with zoom
 const DESIGN_SCALE = 1.5
-/** Default input font size (px) for new fields; matches ~0.8rem at 16px root */
-const DEFAULT_INPUT_FONT_PX = 13
 
 const PROPERTIES_PANEL_DEFAULT_W = 320
 const PROPERTIES_PANEL_MIN_W = 260
@@ -1357,6 +1338,28 @@ export default function FormBuilder() {
   const confirmSelection = () => {
     setShowSelectionModal(false)
     if (selectionMode === 'new') {
+      try {
+        const raw = sessionStorage.getItem(EBR_PENDING_SUGGESTIONS_KEY)
+        if (raw) {
+          sessionStorage.removeItem(EBR_PENDING_SUGGESTIONS_KEY)
+          const o = JSON.parse(raw)
+          if (
+            o &&
+            o.pdfFilename === pdfFile &&
+            Array.isArray(o.fields) &&
+            o.fields.length > 0
+          ) {
+            setFields(
+              normalizeFieldGroupOrder(
+                o.fields.map((f) => ({ ...f, page: f.page || 1 })),
+              ),
+            )
+            return
+          }
+        }
+      } catch {
+        /* ignore invalid import payload */
+      }
       setFields([])
     } else if (selectionMode === 'existing' && selectionFormId) {
       loadFormById(selectionFormId).then((data) => {
@@ -2290,7 +2293,14 @@ function FormField({ field, selected, scaleFactor = 1, onFieldUpdate, onMouseDow
       onMouseDown={onMouseDown}
       onClick={onClick}
     >
-      <FieldPreview field={field} selected={selected} onFieldUpdate={onFieldUpdate} />
+      <FieldPreview
+        field={field}
+        selected={selected}
+        onFieldUpdate={onFieldUpdate}
+        renderTablePreview={({ field: f, selected: s, onFieldUpdate: uf, containerStyle }) => (
+          <TableFieldPreview field={f} selected={s} onFieldUpdate={uf} containerStyle={containerStyle} />
+        )}
+      />
       <div className="fb-field-resize" onMouseDown={onResizeMouseDown} />
       {selected && (
         <button
@@ -2305,138 +2315,6 @@ function FormField({ field, selected, scaleFactor = 1, onFieldUpdate, onMouseDow
       )}
     </div>
   )
-}
-
-/** Matches compact PDF overlay: full component box = value area; centered text, bottom-aligned */
-const fieldPreviewContainerBase = {
-  padding: '2px 2px',
-  height: '100%',
-  boxSizing: 'border-box',
-  display: 'flex',
-  flexDirection: 'column',
-  justifyContent: 'flex-end',
-  alignItems: 'stretch',
-  overflow: 'hidden',
-}
-
-function FieldPreview({ field, selected, onFieldUpdate }) {
-  const containerStyle = fieldPreviewContainerBase
-  switch (field.type) {
-    case 'text':
-      return (
-        <div style={containerStyle}>
-          <input type="text" className="fb-field-input" placeholder={field.placeholder} disabled />
-        </div>
-      )
-    case 'date':
-      return (
-        <div style={containerStyle}>
-          <input type="date" className="fb-field-input" disabled />
-        </div>
-      )
-    case 'number':
-      return (
-        <div style={containerStyle}>
-          <div className="fb-unit-group">
-            <input
-              type="number"
-              className="fb-field-input"
-              placeholder={field.placeholder}
-              disabled
-              style={{ flex: 1 }}
-            />
-            {field.unit && <span className="fb-unit-label">{field.unit}</span>}
-          </div>
-        </div>
-      )
-    case 'signature':
-      return (
-        <div style={containerStyle}>
-          <div className="fb-signature-placeholder">{field.placeholder || 'Sign here'}</div>
-        </div>
-      )
-    case 'textarea':
-      return (
-        <div style={containerStyle}>
-          <textarea
-            className="fb-field-input fb-field-input--textarea"
-            placeholder={field.placeholder}
-            disabled
-            style={{ resize: 'none' }}
-          />
-        </div>
-      )
-    case 'dropdown':
-      return (
-        <div style={containerStyle}>
-          <select className="fb-field-input" disabled>
-            {(field.options || []).map((opt, i) => (
-              <option key={i}>{opt}</option>
-            ))}
-          </select>
-        </div>
-      )
-    case 'checkbox':
-      return (
-        <div style={{ ...containerStyle, justifyContent: 'center', alignItems: 'center' }}>
-          <input type="checkbox" className="fb-field-input" disabled />
-        </div>
-      )
-    case 'time':
-      return (
-        <div style={{ ...containerStyle, flexDirection: 'row', alignItems: 'flex-end', gap: 6 }}>
-          <input type="time" className="fb-field-input" disabled style={{ flex: 1 }} />
-          <button type="button" className="fb-field-now-btn" disabled>Now</button>
-        </div>
-      )
-    case 'radio':
-      return (
-        <div style={{ ...containerStyle, justifyContent: 'flex-start', flexDirection: 'column', alignItems: 'stretch', gap: 4, overflowY: 'auto' }}>
-          {(field.options || ['A', 'B']).slice(0, 4).map((opt, i) => (
-            <label key={i} className="fb-preview-radio">
-              <input type="radio" disabled /> {opt}
-            </label>
-          ))}
-        </div>
-      )
-    case 'multiselect':
-      return (
-        <div style={{ ...containerStyle, justifyContent: 'flex-start', flexDirection: 'column', alignItems: 'stretch', gap: 4, overflowY: 'auto' }}>
-          {(field.options || []).slice(0, 4).map((opt, i) => (
-            <label key={i} className="fb-preview-radio">
-              <input type="checkbox" disabled /> {opt}
-            </label>
-          ))}
-        </div>
-      )
-    case 'collaborator':
-      return (
-        <div style={{ ...containerStyle, justifyContent: 'flex-start', flexDirection: 'column', alignItems: 'stretch', gap: 6, fontSize: '0.75rem' }}>
-          <div className="fb-collab-preview-row">
-            <span>Primary</span>
-            <select className="fb-field-input" disabled><option>—</option></select>
-          </div>
-          <div className="fb-collab-preview-row">
-            <span>Reviewer</span>
-            <select className="fb-field-input" disabled><option>—</option></select>
-          </div>
-          <label className="fb-preview-radio">
-            <input type="checkbox" disabled /> Reviewer records all entry
-          </label>
-        </div>
-      )
-    case 'table':
-      return (
-        <TableFieldPreview
-          field={field}
-          selected={selected}
-          onFieldUpdate={onFieldUpdate}
-          containerStyle={{ ...containerStyle, padding: 2 }}
-        />
-      )
-    default:
-      return <div style={containerStyle} />
-  }
 }
 
 // -- Properties Form sub-component --

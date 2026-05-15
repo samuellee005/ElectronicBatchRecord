@@ -17,7 +17,21 @@ services:
     environment:
       # Dev server: sign in with any username. Override in .env with EBR_LOGIN_BYPASS_DB=0 when this environment uses `db_user`.
       EBR_LOGIN_BYPASS_DB: "1"
+      # PDF detection on the host (uvicorn or Docker publishing :8000). Overrides .env for this service only.
+      EBR_PDF_DETECT_URL: "http://host.docker.internal:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     # Bind to loopback only — Apache on the host reverse-proxies :5173 -> here.
     ports:
       - "127.0.0.1:8080:8080"
     # Also supported in .env: EBR_DEPLOYMENT=arcturus | EBR_ARCTURUS_APP_IPS | EBR_ARCTURUS_HTTP_HOSTS
+
+  pdf-detect:
+    build:
+      context: ./pdf_field_service
+      dockerfile: Dockerfile
+    image: ebr-pdf-detect:latest
+    container_name: ebr-pdf-detect
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8000:8000"

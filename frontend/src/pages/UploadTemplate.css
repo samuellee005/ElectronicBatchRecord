@@ -12,6 +12,15 @@
   color: #555;
 }
 
+.upload-page .upload-debug-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: 0.9rem;
+  font-size: 0.88rem;
+  color: #334155;
+}
+
 /* Native file input — no invisible overlay (avoids clicks hitting the wrong control). */
 .upload-page .upload-file-row {
   display: flex;
@@ -96,4 +105,176 @@
   margin-top: 20px;
   color: #667eea;
   font-weight: 500;
+}
+
+.upload-page .upload-lead {
+  max-width: 44rem;
+  margin: 0 0 1.25rem;
+  line-height: 1.55;
+  color: #444;
+}
+
+.upload-page .upload-detect-status {
+  margin: 0.75rem 0;
+  color: #4338ca;
+  font-weight: 500;
+}
+
+.upload-page .upload-detect-meta {
+  margin: 0.5rem 0 1rem;
+  font-size: 0.9rem;
+  color: #555;
+}
+
+.upload-page .upload-detect-debug {
+  margin-top: 0.45rem;
+  font-size: 0.82rem;
+  color: #475569;
+}
+
+.upload-page .upload-detect-debug summary {
+  cursor: pointer;
+  user-select: none;
+}
+
+.upload-page .upload-detect-debug-body {
+  margin-top: 0.35rem;
+  text-align: left;
+}
+
+.upload-page .upload-detect-warn {
+  color: #92400e;
+}
+
+.upload-page .upload-preview-block {
+  margin-top: 2rem;
+  text-align: left;
+}
+
+.upload-page .upload-preview-title {
+  font-size: 1.1rem;
+  margin: 0 0 0.75rem;
+  color: #1f2937;
+}
+
+.upload-page .upload-preview-layout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+  align-items: flex-start;
+}
+
+.upload-page .upload-preview-pdf {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+
+.upload-page .upload-suggestion-panel {
+  flex: 0 1 280px;
+  max-height: 70vh;
+  overflow: auto;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.upload-page .upload-suggestion-panel h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+
+.upload-page .upload-suggestion-hint {
+  margin: 0 0 0.75rem;
+  font-size: 0.85rem;
+  color: #64748b;
+}
+
+.upload-page .upload-suggestion-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.upload-page .upload-suggestion-item {
+  padding: 0.6rem 0;
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 0.88rem;
+}
+
+.upload-page .upload-suggestion-item:last-child {
+  border-bottom: none;
+}
+
+.upload-page .upload-suggestion-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  font-weight: 600;
+  color: #334155;
+}
+
+.upload-page .upload-suggestion-type {
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  color: #4338ca;
+}
+
+.upload-page .upload-suggestion-kind {
+  font-size: 0.72rem;
+  color: #94a3b8;
+}
+
+.upload-page .upload-suggestion-text {
+  margin: 0.35rem 0 0 1.5rem;
+  color: #475569;
+  word-break: break-word;
+}
+
+.upload-page .upload-suggestion-meta {
+  margin: 0.25rem 0 0 1.5rem;
+  font-size: 0.78rem;
+  color: #94a3b8;
+}
+
+.upload-page .upload-preview-field {
+  position: absolute;
+  cursor: default;
+}
+
+.upload-page .upload-post-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: center;
+  margin-top: 1.5rem;
+}
+
+.upload-page .upload-primary-btn {
+  padding: 12px 22px;
+  background: #4338ca;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.upload-page .upload-primary-btn:hover {
+  background: #3730a3;
+}
+
+.upload-page .upload-secondary-btn {
+  padding: 10px 18px;
+  border-radius: 6px;
+  border: 1px solid #c7d2fe;
+  color: #4338ca;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.upload-page .upload-secondary-btn:hover {
+  background: #eef2ff;
 }

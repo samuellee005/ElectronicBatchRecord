@@ -3,6 +3,49 @@
  * Configuration file for PDF Background Template Application
  */
 
+/**
+ * Load project root `.env` when present so `php -S … router.php` picks up EBR_* without Docker.
+ * Does not override variables already set in the process environment.
+ */
+function ebr_load_dotenv_if_readable(): void
+{
+    $path = __DIR__ . '/.env';
+    if (!is_readable($path)) {
+        return;
+    }
+    $lines = file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    if ($lines === false) {
+        return;
+    }
+    foreach ($lines as $line) {
+        $t = trim($line);
+        if ($t === '' || str_starts_with($t, '#')) {
+            continue;
+        }
+        if (!str_contains($t, '=')) {
+            continue;
+        }
+        [$name, $value] = explode('=', $t, 2);
+        $name = trim($name);
+        $value = trim($value);
+        if ($name === '') {
+            continue;
+        }
+        if ($value !== '' && str_starts_with($value, '"') && str_ends_with($value, '"')) {
+            $value = substr($value, 1, -1);
+        } elseif ($value !== '' && str_starts_with($value, "'") && str_ends_with($value, "'")) {
+            $value = substr($value, 1, -1);
+        }
+        if (getenv($name) !== false) {
+            continue;
+        }
+        putenv($name . '=' . $value);
+        $_ENV[$name] = $value;
+    }
+}
+
+ebr_load_dotenv_if_readable();
+
 // Legacy disk path (optional); template bytes are stored in PostgreSQL (ebr_pdf_templates). GET /uploads/*.pdf is served from the DB via router.php.
 define('UPLOAD_DIR', __DIR__ . '/uploads/');
 
