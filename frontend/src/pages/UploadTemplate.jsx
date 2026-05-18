@@ -99,6 +99,25 @@ export default function UploadTemplate() {
 
   const scaleFactor = 1
 
+  const persistEnabledSuggestions = async (filename) => {
+    if (!filename) return
+    const buf = fileBufferRef.current
+    const enabled = suggestions.filter((s) => enabledIds.has(s.id))
+    if (enabled.length === 0 || !buf) {
+      sessionStorage.removeItem(EBR_PENDING_SUGGESTIONS_KEY)
+      return
+    }
+    try {
+      const fields = await suggestionsToFormFields(buf, enabled)
+      sessionStorage.setItem(
+        EBR_PENDING_SUGGESTIONS_KEY,
+        JSON.stringify({ v: 1, pdfFilename: filename, fields }),
+      )
+    } catch {
+      sessionStorage.removeItem(EBR_PENDING_SUGGESTIONS_KEY)
+    }
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (!file) return
@@ -108,8 +127,15 @@ export default function UploadTemplate() {
     setUploadedFilename(null)
     try {
       const data = await uploadTemplate(file)
-      setMessage('PDF uploaded successfully.')
-      setUploadedFilename(data.filename || null)
+      const filename = data.filename || null
+      setUploadedFilename(filename)
+      await persistEnabledSuggestions(filename)
+      const enabledCount = suggestions.filter((s) => enabledIds.has(s.id)).length
+      setMessage(
+        enabledCount > 0
+          ? `PDF uploaded successfully. ${enabledCount} detected field(s) saved to the form.`
+          : 'PDF uploaded successfully.',
+      )
     } catch (err) {
       setError(err.message || 'Upload failed')
     } finally {
@@ -119,22 +145,7 @@ export default function UploadTemplate() {
 
   const openFormBuilderWithSuggestions = async () => {
     if (!uploadedFilename) return
-    const buf = fileBufferRef.current
-    const enabled = suggestions.filter((s) => enabledIds.has(s.id))
-    if (enabled.length === 0 || !buf) {
-      sessionStorage.removeItem(EBR_PENDING_SUGGESTIONS_KEY)
-      navigate(`/forms/builder?file=${encodeURIComponent(uploadedFilename)}`)
-      return
-    }
-    try {
-      const fields = await suggestionsToFormFields(buf, enabled)
-      sessionStorage.setItem(
-        EBR_PENDING_SUGGESTIONS_KEY,
-        JSON.stringify({ v: 1, pdfFilename: uploadedFilename, fields }),
-      )
-    } catch {
-      sessionStorage.removeItem(EBR_PENDING_SUGGESTIONS_KEY)
-    }
+    await persistEnabledSuggestions(uploadedFilename)
     navigate(`/forms/builder?file=${encodeURIComponent(uploadedFilename)}`)
   }
 
