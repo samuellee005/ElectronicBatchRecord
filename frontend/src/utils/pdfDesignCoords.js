@@ -130,5 +130,3 @@ export function buildFieldFromSuggestion(suggestion, rect, orderInGroup = 1) {
   }
   return field
 }
-
-export const EBR_PENDING_SUGGESTIONS_KEY = 'ebrPendingSuggestions'

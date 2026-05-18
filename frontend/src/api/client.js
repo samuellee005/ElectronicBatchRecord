@@ -273,6 +273,26 @@ export async function uploadTemplate(file) {
 }
 
 /**
+ * Persisted detected-field suggestions for a PDF template (server-side).
+ * @param {string} filename
+ * @returns {Promise<{ success: boolean, hasSuggestions: boolean, fields: object[], count: number }>}
+ */
+export async function loadTemplateSuggestions(filename) {
+  return request(`/includes/template-suggestions-api.php?file=${encodeURIComponent(filename)}`)
+}
+
+/**
+ * @param {string} filename
+ * @param {object[]} fields  FormBuilder-ready field objects
+ */
+export async function saveTemplateSuggestions(filename, fields) {
+  return request('/includes/template-suggestions-api.php', {
+    method: 'POST',
+    body: JSON.stringify({ filename, fields }),
+  })
+}
+
+/**
  * Suggested writable regions from the Python detection service (proxied by PHP).
  * @param {File} file
  * @param {{ includeDebug?: boolean }} [opts]

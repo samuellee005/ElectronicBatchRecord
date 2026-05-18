@@ -12,6 +12,13 @@ CREATE TABLE IF NOT EXISTS ebr_pdf_templates (
 CREATE INDEX IF NOT EXISTS idx_ebr_pdf_templates_uploaded ON ebr_pdf_templates (uploaded_at DESC);
 
 ---STATEMENT---
+CREATE TABLE IF NOT EXISTS ebr_pdf_template_suggestions (
+    filename TEXT PRIMARY KEY,
+    fields JSONB NOT NULL DEFAULT '[]'::jsonb,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+---STATEMENT---
 CREATE TABLE IF NOT EXISTS ebr_forms (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,

@@ -19,12 +19,16 @@ import PdfViewer from '../components/PdfViewer'
 import PdfPageScrubber from '../components/PdfPageScrubber'
 import PdfZoomControls from '../components/PdfZoomControls'
 import FieldPreview from '../components/forms/FieldPreview'
-import { listForms, loadFormById, saveForm } from '../api/client'
+import {
+  listForms,
+  loadFormById,
+  saveForm,
+  loadTemplateSuggestions,
+} from '../api/client'
 import { useUserPrefs } from '../context/UserPrefsContext'
 import { buildTableMergeLayout, tableCellKey } from '../utils/tableMergeLayout'
 import { DEFAULT_TABLE_COL_WIDTH, DEFAULT_TABLE_ROW_HEIGHT, tableColWidthPx, tableRowHeightPx } from '../utils/tableFieldDims'
 import { FORM_FIELD_DEFAULTS, DEFAULT_INPUT_FONT_PX } from '../utils/formFieldDefaults'
-import { EBR_PENDING_SUGGESTIONS_KEY } from '../utils/pdfDesignCoords'
 import './FormBuilder.css'
 
 const COMPONENT_TYPES = [
@@ -712,6 +716,10 @@ export default function FormBuilder() {
   const pdfFile = searchParams.get('file')
   const urlFormId = searchParams.get('formId')
   const urlName = searchParams.get('name')
+  // ?applySuggestions=1 → skip the start modal and pre-fill the canvas with
+  // the server-saved detected fields. ?applySuggestions=0 → skip modal, start
+  // blank. Absent → show the start modal so the user can pick.
+  const urlApplySuggestions = searchParams.get('applySuggestions')
 
   const pdfRef = useRef(null)
   const overlayRef = useRef(null)
@@ -735,6 +743,10 @@ export default function FormBuilder() {
   const [availableForms, setAvailableForms] = useState([])
   const [selectionFormId, setSelectionFormId] = useState(null)
   const [formsLoading, setFormsLoading] = useState(true)
+  // Server-saved detected fields for this PDF; used by the start modal to
+  // offer "Start with detected fields (N)" vs "Start blank".
+  const [savedSuggestionFields, setSavedSuggestionFields] = useState(null)
+  const [savedSuggestionCount, setSavedSuggestionCount] = useState(0)
 
   const [showSaveModal, setShowSaveModal] = useState(false)
   const [allFormNames, setAllFormNames] = useState([])
@@ -858,13 +870,70 @@ export default function FormBuilder() {
           const forPdf = data.forms.filter((f) => f.pdfFile === pdfFile)
           setAvailableForms(forPdf)
           if (forPdf.length === 0) {
-            setSelectionMode('new')
+            setSelectionMode((prev) => prev ?? 'new')
           }
         }
       })
       .catch(() => {})
       .finally(() => setFormsLoading(false))
   }, [pdfFile])
+
+  // Default-highlight "Start with detected fields" once suggestions load,
+  // unless the user already picked something or an existing form is selected.
+  useEffect(() => {
+    if (savedSuggestionCount > 0 && selectionMode == null) {
+      setSelectionMode('new_with_suggestions')
+    }
+  }, [savedSuggestionCount, selectionMode])
+
+  // Load server-saved detected fields for this PDF (offered as a "Start with
+  // detected fields" option in the start modal, or auto-applied via URL flag).
+  useEffect(() => {
+    if (!pdfFile) return
+    let cancelled = false
+    loadTemplateSuggestions(pdfFile)
+      .then((data) => {
+        if (cancelled) return
+        if (data?.success && data.hasSuggestions && Array.isArray(data.fields)) {
+          setSavedSuggestionFields(data.fields)
+          setSavedSuggestionCount(data.fields.length)
+        } else {
+          setSavedSuggestionFields(null)
+          setSavedSuggestionCount(0)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSavedSuggestionFields(null)
+          setSavedSuggestionCount(0)
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [pdfFile])
+
+  // ?applySuggestions=0|1 → skip the start modal entirely and act on the URL
+  // intent. Honored only when not loading an existing form by id.
+  useEffect(() => {
+    if (urlFormId) return
+    if (urlApplySuggestions == null) return
+    if (urlApplySuggestions === '1') {
+      if (savedSuggestionFields && savedSuggestionFields.length > 0) {
+        setFields(
+          normalizeFieldGroupOrder(
+            savedSuggestionFields.map((f) => ({ ...f, page: f.page || 1 })),
+          ),
+        )
+        setShowSelectionModal(false)
+      }
+      // If suggestions haven't arrived yet, wait — this effect re-runs when
+      // savedSuggestionFields updates.
+    } else if (urlApplySuggestions === '0') {
+      setFields([])
+      setShowSelectionModal(false)
+    }
+  }, [urlApplySuggestions, savedSuggestionFields, urlFormId])
 
   // If formId in URL, skip modal and load directly
   useEffect(() => {
@@ -1337,29 +1406,17 @@ export default function FormBuilder() {
 
   const confirmSelection = () => {
     setShowSelectionModal(false)
-    if (selectionMode === 'new') {
-      try {
-        const raw = sessionStorage.getItem(EBR_PENDING_SUGGESTIONS_KEY)
-        if (raw) {
-          sessionStorage.removeItem(EBR_PENDING_SUGGESTIONS_KEY)
-          const o = JSON.parse(raw)
-          if (
-            o &&
-            o.pdfFilename === pdfFile &&
-            Array.isArray(o.fields) &&
-            o.fields.length > 0
-          ) {
-            setFields(
-              normalizeFieldGroupOrder(
-                o.fields.map((f) => ({ ...f, page: f.page || 1 })),
-              ),
-            )
-            return
-          }
-        }
-      } catch {
-        /* ignore invalid import payload */
+    if (selectionMode === 'new_with_suggestions') {
+      if (savedSuggestionFields && savedSuggestionFields.length > 0) {
+        setFields(
+          normalizeFieldGroupOrder(
+            savedSuggestionFields.map((f) => ({ ...f, page: f.page || 1 })),
+          ),
+        )
+        return
       }
+      setFields([])
+    } else if (selectionMode === 'new') {
       setFields([])
     } else if (selectionMode === 'existing' && selectionFormId) {
       loadFormById(selectionFormId).then((data) => {
@@ -2031,16 +2088,41 @@ export default function FormBuilder() {
             <p>Choose how you want to start building your form:</p>
 
             <div className="fb-selection-options">
-              <div
-                className={`fb-selection-option ${selectionMode === 'new' ? 'selected' : ''}`}
-                onClick={() => {
-                  setSelectionMode('new')
-                  setSelectionFormId(null)
-                }}
-              >
-                <h3>Start New Form</h3>
-                <p>Create a completely new form from scratch</p>
-              </div>
+              {savedSuggestionCount > 0 ? (
+                <>
+                  <div
+                    className={`fb-selection-option ${selectionMode === 'new_with_suggestions' ? 'selected' : ''}`}
+                    onClick={() => {
+                      setSelectionMode('new_with_suggestions')
+                      setSelectionFormId(null)
+                    }}
+                  >
+                    <h3>Start with detected fields ({savedSuggestionCount})</h3>
+                    <p>Pre-fill the canvas with the fields detected from this PDF</p>
+                  </div>
+                  <div
+                    className={`fb-selection-option ${selectionMode === 'new' ? 'selected' : ''}`}
+                    onClick={() => {
+                      setSelectionMode('new')
+                      setSelectionFormId(null)
+                    }}
+                  >
+                    <h3>Start blank</h3>
+                    <p>Begin from an empty canvas and place fields manually</p>
+                  </div>
+                </>
+              ) : (
+                <div
+                  className={`fb-selection-option ${selectionMode === 'new' ? 'selected' : ''}`}
+                  onClick={() => {
+                    setSelectionMode('new')
+                    setSelectionFormId(null)
+                  }}
+                >
+                  <h3>Start New Form</h3>
+                  <p>Create a completely new form from scratch</p>
+                </div>
+              )}
               {(availableForms.length > 0 || formsLoading) && (
                 <div
                   className={`fb-selection-option ${selectionMode === 'existing' ? 'selected' : ''}`}

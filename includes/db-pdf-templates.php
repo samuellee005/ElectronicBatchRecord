@@ -170,3 +170,82 @@ function ebr_db_pdf_template_list_for_api(): array
 
     return $out;
 }
+
+/**
+ * Lazy init for the detected-field-suggestions table — lets the feature work
+ * on deployments where schema.sql has not been re-applied.
+ */
+function ebr_db_template_suggestions_ensure_table(): void
+{
+    static $done = false;
+    if ($done) {
+        return;
+    }
+    $pdo = ebr_pg_pdo();
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS ebr_pdf_template_suggestions (
+            filename TEXT PRIMARY KEY,
+            fields JSONB NOT NULL DEFAULT '[]'::jsonb,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )"
+    );
+    $done = true;
+}
+
+/**
+ * Returns the saved field list for a template, or null if no row exists.
+ * @return ?list<array<string, mixed>>
+ */
+function ebr_db_template_suggestions_get(string $filename): ?array
+{
+    $fn = ebr_db_pdf_template_normalize_filename($filename);
+    if ($fn === '') {
+        return null;
+    }
+    ebr_db_template_suggestions_ensure_table();
+    $pdo = ebr_pg_pdo();
+    $st = $pdo->prepare('SELECT fields FROM ebr_pdf_template_suggestions WHERE filename = :f LIMIT 1');
+    $st->execute(['f' => $fn]);
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$row) {
+        return null;
+    }
+    $decoded = json_decode((string) $row['fields'], true);
+
+    return is_array($decoded) ? $decoded : [];
+}
+
+/**
+ * @param list<array<string, mixed>> $fields
+ */
+function ebr_db_template_suggestions_set(string $filename, array $fields): void
+{
+    $fn = ebr_db_pdf_template_normalize_filename($filename);
+    if ($fn === '') {
+        throw new InvalidArgumentException('Invalid template filename');
+    }
+    ebr_db_template_suggestions_ensure_table();
+    $pdo = ebr_pg_pdo();
+    $sql = 'INSERT INTO ebr_pdf_template_suggestions (filename, fields, updated_at)
+            VALUES (:f, CAST(:fields AS JSONB), NOW())
+            ON CONFLICT (filename) DO UPDATE SET fields = EXCLUDED.fields, updated_at = NOW()';
+    $st = $pdo->prepare($sql);
+    $st->bindValue('f', $fn);
+    $st->bindValue(
+        'fields',
+        json_encode(array_values($fields), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+    );
+    $st->execute();
+}
+
+function ebr_db_template_suggestions_delete(string $filename): void
+{
+    $fn = ebr_db_pdf_template_normalize_filename($filename);
+    if ($fn === '') {
+        return;
+    }
+    ebr_db_template_suggestions_ensure_table();
+    $pdo = ebr_pg_pdo();
+    $st = $pdo->prepare('DELETE FROM ebr_pdf_template_suggestions WHERE filename = :f');
+    $st->execute(['f' => $fn]);
+}

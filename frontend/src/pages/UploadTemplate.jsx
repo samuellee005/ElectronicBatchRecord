@@ -1,13 +1,16 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { pdfjs } from 'react-pdf'
-import { uploadTemplate, detectPdfFields } from '../api/client'
+import {
+  uploadTemplate,
+  detectPdfFields,
+  saveTemplateSuggestions,
+} from '../api/client'
 import FieldPreview from '../components/forms/FieldPreview'
 import PdfViewer from '../components/PdfViewer'
 import {
   suggestionsToFormFields,
   buildFieldFromSuggestion,
-  EBR_PENDING_SUGGESTIONS_KEY,
 } from '../utils/pdfDesignCoords'
 import './FormBuilder.css'
 import './UploadTemplate.css'
@@ -99,11 +102,16 @@ export default function UploadTemplate() {
 
   const scaleFactor = 1
 
+  const [savedFieldCount, setSavedFieldCount] = useState(0)
+
+  // Convert the currently-enabled detections into FormBuilder field objects and
+  // POST them to the server, keyed by the uploaded filename. Returns the saved
+  // count so the caller can show a success message and decide which navigation
+  // buttons to render.
   const persistEnabledSuggestions = async (filename) => {
     if (!filename) return { ok: false, count: 0 }
     const enabled = suggestions.filter((s) => enabledIds.has(s.id))
     if (enabled.length === 0 || !file) {
-      sessionStorage.removeItem(EBR_PENDING_SUGGESTIONS_KEY)
       return { ok: true, count: 0 }
     }
     // Re-read bytes from the File each call: pdf.js detaches ArrayBuffers it
@@ -112,13 +120,9 @@ export default function UploadTemplate() {
     try {
       const buf = await file.arrayBuffer()
       const fields = await suggestionsToFormFields(buf, enabled)
-      sessionStorage.setItem(
-        EBR_PENDING_SUGGESTIONS_KEY,
-        JSON.stringify({ v: 1, pdfFilename: filename, fields }),
-      )
+      await saveTemplateSuggestions(filename, fields)
       return { ok: true, count: fields.length }
     } catch (err) {
-      sessionStorage.removeItem(EBR_PENDING_SUGGESTIONS_KEY)
       return { ok: false, count: 0, error: err }
     }
   }
@@ -130,15 +134,17 @@ export default function UploadTemplate() {
     setError(null)
     setMessage(null)
     setUploadedFilename(null)
+    setSavedFieldCount(0)
     try {
       const data = await uploadTemplate(file)
       const filename = data.filename || null
       setUploadedFilename(filename)
       const result = await persistEnabledSuggestions(filename)
       if (result.ok) {
+        setSavedFieldCount(result.count)
         setMessage(
           result.count > 0
-            ? `PDF uploaded successfully. ${result.count} detected field(s) saved to the form.`
+            ? `PDF uploaded successfully. ${result.count} detected field(s) saved to the template.`
             : 'PDF uploaded successfully.',
         )
       } else {
@@ -156,17 +162,12 @@ export default function UploadTemplate() {
     }
   }
 
-  const openFormBuilderWithSuggestions = async () => {
+  const openFormBuilder = (withSuggestions) => {
     if (!uploadedFilename) return
-    // Refresh the pending-fields payload in case the user toggled suggestions
-    // after upload. If it fails (e.g. file gone), keep whatever was already
-    // persisted at upload time rather than clearing it.
-    const existing = sessionStorage.getItem(EBR_PENDING_SUGGESTIONS_KEY)
-    const result = await persistEnabledSuggestions(uploadedFilename)
-    if (!result.ok && existing) {
-      sessionStorage.setItem(EBR_PENDING_SUGGESTIONS_KEY, existing)
-    }
-    navigate(`/forms/builder?file=${encodeURIComponent(uploadedFilename)}`)
+    const flag = withSuggestions ? '1' : '0'
+    navigate(
+      `/forms/builder?file=${encodeURIComponent(uploadedFilename)}&applySuggestions=${flag}`,
+    )
   }
 
   const fieldStyle = (s) => ({
@@ -389,10 +390,32 @@ export default function UploadTemplate() {
           <Link to="/templates" className="upload-secondary-btn">
             View all templates
           </Link>
-          <button type="button" className="upload-primary-btn" onClick={openFormBuilderWithSuggestions}>
-            Open form builder
-            {enabledIds.size > 0 ? ` (${enabledIds.size} fields)` : ''}
-          </button>
+          {savedFieldCount > 0 ? (
+            <>
+              <button
+                type="button"
+                className="upload-secondary-btn"
+                onClick={() => openFormBuilder(false)}
+              >
+                Open form builder blank
+              </button>
+              <button
+                type="button"
+                className="upload-primary-btn"
+                onClick={() => openFormBuilder(true)}
+              >
+                Open form builder with detected fields ({savedFieldCount})
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              className="upload-primary-btn"
+              onClick={() => openFormBuilder(false)}
+            >
+              Open form builder
+            </button>
+          )}
         </div>
       )}
 
