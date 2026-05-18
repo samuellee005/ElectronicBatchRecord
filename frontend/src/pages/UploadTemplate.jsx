@@ -100,21 +100,26 @@ export default function UploadTemplate() {
   const scaleFactor = 1
 
   const persistEnabledSuggestions = async (filename) => {
-    if (!filename) return
-    const buf = fileBufferRef.current
+    if (!filename) return { ok: false, count: 0 }
     const enabled = suggestions.filter((s) => enabledIds.has(s.id))
-    if (enabled.length === 0 || !buf) {
+    if (enabled.length === 0 || !file) {
       sessionStorage.removeItem(EBR_PENDING_SUGGESTIONS_KEY)
-      return
+      return { ok: true, count: 0 }
     }
+    // Re-read bytes from the File each call: pdf.js detaches ArrayBuffers it
+    // receives via `getDocument({ data })`, so fileBufferRef.current may be
+    // empty after the preview pass runs.
     try {
+      const buf = await file.arrayBuffer()
       const fields = await suggestionsToFormFields(buf, enabled)
       sessionStorage.setItem(
         EBR_PENDING_SUGGESTIONS_KEY,
         JSON.stringify({ v: 1, pdfFilename: filename, fields }),
       )
-    } catch {
+      return { ok: true, count: fields.length }
+    } catch (err) {
       sessionStorage.removeItem(EBR_PENDING_SUGGESTIONS_KEY)
+      return { ok: false, count: 0, error: err }
     }
   }
 
@@ -129,13 +134,21 @@ export default function UploadTemplate() {
       const data = await uploadTemplate(file)
       const filename = data.filename || null
       setUploadedFilename(filename)
-      await persistEnabledSuggestions(filename)
-      const enabledCount = suggestions.filter((s) => enabledIds.has(s.id)).length
-      setMessage(
-        enabledCount > 0
-          ? `PDF uploaded successfully. ${enabledCount} detected field(s) saved to the form.`
-          : 'PDF uploaded successfully.',
-      )
+      const result = await persistEnabledSuggestions(filename)
+      if (result.ok) {
+        setMessage(
+          result.count > 0
+            ? `PDF uploaded successfully. ${result.count} detected field(s) saved to the form.`
+            : 'PDF uploaded successfully.',
+        )
+      } else {
+        setMessage('PDF uploaded successfully.')
+        setError(
+          `Detected fields could not be attached automatically: ${
+            result.error?.message || 'unknown error'
+          }. You can still open the form builder and place fields manually.`,
+        )
+      }
     } catch (err) {
       setError(err.message || 'Upload failed')
     } finally {
@@ -145,7 +158,14 @@ export default function UploadTemplate() {
 
   const openFormBuilderWithSuggestions = async () => {
     if (!uploadedFilename) return
-    await persistEnabledSuggestions(uploadedFilename)
+    // Refresh the pending-fields payload in case the user toggled suggestions
+    // after upload. If it fails (e.g. file gone), keep whatever was already
+    // persisted at upload time rather than clearing it.
+    const existing = sessionStorage.getItem(EBR_PENDING_SUGGESTIONS_KEY)
+    const result = await persistEnabledSuggestions(uploadedFilename)
+    if (!result.ok && existing) {
+      sessionStorage.setItem(EBR_PENDING_SUGGESTIONS_KEY, existing)
+    }
     navigate(`/forms/builder?file=${encodeURIComponent(uploadedFilename)}`)
   }
 
