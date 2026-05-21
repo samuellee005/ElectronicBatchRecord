@@ -181,6 +181,63 @@ def _is_label_cell(
     return _cell_role(text, words_in_cell) == "label"
 
 
+def _is_informational_table(
+    table: Table,
+    cell_texts: dict[tuple[int, int], str],
+    words: list[tuple[float, float, float, float, str]],
+) -> bool:
+    """True when a table reads as static content (TOC, references, etc.)
+    rather than a form to be filled in.
+
+    A TOC or references block is a grid where virtually every cell already
+    holds text — there are no empty cells adjacent to filled ones, so the
+    "label → input slot" pattern that drives field emission is absent.
+    Emitting inputs over such cells just clutters the form builder.
+
+    The cell-role check filters underscore fillers, so a cell whose only
+    content is `____` still counts as empty.
+    """
+    label_cells: set[tuple[int, int]] = set()
+    input_cells: set[tuple[int, int]] = set()
+    for cell in table.cells:
+        # Match the emission loop's filter: skip inter-table seam rows
+        # whose tiny cells aren't plausible inputs anyway.
+        if cell.bbox.h < 10.0 or cell.bbox.w < 16.0:
+            continue
+        text = cell_texts.get((cell.row, cell.col), "")
+        words_in_cell = _words_in(words, cell.bbox, inset=0.5)
+        role = _cell_role(text, words_in_cell)
+        if role == "label":
+            label_cells.add((cell.row, cell.col))
+        else:
+            input_cells.add((cell.row, cell.col))
+
+    total = len(label_cells) + len(input_cells)
+    if total < 4:
+        # Too small to classify reliably — let the normal logic run.
+        return False
+
+    if not input_cells:
+        # Nothing would have been emitted anyway, but reporting it as
+        # informational keeps the debug overlay coherent.
+        return True
+
+    label_ratio = len(label_cells) / total
+    if label_ratio < 0.85:
+        return False
+
+    # Of the few remaining empties, count those sitting right of or below
+    # a labelled cell — the canonical "label → input slot" arrangement.
+    # If even one or two empties look like real slots we err on the side
+    # of emitting fields; only when essentially every empty cell looks
+    # incidental do we treat the whole table as static.
+    structural_slots = 0
+    for r, c in input_cells:
+        if (r, c - 1) in label_cells or (r - 1, c) in label_cells:
+            structural_slots += 1
+    return structural_slots <= 1
+
+
 def _emit_from_cell(
     cell: Cell,
     label: str,
@@ -736,6 +793,21 @@ def emit_page_fields(
         injected_headers = (
             (injected_headers_by_table or {}).get(table.id)
         )
+
+        # Table-of-contents and reference blocks are tables in shape only
+        # — every cell already holds static text, with no empty cell to
+        # the right or below to act as an input slot. Skip the whole
+        # table so the form builder isn't littered with bogus fields.
+        if _is_informational_table(table, cell_texts, words):
+            if debug_records is not None:
+                debug_records.append({
+                    "stage": "table",
+                    "tableId": table.id,
+                    "decision": "informational_skip",
+                    "rows": len(table.row_bounds) - 1,
+                    "cols": num_cols,
+                })
+            continue
 
         # Column-level type voting: classify each column's header text
         # once and apply that field type to every input cell in the

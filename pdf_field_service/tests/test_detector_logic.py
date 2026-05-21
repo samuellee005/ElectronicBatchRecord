@@ -289,6 +289,122 @@ class HeaderCarryTests(unittest.TestCase):
         )
 
 
+class InformationalTableTests(unittest.TestCase):
+    """Tables of contents / reference blocks shouldn't emit any inputs."""
+
+    def test_table_of_contents_emits_no_fields(self) -> None:
+        doc, page = _new_page()
+        # 2-col, 4-row TOC: each cell already holds text.
+        _draw_rect(page, 60, 100, 540, 260)
+        _draw_line(page, 460, 100, 460, 260)
+        _draw_line(page, 60, 140, 540, 140)
+        _draw_line(page, 60, 180, 540, 180)
+        _draw_line(page, 60, 220, 540, 220)
+        _put_text(page, 70, 130, "1. Introduction")
+        _put_text(page, 470, 130, "3")
+        _put_text(page, 70, 170, "2. Methods")
+        _put_text(page, 470, 170, "5")
+        _put_text(page, 70, 210, "3. Results")
+        _put_text(page, 470, 210, "8")
+        _put_text(page, 70, 250, "4. Discussion")
+        _put_text(page, 470, 250, "12")
+
+        res = _detect(doc)
+        from_cells = [s for s in res["suggestions"] if s["fromCell"]]
+        self.assertEqual(
+            from_cells, [],
+            "A fully-filled TOC table should produce no input fields",
+        )
+
+    def test_form_table_with_empty_value_cells_still_emits(self) -> None:
+        """Regression: a normal 'label → empty input' form must keep emitting."""
+        doc, page = _new_page()
+        # 2-col, 3-row form: left column has labels, right column empty.
+        _draw_rect(page, 60, 100, 540, 220)
+        _draw_line(page, 240, 100, 240, 220)
+        _draw_line(page, 60, 140, 540, 140)
+        _draw_line(page, 60, 180, 540, 180)
+        _put_text(page, 70, 130, "Product Name")
+        _put_text(page, 70, 170, "Lot Number")
+        _put_text(page, 70, 210, "Manufacture Date")
+
+        res = _detect(doc)
+        from_cells = [s for s in res["suggestions"] if s["fromCell"]]
+        self.assertEqual(
+            len(from_cells), 3,
+            f"Expected three input cells, got {len(from_cells)}: {from_cells}",
+        )
+
+    def test_informational_helper_detects_static_grid(self) -> None:
+        """Unit-level check on the helper, decoupled from PDF rendering."""
+        from app import fields as F
+        from app.geometry import Cell, Rect, Table
+
+        # 3x3 grid, every cell filled — references-style block.
+        cells = []
+        row_bounds = [0.0, 20.0, 40.0, 60.0]
+        col_bounds = [0.0, 40.0, 80.0, 120.0]
+        for r in range(3):
+            for c in range(3):
+                cells.append(Cell(
+                    table_id=1, row=r, col=c, row_span=1, col_span=1,
+                    bbox=Rect(x=col_bounds[c], y=row_bounds[r], w=40.0, h=20.0),
+                ))
+        table = Table(
+            id=1,
+            bbox=Rect(x=0.0, y=0.0, w=120.0, h=60.0),
+            row_bounds=row_bounds,
+            col_bounds=col_bounds,
+            cells=cells,
+        )
+        cell_texts = {
+            (r, c): f"Item {r}.{c}" for r in range(3) for c in range(3)
+        }
+        # _cell_role consults the words list to verify there's real
+        # content in the cell — synthesise a word per cell.
+        words = []
+        for r in range(3):
+            for c in range(3):
+                cx = col_bounds[c] + 5.0
+                cy = row_bounds[r] + 10.0
+                words.append((cx, cy, cx + 30.0, cy + 8.0, f"Item{r}{c}"))
+        self.assertTrue(F._is_informational_table(table, cell_texts, words))
+
+    def test_informational_helper_rejects_form_with_input_slots(self) -> None:
+        from app import fields as F
+        from app.geometry import Cell, Rect, Table
+
+        # Left column filled, right column empty — classic 2-col form.
+        cells = []
+        row_bounds = [0.0, 20.0, 40.0, 60.0]
+        col_bounds = [0.0, 60.0, 120.0]
+        for r in range(3):
+            for c in range(2):
+                cells.append(Cell(
+                    table_id=2, row=r, col=c, row_span=1, col_span=1,
+                    bbox=Rect(x=col_bounds[c], y=row_bounds[r], w=60.0, h=20.0),
+                ))
+        table = Table(
+            id=2,
+            bbox=Rect(x=0.0, y=0.0, w=120.0, h=60.0),
+            row_bounds=row_bounds,
+            col_bounds=col_bounds,
+            cells=cells,
+        )
+        cell_texts = {
+            (0, 0): "Product Name", (0, 1): "",
+            (1, 0): "Lot Number",   (1, 1): "",
+            (2, 0): "Date",         (2, 1): "",
+        }
+        # Left-column words only — right column is intentionally empty.
+        words = []
+        for r, label in enumerate(("Product Name", "Lot Number", "Date")):
+            cx = col_bounds[0] + 5.0
+            cy = row_bounds[r] + 10.0
+            words.append((cx, cy, cx + 40.0, cy + 8.0, label))
+        self.assertFalse(F._is_informational_table(table, cell_texts, words))
+
+
 class FixtureSmokeTests(unittest.TestCase):
 
     def test_example_pdf_emits_only_cell_inputs_for_table_fields(self) -> None:
