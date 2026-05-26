@@ -113,7 +113,7 @@ def _label_has_data(label: str) -> bool:
 
 
 _CHECKBOX_TOKEN_RE = re.compile(
-    r"\b(yes|no|y/n|y|n|pass|fail|n/a)\b", re.IGNORECASE,
+    r"\b(yes|no|y/n|n/a|pass|fail)\b", re.IGNORECASE,
 )
 _CHECKBOX_GLYPH_CHARS = set("☐□✓✔☑☑☒")
 
@@ -121,9 +121,11 @@ _CHECKBOX_GLYPH_CHARS = set("☐□✓✔☑☑☒")
 def _is_checkbox_prompt(text: str) -> bool:
     """Detect cells whose value is a Yes/No-style prompt.
 
-    Examples that should match:
-        "Yes No", "Yes / No", "I Yes I No", "☐ Yes ☐ No",
-        "Pass / Fail", "Y/N"
+    A "prompt" cell is a binary-choice marker the user picks between —
+    we recognise it only when the text clearly contains one of those
+    pairs (yes+no, pass+fail) or stands alone as a single yes/no token.
+    A lone "No" inside a longer phrase is NOT a checkbox: "Version No.",
+    "No. of items", and the like would otherwise be mis-classified.
     """
     if not text:
         return False
@@ -136,13 +138,22 @@ def _is_checkbox_prompt(text: str) -> bool:
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     if not cleaned:
         return False
-    # Must be short — long sentences containing "yes" are not prompts.
     word_count = len(re.findall(r"[A-Za-z]+", cleaned))
     if word_count > 4:
         return False
-    if not _CHECKBOX_TOKEN_RE.search(cleaned):
+    tokens = {m.group(0).lower() for m in _CHECKBOX_TOKEN_RE.finditer(cleaned)}
+    if not tokens:
         return False
-    return True
+    # Binary prompts: explicit yes/no or pass/fail pair.
+    if {"yes", "no"} <= tokens or {"pass", "fail"} <= tokens:
+        return True
+    # Marker tokens that only make sense as checkbox prompts.
+    if tokens & {"y/n", "n/a"}:
+        return True
+    # Standalone single-token prompts ("Yes", "No", "Pass", "Fail").
+    if word_count == 1 and tokens & {"yes", "no", "pass", "fail"}:
+        return True
+    return False
 
 
 # ---------- Stage B: cell classification + emission ---------------------- #
@@ -1004,10 +1015,45 @@ def emit_page_fields(
                 })
 
     # ---- Standalone underlines -----------------------------------------
+    # Discard underlines that are actually internal dividers of a
+    # text-only standalone box (e.g. the top/middle/bottom rules of a
+    # paragraph block surrounded by a border). A divider line spans
+    # essentially the full width of its enclosing box; narrower lines
+    # inside the same box (Print Name / Signature underlines) remain
+    # available as input fields.
+    text_only_boxes = [
+        b for b in geom.standalone_boxes if not _box_has_input_area(b, words)
+    ]
+    divider_tol = 4.0
+
+    def _is_box_divider(line: HLine) -> bool:
+        for b in text_only_boxes:
+            if not (b.y - divider_tol <= line.y <= b.y1 + divider_tol):
+                continue
+            if (
+                abs(line.x0 - b.x) <= divider_tol
+                and abs(line.x1 - b.x1) <= divider_tol
+            ):
+                return True
+        return False
+
+    surviving_underlines = [
+        u for u in geom.standalone_underlines if not _is_box_divider(u)
+    ]
+    if debug_records is not None:
+        for u in geom.standalone_underlines:
+            if _is_box_divider(u):
+                debug_records.append({
+                    "stage": "standalone_underline",
+                    "decision": "box_divider_skip",
+                    "y": round(u.y, 1),
+                    "x0": round(u.x0, 1),
+                    "x1": round(u.x1, 1),
+                })
     # Merge vertically-stacked underlines that share an x range (e.g.
     # the multi-line NOTES section) into one free-text block. Lone
     # underlines stay as single-line fields.
-    underline_groups = _group_stacked_underlines(geom.standalone_underlines, words)
+    underline_groups = _group_stacked_underlines(surviving_underlines, words)
     for group in underline_groups:
         if len(group) >= 2:
             x0 = min(h.x0 for h in group)

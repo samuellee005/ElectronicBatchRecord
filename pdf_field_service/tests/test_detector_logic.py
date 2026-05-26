@@ -457,6 +457,81 @@ class BorderedTextBlockTests(unittest.TestCase):
         self.assertFalse(F._box_has_input_area(box, words))
 
 
+class CheckboxPromptHeuristicTests(unittest.TestCase):
+
+    def test_version_no_not_checkbox(self) -> None:
+        from app import fields as F
+        # "Version No: 0.1" contains "No" but is a label+value, not a
+        # binary prompt — must not be treated as a checkbox.
+        self.assertFalse(F._is_checkbox_prompt("Version No: 0.1"))
+        self.assertFalse(F._is_checkbox_prompt("No. of Items"))
+
+    def test_standalone_yes_or_no_still_checkbox(self) -> None:
+        from app import fields as F
+        self.assertTrue(F._is_checkbox_prompt("Yes"))
+        self.assertTrue(F._is_checkbox_prompt("No"))
+
+    def test_binary_pairs_still_checkbox(self) -> None:
+        from app import fields as F
+        self.assertTrue(F._is_checkbox_prompt("Yes / No"))
+        self.assertTrue(F._is_checkbox_prompt("I Yes I No"))
+        self.assertTrue(F._is_checkbox_prompt("Pass / Fail"))
+
+
+class TestBatchRecordFixtureTests(unittest.TestCase):
+    """Pinned behaviour for data/imgs/TestBatchRecord.pdf page 1.
+
+    The page contains a header table (filled cells), a bordered BATCH
+    RECORD heading, a paragraph block, and four signature rows. The only
+    fields we should emit are the four "Print Name / Signature" and the
+    four "Date" underlines.
+    """
+
+    @classmethod
+    def _detect_first_page(cls):
+        from app import detector
+        fixture = (
+            Path(__file__).resolve().parents[2]
+            / "data" / "imgs" / "TestBatchRecord.pdf"
+        )
+        cls.assertTrue_path = fixture.exists()
+        return detector.detect_pdf(fixture.read_bytes(), max_pages=1)
+
+    def test_emits_only_signature_and_date_underlines(self) -> None:
+        res = self._detect_first_page()
+        kinds = [s["kind"] for s in res["suggestions"]]
+        self.assertEqual(
+            set(kinds), {"standalone_underline"},
+            f"Unexpected non-underline fields emitted: {kinds}",
+        )
+        labels = sorted(s["labelText"].lower() for s in res["suggestions"])
+        prepared = [l for l in labels if l.startswith("prepared")]
+        dates = [l for l in labels if l == "date"]
+        self.assertEqual(len(prepared), 4, f"expected 4 Prepared-By underlines, got {prepared}")
+        self.assertEqual(len(dates), 4, f"expected 4 Date underlines, got {dates}")
+        self.assertEqual(len(res["suggestions"]), 8)
+
+    def test_no_field_over_filled_header_cells(self) -> None:
+        res = self._detect_first_page()
+        # Top header table sits between y=36 and y=83.
+        for s in res["suggestions"]:
+            self.assertFalse(
+                s["y"] < 90,
+                f"Spurious field on top header table: {s}",
+            )
+
+    def test_no_field_over_bordered_paragraph_block(self) -> None:
+        res = self._detect_first_page()
+        # Body box sits between y≈120 and y≈230 for the heading +
+        # paragraph rows. No field should land in that band.
+        for s in res["suggestions"]:
+            cy = s["y"] + s["height"] / 2
+            self.assertFalse(
+                120 < cy < 230,
+                f"Spurious field inside paragraph block: {s}",
+            )
+
+
 class FixtureSmokeTests(unittest.TestCase):
 
     def test_example_pdf_emits_only_cell_inputs_for_table_fields(self) -> None:

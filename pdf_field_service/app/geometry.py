@@ -618,13 +618,15 @@ def _filter_real_row_bounds(
     xs: list[float],
     v_lines: list[VLine],
 ) -> list[float]:
-    """Drop y bounds where most interior V dividers don't actually cross.
+    """Drop y bounds that no interior V divider crosses.
 
-    A real row boundary is one where MORE THAN HALF of the table's
-    interior V dividers extend through that y. Boundaries where the
-    dividers stop short are seam artefacts of raster line detection —
-    including them creates thin rows whose cells merge horizontally
-    because most column borders are missing.
+    A genuine row boundary has at least one interior column divider
+    passing through it — otherwise it's a seam between disjoint
+    sub-tables (e.g. two stacked but unrelated grids that happen to
+    share a horizontal rule). Tables with merged cells routinely have
+    interior dividers that span only some rows, so requiring a
+    majority of dividers to cross every boundary erroneously drops
+    real row bounds.
     """
     if len(xs) < 3:
         return ys
@@ -641,7 +643,7 @@ def _filter_real_row_bounds(
                 if v.y0 <= y + JOIN_TOL_PT and v.y1 >= y - JOIN_TOL_PT:
                     crossed += 1
                     break
-        if crossed * 2 > len(interior_xs):
+        if crossed >= 1:
             real.append(y)
     return real
 
@@ -1081,16 +1083,17 @@ def _identify_standalone_underlines(
 def _line_has_text_on_it(
     h: HLine,
     words: list[tuple[float, float, float, float, str]],
-    y_tol: float = 6.0,
+    descender_tol: float = 4.0,
 ) -> bool:
     """True if a word visually sits on top of this H line.
 
-    A word counts as "on the line" only when its x-CENTER falls inside
-    the line's x range and the line's y position is within the word's
-    y range (with a small slop). Using the x-center lets legitimate
-    "Label: ____" patterns survive — there the label's right edge can
-    touch the underline's left edge, which would otherwise look like an
-    overlap.
+    A word counts as "on the line" when its x-CENTER falls inside the
+    line's x range and the line's y position sits within the word's
+    vertical bounding box (allowing a small descender extension below
+    the box).  Crucially we do NOT allow the line to be *above* the
+    word — that pattern is the input underline / label-below convention
+    ("___" with "Print Name" written underneath), which should remain
+    available as a fillable rule.
     """
     if h.x1 <= h.x0:
         return False
@@ -1099,7 +1102,9 @@ def _line_has_text_on_it(
         cx = (wx0 + wx1) / 2
         if cx < h.x0 + line_inset or cx > h.x1 - line_inset:
             continue
-        if wy0 - y_tol <= h.y <= wy1 + y_tol:
+        # h.y inside the word's bbox (decoration through the glyph)
+        # OR just below the word baseline (within descender tolerance).
+        if wy0 <= h.y <= wy1 + descender_tol:
             return True
     return False
 
