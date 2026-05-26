@@ -602,6 +602,66 @@ class TestBatchRecord2BomTests(unittest.TestCase):
         self.assertEqual(in_bom, [], f"Standalone boxes inside BoM: {in_bom}")
 
 
+class TestBatchRecord3UnderscoreInputsTests(unittest.TestCase):
+    """Pinned behaviour for the RNA Calculations step table on page 1 of
+    TestBatchRecord3.pdf. Each fill-in slot is drawn with underscore
+    characters (`_______`, `______mg`, `=____g`); the caption sits below
+    each blank, except for the signature column where it sits above.
+    """
+
+    @classmethod
+    def _detect_first_page(cls):
+        from app import detector
+        fixture = (
+            Path(__file__).resolve().parents[2]
+            / "data" / "imgs" / "TestBatchRecord3.pdf"
+        )
+        return detector.detect_pdf(fixture.read_bytes(), max_pages=1)
+
+    def test_emits_underscore_fields(self) -> None:
+        res = self._detect_first_page()
+        u_fields = [s for s in res["suggestions"] if s["kind"] == "underscore_input"]
+        self.assertGreaterEqual(
+            len(u_fields), 19,
+            f"Expected ≥19 underscore inputs, got {len(u_fields)}",
+        )
+
+    def test_signature_lines_alternate_performed_reviewed(self) -> None:
+        res = self._detect_first_page()
+        sig_fields = [
+            s for s in res["suggestions"]
+            if s["kind"] == "underscore_input" and s["x"] > 500
+        ]
+        labels = [s["labelText"] for s in sig_fields]
+        # Across 4 step rows, we expect alternating Performed/Reviewed.
+        self.assertIn("Performed by/Date", labels)
+        self.assertIn("Reviewed by/Date", labels)
+
+    def test_units_trigger_number_field_type(self) -> None:
+        res = self._detect_first_page()
+        # Any underscore_input whose label mentions "mass", "weight",
+        # "volume" or "concentration" should be a number field — those
+        # captions accompany unit-suffix slots in this fixture.
+        for s in res["suggestions"]:
+            if s["kind"] != "underscore_input":
+                continue
+            label = s["labelText"].lower()
+            if any(k in label for k in ("mass", "weight", "volume", "concentration")):
+                self.assertEqual(
+                    s["fieldType"], "number",
+                    f"Numeric quantity should be number type: {s}",
+                )
+
+    def test_step_caption_not_truncated_at_column_edge(self) -> None:
+        res = self._detect_first_page()
+        labels = [s["labelText"] for s in res["suggestions"]]
+        # A wrapped multi-line caption must come through fully.
+        self.assertTrue(
+            any("Target mass of RNA with overage from step 9.2.1" in l for l in labels),
+            f"Expected wrapped caption to be captured fully, got {labels}",
+        )
+
+
 class FixtureSmokeTests(unittest.TestCase):
 
     def test_example_pdf_emits_only_cell_inputs_for_table_fields(self) -> None:

@@ -343,6 +343,286 @@ def _emit_from_cell(
     )
 
 
+_UNDERSCORE_INPUT_RE = re.compile(r"^(=?\s*)(_{4,})(.*)$")
+_UNIT_SUFFIX_RE = re.compile(r"^[A-Za-zµμ°·/%]{1,8}$")
+
+
+def _is_unit_suffix(s: str) -> bool:
+    """True when a suffix like 'mg', 'mL', 'g/mL', '%' looks like a
+    measurement unit (and therefore implies a numeric input)."""
+    if not s:
+        return False
+    return bool(_UNIT_SUFFIX_RE.match(s.strip()))
+
+
+def _unit_word_to_right(
+    rect: Rect,
+    words: list[tuple[float, float, float, float, str]],
+    max_dx: float = 22.0,
+    baseline_tol: float = 4.0,
+) -> str | None:
+    """If a unit token (`mg`, `mL`, `%`, ...) sits immediately to the
+    right of the slot on the same baseline, return it. Used to flag
+    `_______________  mg` style inputs as numeric even when no unit is
+    appended to the underscore word itself."""
+    cy_rect = rect.y + rect.h / 2
+    for wx0, wy0, wx1, wy1, t in words:
+        cy = (wy0 + wy1) / 2
+        if abs(cy - cy_rect) > baseline_tol:
+            continue
+        if wx0 <= rect.x1:
+            continue
+        if wx0 - rect.x1 > max_dx:
+            continue
+        if _is_unit_suffix(t.strip()):
+            return t.strip()
+    return None
+
+
+def _scan_underscore_inputs(
+    words: list[tuple[float, float, float, float, str]],
+) -> list[dict[str, Any]]:
+    """Find words that visually act as fill-in slots (`____`, `____mg`,
+    `=____g`, etc.) and return one entry per slot."""
+    out: list[dict[str, Any]] = []
+    for wx0, wy0, wx1, wy1, t in words:
+        m = _UNDERSCORE_INPUT_RE.match(t)
+        if not m:
+            continue
+        prefix, underscores, suffix = m.group(1), m.group(2), m.group(3)
+        if len(underscores) < 4:
+            continue
+        char_w = (wx1 - wx0) / max(1, len(t))
+        ux0 = wx0 + len(prefix) * char_w
+        ux1 = ux0 + len(underscores) * char_w
+        out.append({
+            "rect": Rect(x=ux0, y=wy0, w=max(8.0, ux1 - ux0), h=max(2.0, wy1 - wy0)),
+            "baseline_y": wy1,
+            "suffix": suffix.strip(),
+            "orig": t,
+        })
+    return out
+
+
+def _find_underscore_label(
+    input_rect: Rect,
+    words: list[tuple[float, float, float, float, str]],
+    max_below: float = 32.0,
+    max_above: float = 22.0,
+) -> tuple[str, float]:
+    """Choose a label for an underscore-text input.
+
+    We collect candidate labels both BELOW and ABOVE the slot and
+    pick whichever is closer to the rule. The below-side is the
+    dominant pattern in process-step batch records (caption beneath
+    the blank), but signature blocks have the label ABOVE and the
+    next label-below would belong to the *next* signature rule —
+    proximity is the reliable disambiguator.
+
+    Up to two consecutive baselines are stitched together so wrapped
+    labels ("Target mass of RNA with overage from step 9.2.1")
+    aren't truncated mid-phrase.
+    """
+    x_min = input_rect.x - 6.0
+    x_max = input_rect.x1 + 6.0
+    # Max horizontal gap inside one caption cluster. Tighter than the
+    # usual line-of-text spacing so neighbouring column captions on the
+    # same baseline don't accidentally merge into one label.
+    inter_word_gap = 10.0
+
+    def _grab(y_low: float, y_high: float) -> tuple[str, float]:
+        """Return (label, anchor_y) for caption text in the band.
+
+        Captions are bucketed by baseline, then split into horizontal
+        clusters by inter-word gap. Any cluster whose x range overlaps
+        the input's column is taken whole — so a caption that extends
+        past the input's right edge ("Target mass of RNA with overage")
+        comes through intact instead of being truncated at the column
+        edge.
+        """
+        cands: list[tuple[float, float, float, float, str]] = []
+        # (cy, cx, wx0, wx1, text)
+        for wx0, wy0, wx1, wy1, t in words:
+            if _is_underscore_filler(t):
+                continue
+            cx, cy = (wx0 + wx1) / 2, (wy0 + wy1) / 2
+            if y_low <= cy <= y_high:
+                cands.append((cy, cx, wx0, wx1, t.strip()))
+        if not cands:
+            return "", float("inf")
+        cands.sort(key=lambda c: (c[0], c[1]))
+        # Bucket into baseline rows.
+        lines: list[list[tuple[float, float, float, float, str]]] = [[cands[0]]]
+        for c in cands[1:]:
+            if abs(c[0] - lines[-1][-1][0]) <= 4.0:
+                lines[-1].append(c)
+            else:
+                lines.append([c])
+        text_parts: list[str] = []
+        anchor: float | None = None
+        for line in lines:
+            line.sort(key=lambda c: c[1])
+            # Cluster by horizontal gap.
+            h_clusters: list[list[tuple[float, float, float, float, str]]] = [[line[0]]]
+            for w in line[1:]:
+                if w[2] - h_clusters[-1][-1][3] <= inter_word_gap:
+                    h_clusters[-1].append(w)
+                else:
+                    h_clusters.append([w])
+            line_matched = False
+            for cluster in h_clusters:
+                c_x0 = cluster[0][2]
+                c_x1 = cluster[-1][3]
+                # Keep cluster only when its x range overlaps the input
+                # column. This prevents pulling sibling captions that
+                # describe the *next* input on the same baseline.
+                if c_x1 < x_min or c_x0 > x_max:
+                    continue
+                if anchor is None:
+                    # Anchor the distance comparison to the cluster we
+                    # actually matched, not the band's earliest word —
+                    # otherwise a sibling caption from another column on
+                    # the same y-band would skew distances.
+                    anchor = cluster[0][0]
+                text_parts.append(" ".join(w[4] for w in cluster))
+                line_matched = True
+            if line_matched and len(text_parts) >= 2:
+                # Two matched baselines is enough; further lines belong
+                # to a different caption block.
+                break
+            if not line_matched and text_parts:
+                # We already collected at least one matching line and
+                # the next baseline has no overlapping content — stop
+                # before pulling in unrelated text further away.
+                break
+        if not text_parts or anchor is None:
+            return "", float("inf")
+        return _clean_label(" ".join(text_parts)), anchor
+
+    below_text, below_y = _grab(input_rect.y1 + 1.0, input_rect.y1 + max_below)
+    above_text, above_y = _grab(input_rect.y - max_above, input_rect.y - 1.0)
+
+    has_below = _label_has_data(below_text)
+    has_above = _label_has_data(above_text)
+    if not (has_below or has_above):
+        return "", 0.0
+
+    if has_above and not has_below:
+        return above_text, 0.6
+    if has_below and not has_above:
+        return below_text, 0.7
+
+    # Both sides have candidates — pick the closer baseline.
+    below_dist = below_y - input_rect.y1
+    above_dist = input_rect.y - above_y
+    if above_dist < below_dist:
+        return above_text, 0.65
+    return below_text, 0.7
+
+
+def _emit_underscore_inputs(
+    geom: PageGeometry,
+    keyword_map: dict[str, list[str]],
+    debug_records: list[dict[str, Any]] | None = None,
+) -> list[Suggestion]:
+    """Emit one input field per underscore-text slot.
+
+    A slot inside an "empty" table cell is skipped — the cell-level
+    emission already covers that case as a single input. Slots inside
+    label cells (where the cell carries instructions plus several blank
+    underscore runs) and slots outside any cell are emitted here.
+    """
+    out: list[Suggestion] = []
+    inputs = _scan_underscore_inputs(geom.words)
+    if not inputs:
+        return out
+
+    # Pre-compute per-cell role so we don't re-classify N times.
+    cell_role_cache: dict[tuple[int, int, int], str] = {}
+
+    def _role_for(cell: Cell) -> str:
+        key = (cell.table_id, cell.row, cell.col)
+        cached = cell_role_cache.get(key)
+        if cached is not None:
+            return cached
+        text = _cell_text(cell, geom.words)
+        words_in_cell = _words_in(geom.words, cell.bbox, inset=0.5)
+        role = _cell_role(text, words_in_cell)
+        cell_role_cache[key] = role
+        return role
+
+    for u in inputs:
+        rect: Rect = u["rect"]
+        cx = rect.x + rect.w / 2
+        cy = rect.y + rect.h / 2
+        containing_cell: Cell | None = None
+        for table in geom.tables:
+            for cell in table.cells:
+                b = cell.bbox
+                if b.x <= cx <= b.x1 and b.y <= cy <= b.y1:
+                    containing_cell = cell
+                    break
+            if containing_cell:
+                break
+
+        if containing_cell is not None and _role_for(containing_cell) == "empty":
+            # The cell-first contract owns this region.
+            if debug_records is not None:
+                debug_records.append({
+                    "stage": "underscore_input",
+                    "decision": "skip_empty_cell",
+                    "orig": u["orig"],
+                })
+            continue
+
+        label, label_conf = _find_underscore_label(rect, geom.words)
+        suffix = u["suffix"]
+        is_unit = _is_unit_suffix(suffix)
+        display_label = label if _label_has_data(label) else suffix
+        if not _label_has_data(display_label):
+            if debug_records is not None:
+                debug_records.append({
+                    "stage": "underscore_input",
+                    "decision": "skip_no_label",
+                    "orig": u["orig"],
+                })
+            continue
+
+        right_unit = _unit_word_to_right(rect, geom.words)
+        if is_unit or right_unit:
+            ftype = "number"
+        else:
+            ftype = classify_field_type(display_label, keyword_map)
+
+        # Field rect: a writing strip ABOVE the underline baseline, so
+        # the bottom of the box sits on the existing underline.
+        field_h = 18.0
+        field_y = max(0.0, rect.y1 - field_h)
+        out.append(Suggestion(
+            page=geom.page_num,
+            kind="underscore_input",
+            field_type=ftype,
+            x=rect.x,
+            y=field_y,
+            width=max(24.0, rect.w),
+            height=field_h,
+            label_text=display_label,
+            confidence=0.65 if label_conf >= 0.6 else 0.5,
+            from_cell=False,
+            label_confidence=label_conf,
+        ))
+        if debug_records is not None:
+            debug_records.append({
+                "stage": "underscore_input",
+                "decision": "emit",
+                "label": display_label,
+                "suffix": suffix,
+                "ftype": ftype,
+                "orig": u["orig"],
+            })
+    return out
+
+
 def _emit_from_underline(
     line: HLine,
     label: str,
@@ -1132,5 +1412,13 @@ def emit_page_fields(
             label = "Checkbox"
             label_conf = 0.3
         out.append(_emit_checkbox(cb, label, label_conf, page_num))
+
+    # ---- Underscore-text inputs ---------------------------------------
+    # Some batch records draw fill-in slots with underscore characters
+    # (`_______`, `____mg`, `=____g`) rather than vector rules. Each
+    # such run is an independent input; the label is the caption beneath
+    # it (or above for signature lines) and the field type is "number"
+    # whenever a unit suffix is present.
+    out.extend(_emit_underscore_inputs(geom, keyword_map, debug_records))
 
     return out
