@@ -405,6 +405,58 @@ class InformationalTableTests(unittest.TestCase):
         self.assertFalse(F._is_informational_table(table, cell_texts, words))
 
 
+class BorderedTextBlockTests(unittest.TestCase):
+    """Bordered text blocks (headings, callouts) shouldn't emit fields."""
+
+    def _make_words(self, items):
+        """items: iterable of (x, y, w, h, text). Returns words tuples."""
+        return [(x, y, x + w, y + h, t) for (x, y, w, h, t) in items]
+
+    def test_empty_box_is_input_area(self) -> None:
+        from app import fields as F
+        from app.geometry import Rect
+        box = Rect(x=100.0, y=100.0, w=200.0, h=40.0)
+        self.assertTrue(F._box_has_input_area(box, []))
+
+    def test_bordered_heading_is_not_input_area(self) -> None:
+        from app import fields as F
+        from app.geometry import Rect
+        box = Rect(x=100.0, y=100.0, w=200.0, h=40.0)
+        # A heading "EXECUTIVE SUMMARY" filling the bordered region.
+        words = self._make_words([
+            (115.0, 110.0, 70.0, 12.0, "EXECUTIVE"),
+            (190.0, 110.0, 90.0, 12.0, "SUMMARY"),
+        ])
+        self.assertFalse(F._box_has_input_area(box, words))
+
+    def test_label_colon_with_empty_trail_is_input_area(self) -> None:
+        from app import fields as F
+        from app.geometry import Rect
+        box = Rect(x=100.0, y=100.0, w=300.0, h=40.0)
+        # "Name:" sits on the left; the rest of the box is empty space.
+        words = self._make_words([
+            (105.0, 115.0, 40.0, 12.0, "Name:"),
+        ])
+        self.assertTrue(F._box_has_input_area(box, words))
+
+    def test_bordered_paragraph_is_not_input_area(self) -> None:
+        from app import fields as F
+        from app.geometry import Rect
+        box = Rect(x=100.0, y=100.0, w=300.0, h=60.0)
+        # Two-line paragraph that spans most of each baseline.
+        words = self._make_words([
+            (105.0, 110.0, 80.0, 10.0, "Quality"),
+            (190.0, 110.0, 60.0, 10.0, "control"),
+            (255.0, 110.0, 90.0, 10.0, "review"),
+            (350.0, 110.0, 40.0, 10.0, "data"),
+            (105.0, 130.0, 70.0, 10.0, "must"),
+            (180.0, 130.0, 30.0, 10.0, "be"),
+            (215.0, 130.0, 90.0, 10.0, "validated"),
+            (310.0, 130.0, 80.0, 10.0, "monthly"),
+        ])
+        self.assertFalse(F._box_has_input_area(box, words))
+
+
 class FixtureSmokeTests(unittest.TestCase):
 
     def test_example_pdf_emits_only_cell_inputs_for_table_fields(self) -> None:

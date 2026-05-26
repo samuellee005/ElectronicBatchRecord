@@ -238,6 +238,58 @@ def _is_informational_table(
     return structural_slots <= 1
 
 
+def _box_has_input_area(
+    box: Rect,
+    words: list[tuple[float, float, float, float, str]],
+) -> bool:
+    """True when a standalone bordered region looks like an input zone.
+
+    Only two patterns count as inputs:
+      * Empty box — no meaningful text inside.
+      * "Label: ___" pattern — some text ending in ":" with a clear
+        empty stretch to its right where a value would go.
+
+    Bordered text blocks (headings, callouts, paragraphs surrounded by
+    a border for styling) match neither and should not spawn fields.
+    """
+    inset = 1.5
+    inside = [
+        w for w in _words_in(words, box, inset=inset)
+        if not _is_underscore_filler(w[4])
+        and any(ch.isalnum() for ch in w[4])
+    ]
+    if not inside:
+        return True  # Empty bordered region → real input.
+
+    box_left = box.x + inset
+    box_right = box.x1 - inset
+    box_w = max(1.0, box_right - box_left)
+
+    # Group words into baseline-aligned rows (~4 pt tolerance).
+    inside.sort(key=lambda w: ((w[1] + w[3]) / 2, w[0]))
+    rows: list[list[tuple[float, float, float, float, str]]] = []
+    for w in inside:
+        cy = (w[1] + w[3]) / 2
+        if rows:
+            last_row = rows[-1]
+            last_cy = sum((u[1] + u[3]) / 2 for u in last_row) / len(last_row)
+            if abs(last_cy - cy) <= 4.0:
+                last_row.append(w)
+                continue
+        rows.append([w])
+
+    for row_words in rows:
+        row_words.sort(key=lambda w: w[0])
+        text_concat = " ".join(w[4] for w in row_words)
+        rightmost_x1 = max(w[2] for w in row_words)
+        trailing_space = box_right - rightmost_x1
+        # "Label:" stub followed by meaningful empty space → input row.
+        if ":" in text_concat and trailing_space >= max(40.0, box_w * 0.25):
+            return True
+
+    return False
+
+
 def _emit_from_cell(
     cell: Cell,
     label: str,
@@ -1001,6 +1053,19 @@ def emit_page_fields(
 
     # ---- Standalone closed boxes ---------------------------------------
     for box in geom.standalone_boxes:
+        # Reject bordered text blocks (headings, callouts, paragraph
+        # borders): without either an "Label: ___" stub or an empty
+        # interior, the box isn't an input zone and shouldn't spawn a
+        # field even when there's a nearby phrase that could pose as one.
+        if not _box_has_input_area(box, words):
+            if debug_records is not None:
+                debug_records.append({
+                    "stage": "standalone_box",
+                    "decision": "text_block_skip",
+                    "x": round(box.x, 1), "y": round(box.y, 1),
+                    "w": round(box.w, 1), "h": round(box.h, 1),
+                })
+            continue
         label, label_conf = _find_label_near(box, words, geom.page_w, geom.page_h)
         if not _label_has_data(label):
             continue
