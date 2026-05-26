@@ -115,9 +115,58 @@
 }
 
 .upload-page .upload-detect-status {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
   margin: 0.75rem 0;
   color: #4338ca;
   font-weight: 500;
+}
+
+.upload-page .upload-detect-spinner {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid #c7d2fe;
+  border-top-color: #4338ca;
+  animation: upload-detect-spin 0.9s linear infinite;
+}
+
+@keyframes upload-detect-spin {
+  to { transform: rotate(360deg); }
+}
+
+.upload-page .upload-detect-progress {
+  font-weight: 400;
+  font-size: 0.85rem;
+  color: #475569;
+  margin-top: 0.15rem;
+}
+
+.upload-page .upload-detect-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.upload-page .upload-detect-confirm-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.upload-page .upload-detect-confirm-actions button {
+  padding: 0.4rem 0.85rem;
+  border-radius: 6px;
+  border: 1px solid #b45309;
+  background: #b45309;
+  color: white;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.upload-page .upload-detect-confirm-actions button:last-child {
+  background: white;
+  color: #b45309;
 }
 
 .upload-page .upload-detect-meta {

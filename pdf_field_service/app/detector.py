@@ -239,66 +239,78 @@ def detect_pdf(
 
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     try:
-        n = min(len(doc), max(1, max_pages))
+        total_pages = len(doc)
+        n = min(total_pages, max(1, max_pages))
+        if total_pages > n:
+            warnings.append(
+                f"Only first {n} of {total_pages} pages analyzed; raise "
+                f"the page cap to process the remainder."
+            )
         all_sug: list[Suggestion] = []
         # Cross-page header memory (Fix #1).
         header_memory: list[dict[str, Any]] = []
         for i in range(n):
-            page = doc[i]
-            pw, ph = float(page.rect.width), float(page.rect.height)
+            try:
+                page = doc[i]
+                pw, ph = float(page.rect.width), float(page.rect.height)
 
-            # Render once — needed for the raster fallbacks inside geometry.
-            mat = fitz.Matrix(render_zoom, render_zoom)
-            pix = page.get_pixmap(matrix=mat, alpha=False)
-            img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
-            if pix.n == 4:
-                gray = cv2.cvtColor(img, cv2.COLOR_RGBA2GRAY)
-            elif pix.n == 3:
-                gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-            else:
-                gray = np.squeeze(img)
+                # Render once — needed for the raster fallbacks inside geometry.
+                mat = fitz.Matrix(render_zoom, render_zoom)
+                pix = page.get_pixmap(matrix=mat, alpha=False)
+                img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
+                if pix.n == 4:
+                    gray = cv2.cvtColor(img, cv2.COLOR_RGBA2GRAY)
+                elif pix.n == 3:
+                    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+                else:
+                    gray = np.squeeze(img)
 
-            # Embedded text first; OCR fallback when sparse.
-            page_words = _geometry._words(page)
-            if len(page_words) < 8 and pytesseract is not None:
-                ocr_words = _ocr_words(page, gray)
-                if len(ocr_words) > len(page_words):
-                    page_words = ocr_words
-                    warnings.append(f"Page {i + 1}: used OCR fallback for sparse text.")
+                # Embedded text first; OCR fallback when sparse.
+                page_words = _geometry._words(page)
+                if len(page_words) < 8 and pytesseract is not None:
+                    ocr_words = _ocr_words(page, gray)
+                    if len(ocr_words) > len(page_words):
+                        page_words = ocr_words
+                        warnings.append(f"Page {i + 1}: used OCR fallback for sparse text.")
 
-            geom = _geometry.extract_page_geometry(
-                page, gray, pw, ph, page_num=i + 1, words_override=page_words
-            )
+                geom = _geometry.extract_page_geometry(
+                    page, gray, pw, ph, page_num=i + 1, words_override=page_words
+                )
 
-            # Build cell-text index for header-carry analysis.
-            cell_texts_by_table: dict[int, dict[tuple[int, int], str]] = {}
-            for table in geom.tables:
-                d: dict[tuple[int, int], str] = {}
-                for cell in table.cells:
-                    d[(cell.row, cell.col)] = _fields._cell_text(cell, geom.words)
-                cell_texts_by_table[table.id] = d
-            injected_headers = _resolve_header_carry(
-                geom, cell_texts_by_table, header_memory,
-            )
+                # Build cell-text index for header-carry analysis.
+                cell_texts_by_table: dict[int, dict[tuple[int, int], str]] = {}
+                for table in geom.tables:
+                    d: dict[tuple[int, int], str] = {}
+                    for cell in table.cells:
+                        d[(cell.row, cell.col)] = _fields._cell_text(cell, geom.words)
+                    cell_texts_by_table[table.id] = d
+                injected_headers = _resolve_header_carry(
+                    geom, cell_texts_by_table, header_memory,
+                )
 
-            debug_records: list[dict[str, Any]] | None = [] if include_debug else None
-            page_sug = _fields.emit_page_fields(
-                geom, keyword_map,
-                debug_records=debug_records,
-                injected_headers_by_table=injected_headers,
-            )
-            page_sug = [_clamp_to_page(s, pw, ph) for s in page_sug]
+                debug_records: list[dict[str, Any]] | None = [] if include_debug else None
+                page_sug = _fields.emit_page_fields(
+                    geom, keyword_map,
+                    debug_records=debug_records,
+                    injected_headers_by_table=injected_headers,
+                )
+                page_sug = [_clamp_to_page(s, pw, ph) for s in page_sug]
 
-            all_sug.extend(page_sug)
+                all_sug.extend(page_sug)
 
-            if include_debug:
-                page_debug = _geometry.page_geometry_to_debug(geom)
-                page_debug["decisions"] = debug_records or []
-                if injected_headers:
-                    page_debug["injectedHeaders"] = {
-                        str(tid): hdrs for tid, hdrs in injected_headers.items()
-                    }
-                debug_pages.append(page_debug)
+                if include_debug:
+                    page_debug = _geometry.page_geometry_to_debug(geom)
+                    page_debug["decisions"] = debug_records or []
+                    if injected_headers:
+                        page_debug["injectedHeaders"] = {
+                            str(tid): hdrs for tid, hdrs in injected_headers.items()
+                        }
+                    debug_pages.append(page_debug)
+            except Exception as page_err:
+                # Record the failure and keep going — one malformed page
+                # shouldn't kill detection for the remaining N-1 pages
+                # in a long batch record.
+                warnings.append(f"Page {i + 1}: skipped ({page_err!s}).")
 
         out = [_suggestion_to_dict(idx, s) for idx, s in enumerate(all_sug)]
         payload: dict[str, Any] = {

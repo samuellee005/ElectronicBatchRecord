@@ -27,6 +27,8 @@ export default function UploadTemplate() {
   const [detectLoading, setDetectLoading] = useState(false)
   const [detectError, setDetectError] = useState(null)
   const [detectInfo, setDetectInfo] = useState(null)
+  const [detectProgress, setDetectProgress] = useState(null)
+  const [detectConfirm, setDetectConfirm] = useState(null)
   const [suggestions, setSuggestions] = useState([])
   const [enabledIds, setEnabledIds] = useState(() => new Set())
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 })
@@ -34,6 +36,9 @@ export default function UploadTemplate() {
   const [uploadedFilename, setUploadedFilename] = useState(null)
   const [detectDebugEnabled, setDetectDebugEnabled] = useState(false)
   const fileBufferRef = useRef(null)
+  const detectTimerRef = useRef(null)
+  // Empirical cost — adjust if real-world batch records run slower.
+  const PER_PAGE_SECONDS_ESTIMATE = 1.0
 
   useEffect(() => {
     try {
@@ -54,16 +59,76 @@ export default function UploadTemplate() {
     return () => URL.revokeObjectURL(url)
   }, [file])
 
-  const runDetection = useCallback(async (f) => {
+  const stopProgressTicker = useCallback(() => {
+    if (detectTimerRef.current) {
+      clearInterval(detectTimerRef.current)
+      detectTimerRef.current = null
+    }
+  }, [])
+
+  const startProgressTicker = useCallback((pageCount) => {
+    stopProgressTicker()
+    const startedAt = Date.now()
+    const tick = () => {
+      const elapsed = (Date.now() - startedAt) / 1000
+      const estimatedTotal = Math.max(
+        elapsed + 1,
+        (pageCount || 1) * PER_PAGE_SECONDS_ESTIMATE,
+      )
+      const remaining = Math.max(0, estimatedTotal - elapsed)
+      setDetectProgress({
+        pageCount: pageCount || null,
+        elapsedSec: Math.round(elapsed),
+        estimatedRemainingSec: Math.round(remaining),
+      })
+    }
+    tick()
+    detectTimerRef.current = setInterval(tick, 1000)
+  }, [stopProgressTicker])
+
+  useEffect(() => () => stopProgressTicker(), [stopProgressTicker])
+
+  const readPdfPageCount = useCallback(async (buf) => {
+    try {
+      if (!pdfjs.GlobalWorkerOptions.workerSrc) {
+        pdfjs.GlobalWorkerOptions.workerSrc =
+          `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`
+      }
+      const slice = buf.slice(0)
+      const pdf = await pdfjs.getDocument({ data: slice }).promise
+      return pdf.numPages || null
+    } catch {
+      return null
+    }
+  }, [])
+
+  const runDetection = useCallback(async (f, { allowExtended = false } = {}) => {
     setDetectLoading(true)
     setDetectError(null)
     setDetectInfo(null)
+    setDetectConfirm(null)
     setSuggestions([])
     setEnabledIds(new Set())
     try {
       const buf = await f.arrayBuffer()
       fileBufferRef.current = buf
-      const data = await detectPdfFields(f, { includeDebug: detectDebugEnabled })
+      const pageCount = await readPdfPageCount(buf)
+      startProgressTicker(pageCount)
+      const data = await detectPdfFields(f, {
+        includeDebug: detectDebugEnabled,
+        allowExtendedPages: allowExtended,
+      })
+      if (data && data.requiresConfirmation === true) {
+        stopProgressTicker()
+        setDetectProgress(null)
+        setDetectConfirm({
+          pageCount: data.pageCount,
+          cap: data.cap,
+          extendedCap: data.extendedCap,
+          message: data.message,
+        })
+        return
+      }
       const list = data.suggestions || []
       setSuggestions(list)
       setEnabledIds(new Set(list.map((s) => s.id)))
@@ -82,14 +147,25 @@ export default function UploadTemplate() {
         )
       }
     } finally {
+      stopProgressTicker()
+      setDetectProgress(null)
       setDetectLoading(false)
     }
-  }, [])
+  }, [detectDebugEnabled, readPdfPageCount, startProgressTicker, stopProgressTicker])
 
   useEffect(() => {
     if (!file) return
     runDetection(file)
   }, [file, runDetection])
+
+  const confirmExtendedDetection = useCallback(() => {
+    if (!file) return
+    runDetection(file, { allowExtended: true })
+  }, [file, runDetection])
+
+  const cancelExtendedDetection = useCallback(() => {
+    setDetectConfirm(null)
+  }, [])
 
   const toggleSuggestion = (id) => {
     setEnabledIds((prev) => {
@@ -279,7 +355,42 @@ export default function UploadTemplate() {
           />
         </div>
         {file && <div className="file-name">Selected: {file.name}</div>}
-        {detectLoading && <div className="upload-detect-status">Analyzing PDF layout…</div>}
+        {detectLoading && (
+          <div className="upload-detect-status">
+            <div className="upload-detect-spinner" aria-hidden="true" />
+            <div>
+              <strong>Analyzing PDF layout…</strong>
+              {detectProgress && (
+                <div className="upload-detect-progress">
+                  {detectProgress.pageCount != null && (
+                    <>Approx {detectProgress.pageCount} page(s). </>
+                  )}
+                  Elapsed {detectProgress.elapsedSec}s
+                  {detectProgress.estimatedRemainingSec > 0 && (
+                    <>, ~{detectProgress.estimatedRemainingSec}s remaining</>
+                  )}
+                  .
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        {detectConfirm && !detectLoading && (
+          <div className="message warning upload-detect-confirm">
+            <div>
+              {detectConfirm.message ||
+                `This PDF has ${detectConfirm.pageCount} pages, above the ${detectConfirm.cap}-page limit.`}
+            </div>
+            <div className="upload-detect-confirm-actions">
+              <button type="button" onClick={confirmExtendedDetection}>
+                Process up to {detectConfirm.extendedCap} pages
+              </button>
+              <button type="button" onClick={cancelExtendedDetection}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
         {detectInfo && !detectLoading && (
           <div className="upload-detect-meta">
             Analyzed {detectInfo.pagesAnalyzed} page(s)

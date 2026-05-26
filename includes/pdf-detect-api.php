@@ -51,13 +51,14 @@ if (!ebr_file_looks_like_pdf($tmp)) {
 }
 
 $url = $base . '/detect';
-$timeout = (int) (getenv('EBR_PDF_DETECT_TIMEOUT_SEC') ?: 120);
+$timeout = (int) (getenv('EBR_PDF_DETECT_TIMEOUT_SEC') ?: 600);
 $includeDebug = isset($_POST['include_debug']) && (string) $_POST['include_debug'] === '1';
+$allowExtended = isset($_POST['allow_extended_pages']) && (string) $_POST['allow_extended_pages'] === '1';
 
 /**
  * @return array{http: int, body: string, transport_error: string}
  */
-function ebr_pdf_detect_post_pdf(string $url, string $tmpPath, int $timeout, bool $includeDebug): array
+function ebr_pdf_detect_post_pdf(string $url, string $tmpPath, int $timeout, bool $includeDebug, bool $allowExtended): array
 {
     if (function_exists('curl_init')) {
         $ch = curl_init($url);
@@ -66,6 +67,7 @@ function ebr_pdf_detect_post_pdf(string $url, string $tmpPath, int $timeout, boo
         curl_setopt($ch, CURLOPT_POSTFIELDS, [
             'pdf' => $cfile,
             'include_debug' => $includeDebug ? '1' : '0',
+            'allow_extended_pages' => $allowExtended ? '1' : '0',
         ]);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, min(30, $timeout));
@@ -106,8 +108,11 @@ function ebr_pdf_detect_post_pdf(string $url, string $tmpPath, int $timeout, boo
     $debugPart = "\r\n--{$boundary}\r\n"
         . "Content-Disposition: form-data; name=\"include_debug\"\r\n\r\n"
         . ($includeDebug ? '1' : '0');
+    $extendedPart = "\r\n--{$boundary}\r\n"
+        . "Content-Disposition: form-data; name=\"allow_extended_pages\"\r\n\r\n"
+        . ($allowExtended ? '1' : '0');
     $suffix = "\r\n--{$boundary}--\r\n";
-    $payload = $prefix . $pdf . $debugPart . $suffix;
+    $payload = $prefix . $pdf . $debugPart . $extendedPart . $suffix;
 
     $ctx = stream_context_create([
         'http' => [
@@ -142,7 +147,7 @@ function ebr_pdf_detect_post_pdf(string $url, string $tmpPath, int $timeout, boo
     return ['http' => $http, 'body' => (string) $body, 'transport_error' => ''];
 }
 
-$res = ebr_pdf_detect_post_pdf($url, $tmp, $timeout, $includeDebug);
+$res = ebr_pdf_detect_post_pdf($url, $tmp, $timeout, $includeDebug, $allowExtended);
 if ($res['transport_error'] !== '') {
     echo json_encode([
         'success' => false,
@@ -169,6 +174,14 @@ if (!is_array($data)) {
 if ($http >= 400) {
     $msg = $data['detail'] ?? $data['message'] ?? ('HTTP ' . $http);
     echo json_encode(['success' => false, 'message' => is_string($msg) ? $msg : json_encode($msg)]);
+    exit;
+}
+
+// Over-cap pre-flight: FastAPI returns success=false + requiresConfirmation
+// for PDFs above the regular page cap. Surface that to the frontend
+// verbatim so it can prompt the user.
+if (isset($data['requiresConfirmation']) && $data['requiresConfirmation'] === true) {
+    echo json_encode($data);
     exit;
 }
 
