@@ -122,6 +122,16 @@ MIN_V_LEN_PT = 10.0
 # Tolerance for treating two H/V line endpoints as "touching" at a corner.
 JOIN_TOL_PT = 4.0
 
+# Maximum gap between two V/H lines that should be treated as one
+# column/row boundary. Inset / doubled-border table styling routinely
+# emits 2-3 parallel rules within 5-7 pt at each real boundary; we
+# cluster them so the table reads with the correct column/row count.
+TABLE_X_CLUSTER_TOL = 7.0
+TABLE_Y_CLUSTER_TOL = 4.0
+# Endpoint-on-column tolerance: a row divider's endpoints must sit
+# within this many points of a (clustered) column boundary.
+TABLE_H_ENDPOINT_TOL = 8.0
+
 
 # ---------- Vector line extraction --------------------------------------- #
 
@@ -491,22 +501,27 @@ def _build_grids_from_cluster(
         return []
 
     ys = sorted({round(h.y, 1) for h in h_lines})
-    xs = sorted({round(v.x, 1) for v in v_lines})
-    ys = _dedup_floats(ys, tol=JOIN_TOL_PT)
-    xs = _dedup_floats(xs, tol=JOIN_TOL_PT)
+    ys = _cluster_floats(ys, tol=TABLE_Y_CLUSTER_TOL)
+    raw_xs = sorted({round(v.x, 1) for v in v_lines})
+    xs = _cluster_floats(raw_xs, tol=TABLE_X_CLUSTER_TOL)
     if len(ys) < 2 or len(xs) < 2:
         return []
 
-    # Per-row-band V-line set (which vertical dividers are active here).
+    # Per-row-band V-line set, using clustered column centres so that
+    # doubled / inset borders don't make the header and body bands look
+    # like they belong to different sub-tables.
     rows = len(ys) - 1
     row_vsets: list[frozenset[float]] = []
     for r in range(rows):
         y_mid = (ys[r] + ys[r + 1]) / 2
-        vset = frozenset(
-            round(v.x, 1) for v in v_lines
-            if v.y0 - JOIN_TOL_PT <= y_mid <= v.y1 + JOIN_TOL_PT
-        )
-        row_vsets.append(vset)
+        members: set[float] = set()
+        for v in v_lines:
+            if not (v.y0 - JOIN_TOL_PT <= y_mid <= v.y1 + JOIN_TOL_PT):
+                continue
+            cluster = _nearest_cluster(round(v.x, 1), xs, TABLE_X_CLUSTER_TOL)
+            if cluster is not None:
+                members.add(cluster)
+        row_vsets.append(frozenset(members))
 
     # Partition consecutive rows into sub-tables by V-set similarity.
     sub_ranges = _partition_rows_by_vset(row_vsets)
@@ -663,23 +678,29 @@ def _build_single_grid(
     """
     if len(h_lines) < 2 or len(v_lines) < 2:
         return None
-    xs = sorted({round(v.x, 1) for v in v_lines})
-    xs = _dedup_floats(xs, tol=JOIN_TOL_PT)
+    raw_xs = sorted({round(v.x, 1) for v in v_lines})
+    xs = _cluster_floats(raw_xs, tol=TABLE_X_CLUSTER_TOL)
     if len(xs) < 2:
         return None
-    table_x_min, table_x_max = xs[0], xs[-1]
-    # Keep only H lines that reach (within tolerance) both ends of the
-    # table's x range. Other H lines stay available for sub-cell
-    # treatment but never define a row.
-    full_width_hs = [
-        h for h in h_lines
-        if h.x0 <= table_x_min + JOIN_TOL_PT * 2
-        and h.x1 >= table_x_max - JOIN_TOL_PT * 2
-    ]
-    if len(full_width_hs) < 2:
+
+    # Row-divider H lines: both endpoints must land on a column
+    # boundary and together span at least two column intervals (one
+    # full cell across columns). This admits partial-width rules in
+    # merged-column tables — e.g. body rows whose right column is
+    # merged downward — while still rejecting decorative inset lines
+    # that bound a single cell.
+    def _row_divider_span(h: HLine) -> int:
+        left = _nearest_cluster(h.x0, xs, TABLE_H_ENDPOINT_TOL)
+        right = _nearest_cluster(h.x1, xs, TABLE_H_ENDPOINT_TOL)
+        if left is None or right is None:
+            return 0
+        return xs.index(right) - xs.index(left)
+
+    row_divider_hs = [h for h in h_lines if _row_divider_span(h) >= 2]
+    if len(row_divider_hs) < 2:
         return None
-    ys = sorted({round(h.y, 1) for h in full_width_hs})
-    ys = _dedup_floats(ys, tol=JOIN_TOL_PT)
+    ys = sorted({round(h.y, 1) for h in row_divider_hs})
+    ys = _cluster_floats(ys, tol=TABLE_Y_CLUSTER_TOL)
     if len(ys) < 2:
         return None
 
@@ -878,6 +899,38 @@ def _dedup_floats(values: list[float], tol: float) -> list[float]:
         if v - out[-1] > tol:
             out.append(v)
     return out
+
+
+def _cluster_floats(values: list[float], tol: float) -> list[float]:
+    """Group close values into clusters; return the mean of each cluster.
+
+    Unlike `_dedup_floats` (which keeps the first value and discards
+    near-duplicates), this gives the central position of doubled
+    column / row borders — closer to the visual boundary than either
+    end of the cluster.
+    """
+    if not values:
+        return []
+    vs = sorted(values)
+    clusters: list[list[float]] = [[vs[0]]]
+    for v in vs[1:]:
+        if v - clusters[-1][-1] <= tol:
+            clusters[-1].append(v)
+        else:
+            clusters.append([v])
+    return [sum(c) / len(c) for c in clusters]
+
+
+def _nearest_cluster(value: float, clusters: list[float], tol: float) -> float | None:
+    """Return the cluster centre within ``tol`` of ``value``, or None."""
+    best = None
+    best_d = tol + 1.0
+    for c in clusters:
+        d = abs(value - c)
+        if d <= tol and d < best_d:
+            best = c
+            best_d = d
+    return best
 
 
 # ---------- Borderless table inference ----------------------------------- #
@@ -1291,6 +1344,17 @@ def extract_page_geometry(
         h_lines, v_lines, consumed_h, page_w, words=words, tables=tables,
     )
     standalone_boxes = _identify_standalone_boxes(h_lines, v_lines, consumed_h, consumed_v)
+    # Boxes whose centre falls inside a detected table are inset-frame
+    # decorations of a table cell — the cell-level emission already
+    # owns that region, so the standalone path mustn't double-emit.
+    standalone_boxes = [
+        b for b in standalone_boxes
+        if not any(
+            t.bbox.x + 1.0 <= b.cx <= t.bbox.x1 - 1.0
+            and t.bbox.y + 1.0 <= b.cy <= t.bbox.y1 - 1.0
+            for t in tables
+        )
+    ]
     have_vector_lines = len(h_vec) + len(v_vec) >= 4
     checkboxes = _identify_checkbox_candidates(
         standalone_boxes, gray, page_w, page_h, tables, have_vector_lines

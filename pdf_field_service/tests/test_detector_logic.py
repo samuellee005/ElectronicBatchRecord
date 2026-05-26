@@ -532,6 +532,76 @@ class TestBatchRecordFixtureTests(unittest.TestCase):
             )
 
 
+class TestBatchRecord2BomTests(unittest.TestCase):
+    """Pinned behaviour for the Bill of Materials table on page 1 of
+    TestBatchRecord2.pdf. The table has 6 columns (Materials, Vendor,
+    Part Number, Lot Number, Expiration Date, Recorded By/Date), a
+    rightmost merged-down column, and inset double-border styling on
+    every cell."""
+
+    @classmethod
+    def _detect_first_page(cls):
+        from app import detector
+        fixture = (
+            Path(__file__).resolve().parents[2]
+            / "data" / "imgs" / "TestBatchRecord2.pdf"
+        )
+        return detector.detect_pdf(fixture.read_bytes(), max_pages=1, include_debug=True)
+
+    def test_bom_table_is_six_columns(self) -> None:
+        res = self._detect_first_page()
+        tables = res["debug"]["pages"][0]["tables"]
+        bom = next(
+            (t for t in tables if 100 < t["bbox"]["y"] < 200 and t["bbox"]["height"] > 200),
+            None,
+        )
+        self.assertIsNotNone(bom, "BoM table not found")
+        cols = len(bom["colBounds"]) - 1
+        rows = len(bom["rowBounds"]) - 1
+        self.assertEqual(cols, 6, f"Expected 6 columns, got {cols}")
+        self.assertGreaterEqual(rows, 13, f"Expected ≥13 rows, got {rows}")
+
+    def test_bom_column_types_follow_header(self) -> None:
+        res = self._detect_first_page()
+        bom_fields = [
+            s for s in res["suggestions"]
+            if s.get("fromCell") and s.get("tableId") is not None
+            and 130 < s["y"] < 460
+        ]
+        # Every emitted field's type should match its column header.
+        expected = {
+            "Vendor": "text",
+            "Part Number": "number",
+            "Lot Number": "number",
+            "Expiration Date": "date",
+            "Recorded By/Date": "date",  # may also be text — date acceptable
+        }
+        for s in bom_fields:
+            want = expected.get(s["labelText"])
+            if want is None:
+                continue
+            self.assertEqual(
+                s["fieldType"], want,
+                f"Column '{s['labelText']}' should emit type '{want}', got '{s['fieldType']}'",
+            )
+
+    def test_bom_skips_na_cells(self) -> None:
+        res = self._detect_first_page()
+        # No emitted field should carry the literal label "N/A".
+        for s in res["suggestions"]:
+            self.assertNotEqual(
+                s["labelText"], "N/A",
+                f"N/A cell should not produce a field: {s}",
+            )
+
+    def test_bom_no_standalone_boxes_inside_table(self) -> None:
+        res = self._detect_first_page()
+        # The inset frames inside cells must not leak as standalone boxes.
+        boxes = [s for s in res["suggestions"] if s["kind"] == "standalone_box"]
+        in_bom = [s for s in boxes if 130 < s["y"] < 460 and 40 < s["x"] < 570]
+        self.assertEqual(in_bom, [], f"Standalone boxes inside BoM: {in_bom}")
+
+
 class FixtureSmokeTests(unittest.TestCase):
 
     def test_example_pdf_emits_only_cell_inputs_for_table_fields(self) -> None:

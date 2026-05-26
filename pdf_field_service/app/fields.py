@@ -147,10 +147,12 @@ def _is_checkbox_prompt(text: str) -> bool:
     # Binary prompts: explicit yes/no or pass/fail pair.
     if {"yes", "no"} <= tokens or {"pass", "fail"} <= tokens:
         return True
-    # Marker tokens that only make sense as checkbox prompts.
-    if tokens & {"y/n", "n/a"}:
+    # Explicit y/n marker (single token "Y/N" is a checkbox prompt).
+    if "y/n" in tokens:
         return True
     # Standalone single-token prompts ("Yes", "No", "Pass", "Fail").
+    # "N/A" alone is *not* a prompt — it's a "not applicable" marker
+    # filling the cell with static content.
     if word_count == 1 and tokens & {"yes", "no", "pass", "fail"}:
         return True
     return False
@@ -445,11 +447,15 @@ def _find_label_parts_for_cell(
 
     col_header = ""
     if num_cols >= 3:
-        # Walk upward, accept a row as our column header only when (a) it
-        # has text in our specific column AND (b) at least half its cells
-        # carry text overall (filters stray data rows like
-        # "Approved : I Yes I No" or "Ingredient A | 25 kg | _ | _").
-        for r in range(row - 1, -1, -1):
+        # Walk DOWNWARD from row 0 so we find the table's real header
+        # row before any intermediate data row. We accept a row as the
+        # column header only when (a) it has text in our specific column
+        # AND (b) at least half its cells carry text overall (filters
+        # stray data rows like "Approved : I Yes I No" or
+        # "Ingredient A | 25 kg | _ | _"). Walking from the top also
+        # prevents an inner data row whose cells happen to contain
+        # static markers ("N/A", "—") from masquerading as the header.
+        for r in range(0, row):
             cand = cell_texts.get((r, col), "")
             if not _label_has_data(cand):
                 continue
