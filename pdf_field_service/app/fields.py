@@ -16,7 +16,14 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from .geometry import Cell, HLine, PageGeometry, Rect, Table
+from .geometry import (
+    Cell,
+    HLine,
+    PageGeometry,
+    Rect,
+    Table,
+    _build_single_grid,
+)
 
 
 # ---------- Output record ------------------------------------------------ #
@@ -95,14 +102,18 @@ def _cell_text(
     cell: Cell,
     words: list[tuple[float, float, float, float, str]],
 ) -> str:
-    """Concatenated, left-to-right text inside a cell (ignoring fillers)."""
-    parts = []
+    """Concatenated text inside a cell in natural reading order
+    (top-to-bottom, then left-to-right). Underscore-fillers skipped."""
+    parts: list[tuple[float, float, str]] = []
     for wx0, wy0, wx1, wy1, t in _words_in(words, cell.bbox, inset=0.5):
         if _is_underscore_filler(t):
             continue
-        parts.append((wx0, t.strip()))
-    parts.sort(key=lambda p: p[0])
-    return " ".join(p[1] for p in parts if p[1]).strip()
+        # Bucket baselines within ~3pt so words on the same visual line
+        # don't get split apart by tiny y jitter from font rendering.
+        baseline = round(wy0 / 3.0) * 3.0
+        parts.append((baseline, wx0, t.strip()))
+    parts.sort(key=lambda p: (p[0], p[1]))
+    return " ".join(p[2] for p in parts if p[2]).strip()
 
 
 def _label_has_data(label: str) -> bool:
@@ -345,6 +356,18 @@ def _emit_from_cell(
 
 _UNDERSCORE_INPUT_RE = re.compile(r"^(=?\s*)(_{4,})(.*)$")
 _UNIT_SUFFIX_RE = re.compile(r"^[A-Za-zµμ°·/%]{1,8}$")
+_STEP_IDENTIFIER_RE = re.compile(
+    r"^\s*(step(\s*(no\.?|number|#))?|#|no\.?|item|seq(uence)?)\s*$",
+    re.IGNORECASE,
+)
+
+
+def _is_step_identifier_header(header: str) -> bool:
+    """True when a column header marks a process-step identifier column
+    (and so empty cells in that column are layout markers, not inputs)."""
+    if not header:
+        return False
+    return bool(_STEP_IDENTIFIER_RE.match(header.strip()))
 
 
 def _is_unit_suffix(s: str) -> bool:
@@ -621,6 +644,118 @@ def _emit_underscore_inputs(
                 "orig": u["orig"],
             })
     return out
+
+
+def _emit_nested_table_fields(
+    merged_cell: Cell,
+    geom: PageGeometry,
+    keyword_map: dict[str, list[str]],
+    next_table_id: int,
+    debug_records: list[dict[str, Any]] | None = None,
+) -> tuple[list[Suggestion], int]:
+    """Detect a sub-table within a merged cell and emit one field per
+    empty value cell.
+
+    Process-step batch records often place a small "label | value" grid
+    inside an Instructions cell that spans many rows of the outer
+    table. The outer table merges that whole region because the inner
+    row dividers don't reach the outer column borders. We rescue the
+    sub-grid by re-running table-building on the H/V lines that fall
+    inside the merged cell, and emit fields for empty value cells.
+    """
+    cell_bbox = merged_cell.bbox
+    # Inner H lines within (or on the bottom edge of) the cell.
+    inner_h = [
+        h for h in geom.h_lines
+        if cell_bbox.y < h.y < cell_bbox.y1
+        and h.x0 >= cell_bbox.x - 4
+        and h.x1 <= cell_bbox.x1 + 4
+    ]
+    if len(inner_h) < 2:
+        return [], next_table_id
+
+    # Inner V lines that span a substantial fraction of the cell — i.e.
+    # the inset sub-table's outer edges plus its column divider(s).
+    inner_v = [
+        v for v in geom.v_lines
+        if cell_bbox.x - 4 <= v.x <= cell_bbox.x1 + 4
+        and v.y0 >= cell_bbox.y - 4
+        and v.y1 <= cell_bbox.y1 + 4
+        and (v.y1 - v.y0) >= cell_bbox.h * 0.4
+    ]
+    if len(inner_v) < 2:
+        return [], next_table_id
+
+    # The sub-table's last row often closes on the merged cell's outer
+    # bottom border, which doesn't appear in `inner_h` because its
+    # x-range extends past the inner sub-table. Synthesise it from the
+    # inner V extents so the final row isn't lost.
+    sub_x_min = min(v.x for v in inner_v)
+    sub_x_max = max(v.x for v in inner_v)
+    synth_bottom = HLine(x0=sub_x_min, x1=sub_x_max, y=cell_bbox.y1)
+    inner_h = inner_h + [synth_bottom]
+
+    sub_table = _build_single_grid(inner_h, inner_v, table_id=next_table_id)
+    if sub_table is None or len(sub_table.cells) < 2:
+        return [], next_table_id
+
+    sub_texts = {
+        (c.row, c.col): _cell_text(c, geom.words) for c in sub_table.cells
+    }
+    out: list[Suggestion] = []
+    for c in sub_table.cells:
+        # Skip the sub-table's narrow seam cells (typical of inset
+        # borders that bracket the real cell content).
+        if c.bbox.h < 10.0 or c.bbox.w < 16.0:
+            continue
+        text = sub_texts[(c.row, c.col)]
+        words_in_cell = _words_in(geom.words, c.bbox, inset=0.5)
+        role = _cell_role(text, words_in_cell)
+        if role == "label":
+            continue
+        # Label = leftmost cell in this sub-row with text.
+        label = ""
+        for cc in range(0, c.col):
+            txt = sub_texts.get((c.row, cc), "")
+            if _label_has_data(txt):
+                label = _clean_label(txt)
+                break
+        if not _label_has_data(label):
+            continue
+
+        if role == "checkbox":
+            kind = "nested_cell_checkbox"
+            ftype = "checkbox"
+        else:
+            kind = "nested_cell_input"
+            ftype = classify_field_type(label, keyword_map)
+
+        out.append(Suggestion(
+            page=geom.page_num,
+            kind=kind,
+            field_type=ftype,
+            x=c.bbox.x,
+            y=c.bbox.y,
+            width=c.bbox.w,
+            height=c.bbox.h,
+            label_text=label,
+            confidence=0.7,
+            from_cell=True,
+            table_id=sub_table.id,
+            cell_row=c.row,
+            cell_col=c.col,
+            label_confidence=0.7,
+        ))
+        if debug_records is not None:
+            debug_records.append({
+                "stage": "nested_cell",
+                "tableId": sub_table.id,
+                "row": c.row, "col": c.col,
+                "decision": "input",
+                "label": label,
+                "fieldType": ftype,
+            })
+    return out, next_table_id + 1
 
 
 def _emit_from_underline(
@@ -1136,6 +1271,12 @@ def emit_page_fields(
             cell_texts[(cell.row, cell.col)] = _cell_text(cell, words)
         table_cell_texts[table.id] = cell_texts
 
+    # Synthetic ids assigned to nested sub-tables we recover from
+    # merged cells. Counter starts above any real table id.
+    nested_table_id_counter = (
+        max((t.id for t in geom.tables), default=-1) + 1000
+    )
+
     for table in geom.tables:
         cell_texts = table_cell_texts[table.id]
         num_cols = len(table.col_bounds) - 1
@@ -1230,6 +1371,16 @@ def emit_page_fields(
                         "decision": "label",
                         "text": text,
                     })
+                # A merged label cell can wrap a nested label/value
+                # sub-grid (instructions block + sub-table). Recover
+                # those fields from the lines inside the merged cell.
+                if cell.row_span > 1 or cell.col_span > 1:
+                    nested, nested_next_id = _emit_nested_table_fields(
+                        cell, geom, keyword_map, nested_table_id_counter,
+                        debug_records=debug_records,
+                    )
+                    out.extend(nested)
+                    nested_table_id_counter = nested_next_id
                 continue
 
             row_id, col_header, label_conf = _find_label_parts_for_cell(
@@ -1241,6 +1392,23 @@ def emit_page_fields(
                 col_header = column_header_texts[cell.col]
                 if not label_conf:
                     label_conf = 0.6
+
+            # Step-marker columns ("Step", "#", "No.", "Item") are
+            # process identifiers, not inputs. Even when the cells look
+            # empty (step numbers often aren't extractable text), the
+            # form builder shouldn't get a field per row here.
+            effective_header = col_header or column_header_texts.get(cell.col, "")
+            if role == "empty" and _is_step_identifier_header(effective_header):
+                if debug_records is not None:
+                    debug_records.append({
+                        "stage": "cell",
+                        "tableId": cell.table_id,
+                        "row": cell.row, "col": cell.col,
+                        "decision": "step_column_skip",
+                        "header": effective_header,
+                    })
+                continue
+
             display_label = _compose_display_label(row_id, col_header, num_cols)
 
             if not _label_has_data(display_label):

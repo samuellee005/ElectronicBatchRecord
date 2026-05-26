@@ -662,6 +662,74 @@ class TestBatchRecord3UnderscoreInputsTests(unittest.TestCase):
         )
 
 
+class TestBatchRecord4NestedTableTests(unittest.TestCase):
+    """Page 1 of TestBatchRecord4.pdf nests a label/value sub-table inside
+    Step 9.1.1's Instructions cell. The outer table merges that whole
+    region; we need to recover the inner grid and emit one field per
+    empty value cell. The Step column should emit no fields at all."""
+
+    @classmethod
+    def _detect_first_page(cls):
+        from app import detector
+        fixture = (
+            Path(__file__).resolve().parents[2]
+            / "data" / "imgs" / "TestBatchRecord4.pdf"
+        )
+        return detector.detect_pdf(fixture.read_bytes(), max_pages=1)
+
+    def test_step_column_emits_no_fields(self) -> None:
+        res = self._detect_first_page()
+        for s in res["suggestions"]:
+            # Step column is the narrow x=43–85 band.
+            self.assertFalse(
+                s["x"] < 85 and s["width"] < 60,
+                f"Spurious field in Step column: {s}",
+            )
+            self.assertNotEqual(
+                s["labelText"], "Step",
+                f"A field labelled just 'Step' should never be emitted: {s}",
+            )
+
+    def test_nested_inner_table_emits_inputs(self) -> None:
+        res = self._detect_first_page()
+        nested = [s for s in res["suggestions"] if s["kind"].startswith("nested_cell")]
+        # Step 9.1.1 has ~12 inner rows; we expect at least 10 nested
+        # fields covering the empty value cells and Yes/No prompts.
+        self.assertGreaterEqual(
+            len(nested), 10,
+            f"Expected ≥10 nested inputs, got {len(nested)}: "
+            f"{[s['labelText'] for s in nested]}",
+        )
+
+    def test_nested_labels_capture_expected_rows(self) -> None:
+        res = self._detect_first_page()
+        labels = {s["labelText"] for s in res["suggestions"]}
+        for needle in (
+            "mRNA-1801-2 Lot Number",
+            "Storage Location",
+            "RNA concentration (mg/mL)",
+        ):
+            matched = any(needle in l for l in labels)
+            self.assertTrue(matched, f"Expected a field labelled containing {needle!r}, got {labels}")
+
+    def test_cell_text_orders_words_top_to_bottom(self) -> None:
+        from app import fields as F
+        from app.geometry import Cell, Rect
+        cell = Cell(
+            table_id=0, row=0, col=0, row_span=1, col_span=1,
+            bbox=Rect(x=0.0, y=0.0, w=200.0, h=60.0),
+        )
+        # Words deliberately given in non-reading order.
+        words = [
+            (10.0, 40.0, 50.0, 52.0, "additional"),
+            (5.0, 10.0, 30.0, 22.0, "Is"),
+            (40.0, 10.0, 100.0, 22.0, "complete?"),
+            (5.0, 25.0, 100.0, 37.0, "Multi-line cell"),
+        ]
+        text = F._cell_text(cell, words)
+        self.assertEqual(text, "Is complete? Multi-line cell additional")
+
+
 class FixtureSmokeTests(unittest.TestCase):
 
     def test_example_pdf_emits_only_cell_inputs_for_table_fields(self) -> None:
