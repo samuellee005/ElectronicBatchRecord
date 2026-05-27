@@ -13,8 +13,10 @@ The response shape is preserved for the PHP glue and frontend ingestion
 
 from __future__ import annotations
 
+import collections
 import io
 import json
+import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -115,6 +117,104 @@ def _clamp_to_page(s: Suggestion, page_w: float, page_h: float) -> Suggestion:
     return s
 
 
+def _disambiguate_labels(suggestions: list[Suggestion]) -> None:
+    """Ensure every suggestion in the document has a label distinct from
+    every other suggestion's label.
+
+    Goal: when the user saves a form, no two fields share the same
+    display name — e.g. a Bill of Materials table with 13 "Lot Number"
+    cells should produce "Lot Number — Ultrapure water",
+    "Lot Number — 200 proof Ethanol", … instead of thirteen identical
+    "Lot Number" entries.
+
+    Three passes:
+      1. Semantic — use row_id / col_header on collisions so each cell
+         picks up its row's identifier.
+      2. Cross-page — append "(page N)" for labels that still collide
+         across multiple pages.
+      3. Numeric — append "#1/#2/..." (ordered top-to-bottom) for any
+         remaining duplicates within a page.
+    """
+    if len(suggestions) <= 1:
+        return
+
+    def _specific(s: Suggestion) -> str | None:
+        base = s.label_text
+        if s.row_id and s.col_header and s.col_header.strip() == base.strip():
+            return f"{base} — {s.row_id}"
+        if s.row_id and s.row_id.strip() != base.strip():
+            return f"{base} — {s.row_id}"
+        if s.col_header and s.col_header.strip() != base.strip():
+            return f"{s.col_header} — {base}"
+        return None
+
+    # Pass 1: semantic disambiguation for collisions.
+    counts = collections.Counter(s.label_text for s in suggestions)
+    for s in suggestions:
+        if counts[s.label_text] > 1:
+            cand = _specific(s)
+            if cand and cand != s.label_text:
+                s.label_text = cand
+
+    # Pass 2: append page number when a label still spans multiple pages.
+    pages_per_label: dict[str, set[int]] = collections.defaultdict(set)
+    for s in suggestions:
+        pages_per_label[s.label_text].add(s.page)
+    for s in suggestions:
+        if len(pages_per_label[s.label_text]) > 1:
+            s.label_text = f"{s.label_text} (page {s.page})"
+
+    # Pass 3: numeric suffix for any in-page duplicates that remain.
+    groups: dict[str, list[Suggestion]] = collections.defaultdict(list)
+    for s in suggestions:
+        groups[s.label_text].append(s)
+    for label, group in groups.items():
+        if len(group) <= 1:
+            continue
+        group.sort(key=lambda x: (x.page, x.y, x.x))
+        for i, s in enumerate(group, start=1):
+            s.label_text = f"{label} #{i}"
+
+
+_SLUG_RE = re.compile(r"[^a-z0-9]+")
+
+
+def _slugify(label: str) -> str:
+    """Convert a free-form label into a snake_case identifier.
+
+    Lowercases, replaces any run of non-alphanumeric ASCII with a
+    single underscore, trims leading/trailing underscores, and falls
+    back to ``"field"`` when the label has no alphanumeric content.
+    """
+    base = _SLUG_RE.sub("_", (label or "").lower()).strip("_")
+    return base or "field"
+
+
+def _assign_machine_names(suggestions: list[Suggestion]) -> None:
+    """Give every suggestion a unique snake_case ``name`` derived from
+    its (already-disambiguated) label.
+
+    The display label keeps any disambiguation context (em-dash, "#N",
+    "(page N)") so the resulting slug naturally inherits that context —
+    e.g. ``"Lot Number — Ultrapure water"`` →
+    ``lot_number_ultrapure_water``. In the rare event two labels
+    collapse to the same slug after non-alphanumeric removal we append
+    ``_2``, ``_3``, …
+    """
+    if not suggestions:
+        return
+    seen: set[str] = set()
+    for s in suggestions:
+        base = _slugify(s.label_text)
+        candidate = base
+        n = 2
+        while candidate in seen:
+            candidate = f"{base}_{n}"
+            n += 1
+        seen.add(candidate)
+        s.name = candidate
+
+
 def _suggestion_to_dict(idx: int, s: Suggestion) -> dict[str, Any]:
     out: dict[str, Any] = {
         "id": f"det_{idx}",
@@ -126,6 +226,7 @@ def _suggestion_to_dict(idx: int, s: Suggestion) -> dict[str, Any]:
         "width": round(s.width, 2),
         "height": round(s.height, 2),
         "labelText": s.label_text,
+        "name": s.name,
         "confidence": round(s.confidence, 3),
         "fromCell": s.from_cell,
     }
@@ -312,6 +413,8 @@ def detect_pdf(
                 # in a long batch record.
                 warnings.append(f"Page {i + 1}: skipped ({page_err!s}).")
 
+        _disambiguate_labels(all_sug)
+        _assign_machine_names(all_sug)
         out = [_suggestion_to_dict(idx, s) for idx, s in enumerate(all_sug)]
         payload: dict[str, Any] = {
             "success": True,

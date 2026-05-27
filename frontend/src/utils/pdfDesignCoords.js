@@ -93,8 +93,20 @@ export function buildFieldFromSuggestion(suggestion, rect, orderInGroup = 1) {
     suggestion.id && String(suggestion.id).trim()
       ? `field_${String(suggestion.id).replace(/[^a-zA-Z0-9_-]/g, '_')}`
       : `field_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`
+  // Machine-readable data key for exports / database columns / JSON keys.
+  // The Python detector emits a unique snake_case slug per field; fall
+  // back to a slug derived from the display label when an older
+  // detection payload didn't include `name`.
+  const name =
+    (suggestion.name && String(suggestion.name).trim()) ||
+    String(label)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '') ||
+    'field'
   const field = {
     id,
+    name,
     type,
     page: rect.page,
     x: rect.x,

@@ -52,6 +52,9 @@ class Suggestion:
     # for grouping / batch context.
     row_id: str = ""
     col_header: str = ""
+    # Machine-readable, snake_case identifier — unique across the
+    # document. Assigned after label disambiguation.
+    name: str = ""
 
 
 # ---------- Helpers ------------------------------------------------------ #

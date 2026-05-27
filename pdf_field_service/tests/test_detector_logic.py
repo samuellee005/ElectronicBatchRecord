@@ -134,9 +134,12 @@ class LabelAssociationTests(unittest.TestCase):
         sugs = [s for s in res["suggestions"] if s["fromCell"]]
         # Inputs in row 1: cols 1 and 2 (col 0 has "Mixer A" text).
         row1 = [s for s in sugs if s["cellRow"] == 1]
-        labels = {s["labelText"] for s in row1}
-        self.assertIn("Initials", labels)
-        self.assertIn("Date", labels)
+        labels = [s["labelText"] for s in row1]
+        # Disambiguation may suffix with the row id when labels collide
+        # across rows in larger tables; here there's a single row so the
+        # bare header still appears in the label string.
+        self.assertTrue(any("Initials" in l for l in labels), f"got {labels}")
+        self.assertTrue(any("Date" in l for l in labels), f"got {labels}")
         # Row id is retained as metadata for downstream grouping.
         row_ids = {s.get("rowId") for s in row1}
         self.assertEqual(row_ids, {"Mixer A"})
@@ -282,11 +285,15 @@ class HeaderCarryTests(unittest.TestCase):
         doc = self._two_page_log()
         res = _detect(doc)
         page2 = [s for s in res["suggestions"] if s["page"] == 2 and s["fromCell"]]
-        labels = {s["labelText"] for s in page2}
-        self.assertTrue(
-            {"Time", "Temperature", "Operator"}.issubset(labels),
-            f"Expected inherited column headers, got {labels}",
-        )
+        labels = [s["labelText"] for s in page2]
+        # Page 2 inherits Time/Temperature/Operator. With three empty
+        # rows the labels collide, so disambiguation appends "#1/#2/#3".
+        # We only need each header to *appear* in at least one label.
+        for header in ("Time", "Temperature", "Operator"):
+            self.assertTrue(
+                any(header in l for l in labels),
+                f"Expected inherited header {header!r}, got {labels}",
+            )
 
 
 class InformationalTableTests(unittest.TestCase):
@@ -506,7 +513,9 @@ class TestBatchRecordFixtureTests(unittest.TestCase):
         )
         labels = sorted(s["labelText"].lower() for s in res["suggestions"])
         prepared = [l for l in labels if l.startswith("prepared")]
-        dates = [l for l in labels if l == "date"]
+        # Disambiguation suffixes duplicates with "#N", so accept any
+        # label that starts with the bare "date" word.
+        dates = [l for l in labels if l == "date" or l.startswith("date ")]
         self.assertEqual(len(prepared), 4, f"expected 4 Prepared-By underlines, got {prepared}")
         self.assertEqual(len(dates), 4, f"expected 4 Date underlines, got {dates}")
         self.assertEqual(len(res["suggestions"]), 8)
@@ -568,7 +577,9 @@ class TestBatchRecord2BomTests(unittest.TestCase):
             if s.get("fromCell") and s.get("tableId") is not None
             and 130 < s["y"] < 460
         ]
-        # Every emitted field's type should match its column header.
+        # Every emitted field's type should match its column header. After
+        # disambiguation the label is "<Header> — <row id>", so match on
+        # the column header substring.
         expected = {
             "Vendor": "text",
             "Part Number": "number",
@@ -577,7 +588,11 @@ class TestBatchRecord2BomTests(unittest.TestCase):
             "Recorded By/Date": "date",  # may also be text — date acceptable
         }
         for s in bom_fields:
-            want = expected.get(s["labelText"])
+            want = None
+            for header, ftype in expected.items():
+                if s["labelText"].startswith(header):
+                    want = ftype
+                    break
             if want is None:
                 continue
             self.assertEqual(
@@ -633,9 +648,16 @@ class TestBatchRecord3UnderscoreInputsTests(unittest.TestCase):
             if s["kind"] == "underscore_input" and s["x"] > 500
         ]
         labels = [s["labelText"] for s in sig_fields]
-        # Across 4 step rows, we expect alternating Performed/Reviewed.
-        self.assertIn("Performed by/Date", labels)
-        self.assertIn("Reviewed by/Date", labels)
+        # Disambiguation appends "#N" to duplicates; the base header must
+        # still appear in at least one label.
+        self.assertTrue(
+            any("Performed by/Date" in l for l in labels),
+            f"got {labels}",
+        )
+        self.assertTrue(
+            any("Reviewed by/Date" in l for l in labels),
+            f"got {labels}",
+        )
 
     def test_units_trigger_number_field_type(self) -> None:
         res = self._detect_first_page()
