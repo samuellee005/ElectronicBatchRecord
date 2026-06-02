@@ -654,6 +654,7 @@ def _emit_underscore_inputs(
     keyword_map: dict[str, list[str]],
     debug_records: list[dict[str, Any]] | None = None,
     step_index: list[tuple[float, float, str]] | None = None,
+    table_cell_texts: dict[int, dict[tuple[int, int], str]] | None = None,
 ) -> list[Suggestion]:
     """Emit one input field per underscore-text slot.
 
@@ -666,11 +667,18 @@ def _emit_underscore_inputs(
     label on that page. Free-floating fields like `Performed by/Date ___`
     inherit that step as their `row_id`, so cross-page disambiguation
     can anchor on the step rather than the page number.
+
+    `table_cell_texts` (when supplied) lets a slot sitting in a data cell
+    of a multi-column grid (e.g., the lipid weight-range table) inherit
+    the cell's row-label and column-header instead of falling back to
+    the unit-suffix word (`mg`) that travels with the underline.
     """
     out: list[Suggestion] = []
     inputs = _scan_underscore_inputs(geom.words)
     if not inputs:
         return out
+
+    tables_by_id = {t.id: t for t in geom.tables}
 
     # Pre-compute per-cell role so we don't re-classify N times.
     cell_role_cache: dict[tuple[int, int, int], str] = {}
@@ -686,19 +694,48 @@ def _emit_underscore_inputs(
         cell_role_cache[key] = role
         return role
 
+    def _grid_label_for_cell(cell: Cell) -> tuple[str, str]:
+        """Return ``(col_header, row_id)`` for a data cell in a 3+ col
+        grid table, or ``("", "")`` if no clean labels are available.
+
+        Mirrors the cell-emission path: column header from row 0 at the
+        same column, row id from column 0 at the same row.
+        """
+        if cell.table_id is None or table_cell_texts is None:
+            return "", ""
+        if cell.row == 0 or cell.col == 0:
+            return "", ""
+        table = tables_by_id.get(cell.table_id)
+        if table is None:
+            return "", ""
+        if len(table.col_bounds) - 1 < 3:
+            return "", ""
+        cell_texts = table_cell_texts.get(cell.table_id, {})
+        col_hdr_txt = cell_texts.get((0, cell.col), "") or ""
+        row_id_txt = cell_texts.get((cell.row, 0), "") or ""
+        if not _label_has_data(col_hdr_txt) or not _label_has_data(row_id_txt):
+            return "", ""
+        return _clean_label(col_hdr_txt), _clean_label(row_id_txt)
+
     for u in inputs:
         rect: Rect = u["rect"]
         cx = rect.x + rect.w / 2
         cy = rect.y + rect.h / 2
+        # An underline at (cx, cy) can fall inside multiple tables when
+        # one table is visually nested inside another's merged cell
+        # (e.g., the lipid weight-range grid sits inside the outer
+        # Step|Instructions|Signature merged Instructions cell). Pick the
+        # *smallest* containing cell so the inner data grid wins.
         containing_cell: Cell | None = None
+        best_area = float("inf")
         for table in geom.tables:
             for cell in table.cells:
                 b = cell.bbox
                 if b.x <= cx <= b.x1 and b.y <= cy <= b.y1:
-                    containing_cell = cell
-                    break
-            if containing_cell:
-                break
+                    area = (b.x1 - b.x) * (b.y1 - b.y)
+                    if area < best_area:
+                        containing_cell = cell
+                        best_area = area
 
         if containing_cell is not None and _role_for(containing_cell) == "empty":
             # The cell-first contract owns this region.
@@ -714,6 +751,31 @@ def _emit_underscore_inputs(
         suffix = u["suffix"]
         is_unit = _is_unit_suffix(suffix)
         display_label = label if _label_has_data(label) else suffix
+        grid_col_hdr, grid_row_id = "", ""
+        if containing_cell is not None:
+            grid_col_hdr, grid_row_id = _grid_label_for_cell(containing_cell)
+            if grid_col_hdr and grid_row_id:
+                # Determine if the slot sits inside a "value cell" — the
+                # cell's only content is a unit-suffix decoration (`mg`,
+                # `mL`, `g`, …) sitting next to the underline. In that
+                # case the proximity search is meaningless (it would
+                # pick up whatever paragraph sits below the table) and
+                # the grid headers are the right answer.
+                cell_only_text = _cell_text(containing_cell, geom.words).strip()
+                cell_is_value_slot = (
+                    not cell_only_text
+                    or _is_unit_suffix(cell_only_text)
+                    or cell_only_text.lower() == suffix.strip().lower()
+                )
+                proximity_useless = (
+                    not _label_has_data(display_label)
+                    or _is_unit_suffix(display_label.strip())
+                    or display_label.strip().lower() == suffix.strip().lower()
+                )
+                if cell_is_value_slot or proximity_useless:
+                    display_label = grid_col_hdr
+                    label_conf = max(label_conf, 0.75)
+
         if not _label_has_data(display_label):
             if debug_records is not None:
                 debug_records.append({
@@ -733,7 +795,11 @@ def _emit_underscore_inputs(
         # the bottom of the box sits on the existing underline.
         field_h = 18.0
         field_y = max(0.0, rect.y1 - field_h)
+        # Prefer the grid row-id when we've already pulled one — it's
+        # the more specific anchor (e.g., "ATX-298"). Fall back to the
+        # page-level step label.
         step_row_id = _step_label_at(step_index or [], (rect.y + rect.y1) / 2)
+        row_id_out = grid_row_id or step_row_id
         out.append(Suggestion(
             page=geom.page_num,
             kind="underscore_input",
@@ -746,7 +812,8 @@ def _emit_underscore_inputs(
             confidence=0.65 if label_conf >= 0.6 else 0.5,
             from_cell=False,
             label_confidence=label_conf,
-            row_id=step_row_id,
+            row_id=row_id_out,
+            col_header=grid_col_hdr,
         ))
         if debug_records is not None:
             debug_records.append({
@@ -1798,7 +1865,9 @@ def emit_page_fields(
     # it (or above for signature lines) and the field type is "number"
     # whenever a unit suffix is present.
     out.extend(_emit_underscore_inputs(
-        geom, keyword_map, debug_records, step_index=step_index,
+        geom, keyword_map, debug_records,
+        step_index=step_index,
+        table_cell_texts=table_cell_texts,
     ))
 
     return out

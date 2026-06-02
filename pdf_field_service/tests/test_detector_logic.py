@@ -146,6 +146,67 @@ class LabelAssociationTests(unittest.TestCase):
         row_ids = {s.get("rowId") for s in row1}
         self.assertEqual(row_ids, {"Mixer A"})
 
+    def test_underscore_slot_in_grid_data_cell_uses_table_headers(self) -> None:
+        """A cell whose only content is a unit suffix (`mg`) decorating an
+        underscore slot should still pick up the table's row label and
+        column header — not just the unit word.
+
+        Mirrors the lipid weight-range layout on ARCT-2601 page 16:
+
+            Lipids   | Target weight     | Lower limit       | Upper limit
+            ATX-298  | ____ mg           | ____ mg           | ____ mg
+            ATX-1057 | ____ mg           | ____ mg           | ____ mg
+
+        Without grid-aware label association the cells emit nine
+        identical "mg" fields disambiguated only by numeric suffix.
+        """
+        doc, page = _new_page()
+        # 4-column header row + 2 data rows. Vertical dividers, horizontal
+        # row separators.
+        _draw_rect(page, 60, 100, 540, 200)
+        for x in (170, 290, 410):
+            _draw_line(page, x, 100, x, 200)
+        _draw_line(page, 60, 130, 540, 130)  # below header
+        _draw_line(page, 60, 165, 540, 165)  # below row 1
+        # Header row
+        _put_text(page, 80, 120, "Lipids")
+        _put_text(page, 185, 120, "Target weight")
+        _put_text(page, 305, 120, "Lower limit")
+        _put_text(page, 425, 120, "Upper limit")
+        # Row 1: row label + 3 unit-suffix value cells
+        _put_text(page, 80, 155, "ATX-298")
+        _put_text(page, 195, 155, "_______ mg")
+        _put_text(page, 315, 155, "_______ mg")
+        _put_text(page, 435, 155, "_______ mg")
+        # Row 2: same shape, different lipid
+        _put_text(page, 80, 190, "ATX-1057")
+        _put_text(page, 195, 190, "_______ mg")
+        _put_text(page, 315, 190, "_______ mg")
+        _put_text(page, 435, 190, "_______ mg")
+
+        res = _detect(doc)
+        slot_fields = [
+            s for s in res["suggestions"]
+            if s.get("kind") == "underscore_input"
+        ]
+        labels = [s["labelText"] for s in slot_fields]
+        # No field should be labelled bare "mg" / "mg #N" — the row+col
+        # headers must be in the visible label.
+        for l in labels:
+            self.assertFalse(
+                l.startswith("mg"),
+                f"slot fell back to unit-suffix label: {l!r} (all: {labels})",
+            )
+        # Each composed label should carry both a column header and a
+        # row identifier.
+        for header in ("Target weight", "Lower limit", "Upper limit"):
+            for row in ("ATX-298", "ATX-1057"):
+                want = f"{header} — {row}"
+                self.assertTrue(
+                    any(want in l for l in labels),
+                    f"missing {want!r} in {labels}",
+                )
+
 
 # ---------- Type classification ---------------------------------------- #
 
