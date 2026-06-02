@@ -808,16 +808,38 @@ def _scan_blank_unit_inputs(
         if _is_underscore_filler(nearest_left_token):
             continue
         # When a word *is* found within the search strip, only accept
-        # it as a slot boundary if it's an arithmetic operator or a
-        # short numeric (e.g., "0.99") — long words to the left mean
-        # the unit is part of running text, not an equation.
+        # it as a slot boundary if it's an arithmetic operator, a
+        # short numeric (e.g. "0.99"), another known unit, OR a short
+        # row-label-style word ending in ":" (the "DOTAP:" /
+        # "ATX-12:" pattern on ARCT-032's lipid calc pages). A long
+        # prose word to the left means the unit is part of running
+        # text, not an equation.
+        row_label_left = ""
         if nearest_left_token:
             cleaned = re.sub(r"[\s.,;:]", "", nearest_left_token)
             is_operator = cleaned in _ARITH_OPERATORS
             is_short_numeric = bool(re.fullmatch(r"[\d.]{1,6}", cleaned))
             is_other_unit = cleaned.lower() in _KNOWN_BLANK_UNIT_TOKENS
-            if not (is_operator or is_short_numeric or is_other_unit):
+            # Row-label-style tokens cover both "DOTAP:" (with colon)
+            # and bare identifiers like "DOTAP" / "ATX-12" /
+            # "Cholesterol" / "PEG2000-". A token qualifies when it's
+            # short, no internal whitespace, and carries at least one
+            # uppercase letter or digit — that's enough to exclude
+            # lowercase prose words (the, with, for, …) that would
+            # otherwise mark a unit as part of running text.
+            ends_in_colon = nearest_left_token.endswith(":")
+            is_row_label = (
+                1 <= len(cleaned) <= 20
+                and " " not in nearest_left_token
+                and (
+                    ends_in_colon
+                    or any(c.isupper() or c.isdigit() for c in cleaned)
+                )
+            )
+            if not (is_operator or is_short_numeric or is_other_unit or is_row_label):
                 continue
+            if is_row_label:
+                row_label_left = nearest_left_token.rstrip(": ").strip()
         gap = unit_x0 - nearest_left_x1
         if gap < min_gap:
             continue
@@ -833,7 +855,33 @@ def _scan_blank_unit_inputs(
             "baseline_y": unit_y1,
             "suffix": ut.strip(),
             "orig": ut,
+            "row_label_left": row_label_left,
         })
+    # Propagate row labels across same-baseline slots. The first slot
+    # on a row carries "DOTAP:" to its left; later slots on the same
+    # baseline (e.g. `= ___ mg`) only have an operator boundary and
+    # would otherwise lose the row context. Use tolerance-based
+    # clustering so 1pt of baseline jitter doesn't split a row.
+    BASELINE_TOL = 4.0
+    by_baseline: list[list[dict[str, Any]]] = []
+    for s in sorted(out, key=lambda s: s["baseline_y"]):
+        placed = False
+        for group in by_baseline:
+            if abs(group[0]["baseline_y"] - s["baseline_y"]) <= BASELINE_TOL:
+                group.append(s)
+                placed = True
+                break
+        if not placed:
+            by_baseline.append([s])
+    for group in by_baseline:
+        label = next(
+            (s["row_label_left"] for s in group if s["row_label_left"]), ""
+        )
+        if not label:
+            continue
+        for s in group:
+            if not s["row_label_left"]:
+                s["row_label_left"] = label
     return out
 
 
@@ -1083,6 +1131,19 @@ def _emit_underscore_inputs(
                     display_label = grid_col_hdr
                     label_conf = max(label_conf, 0.75)
 
+        # A blank+unit slot may carry a row-label captured by the
+        # scanner ("DOTAP:", "ATX-12:", "Chol:"). Promote it to the
+        # field's row_id and — when the proximity search returned only
+        # the unit suffix — to the display label too, so the form
+        # builder reads "DOTAP — mg" instead of "mg #N".
+        row_label_left = (u.get("row_label_left") or "").strip()
+        if row_label_left and (
+            not _label_has_data(display_label)
+            or display_label.strip().lower() == suffix.strip().lower()
+        ):
+            display_label = suffix or row_label_left
+            label_conf = max(label_conf, 0.65)
+
         if not _label_has_data(display_label):
             if debug_records is not None:
                 debug_records.append({
@@ -1104,9 +1165,10 @@ def _emit_underscore_inputs(
         field_y = max(0.0, rect.y1 - field_h)
         # Prefer the grid row-id when we've already pulled one — it's
         # the more specific anchor (e.g., "ATX-298"). Fall back to the
+        # scanner-supplied row label (DOTAP / ATX-12 / …), then to the
         # page-level step label.
         step_row_id = _step_label_at(step_index or [], (rect.y + rect.y1) / 2)
-        row_id_out = grid_row_id or step_row_id
+        row_id_out = grid_row_id or row_label_left or step_row_id
         out.append(Suggestion(
             page=geom.page_num,
             kind="underscore_input",
