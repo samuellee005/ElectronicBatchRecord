@@ -1197,6 +1197,51 @@ def _label_matches_keyword(label: str, kw: str) -> bool:
     return bool(re.search(pattern, label))
 
 
+# Labels that name an external identifier whose value is alphanumeric
+# (SKUs, lot codes, equipment IDs). Without this override the bare
+# "number" / "no." / "id" keywords in the number bucket would misclassify
+# every "Lot Number", "Part Number", "Vessel ID", "Pump ID" as numeric.
+_TEXT_IDENTIFIER_NUMBER_RE = re.compile(
+    r"\b(?:"
+    r"lot|part|batch|serial|catalog(?:ue)?|model|sku|product|reference|"
+    r"ref|document|doc|order|invoice|po|asset|tag"
+    r")\s*(?:no\.?|number|#|code)\b",
+    re.IGNORECASE,
+)
+_TRAILING_ID_RE = re.compile(r"\bid\b\s*(?:[\(:].*)?\s*$", re.IGNORECASE)
+
+
+def _has_strong_format_hint(label: str) -> bool:
+    """True when the label contains an unambiguous date/time format
+    literal (`HH:MM`, `DDMMYYYY`, …). Used to override column-level
+    type voting from a per-row label."""
+    return bool(_TIME_FORMAT_RE.search(label) or _DATE_FORMAT_RE.search(label))
+
+
+def _looks_like_text_identifier(label: str) -> bool:
+    if _TEXT_IDENTIFIER_NUMBER_RE.search(label):
+        return True
+    # "Balance ID", "Vessel ID", "Pump ID", "Storage Equipment ID" —
+    # a noun-modified ID at the end of the label. A bare "ID" alone
+    # could go either way; require at least one preceding word.
+    if _TRAILING_ID_RE.search(label) and len(label.split()) >= 2:
+        return True
+    return False
+
+
+# Format hints that override the multi-word ambiguity guard.
+# "Start Date and Time (HH:MM)" otherwise falls to plain text because it
+# has 6 words — but the HH:MM literal is unambiguous.
+_TIME_FORMAT_RE = re.compile(r"\bhh\s*[:\.]\s*mm\b", re.IGNORECASE)
+_DATE_FORMAT_RE = re.compile(
+    r"\b(?:ddmmyyyy|mmddyyyy|yyyymmdd|"
+    r"dd\s*[/-]\s*mm\s*[/-]\s*(?:yyyy|yy)|"
+    r"mm\s*[/-]\s*dd\s*[/-]\s*(?:yyyy|yy)"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
 def classify_field_type(
     label: str,
     keyword_map: dict[str, list[str]],
@@ -1219,6 +1264,21 @@ def classify_field_type(
 
     if geometry_hint == "tiny_square":
         return "checkbox"
+
+    # Strong type signals beat the keyword bucket and the ambiguity
+    # guard below. Resolve them first.
+    if _looks_like_text_identifier(t):
+        return "text"
+    has_time_fmt = bool(_TIME_FORMAT_RE.search(t))
+    has_date_fmt = bool(_DATE_FORMAT_RE.search(t))
+    if has_time_fmt and not has_date_fmt:
+        return "time"
+    if has_date_fmt and not has_time_fmt:
+        return "date"
+    if has_time_fmt and has_date_fmt:
+        # "Start Date and Time (HH:MM)" — both signals present; prefer
+        # the more specific (time) since HH:MM is the literal format.
+        return "time"
 
     # Ambiguous label fallback: if the text looks like multiple labels
     # mashed together (multiple colons or many words), we can't reliably
@@ -1567,9 +1627,31 @@ def emit_page_fields(
             hint = _geometry_hint_for(cell.bbox)
             # Prefer the column-level type (voted from the column's
             # header) so a column reads as one consistent data type.
-            ftype = column_types.get(cell.col) or classify_field_type(
+            # Exception: when either the cell's display label or its row
+            # id carries an unambiguous format hint (HH:MM, DDMMYYYY, …)
+            # and the column vote is the generic "text", trust the
+            # row-specific signal so e.g. a "Start time (HH:MM)" cell in
+            # an "Instructions" column still reads as time.
+            cell_ftype = classify_field_type(
                 display_label, keyword_map, geometry_hint=hint,
             )
+            # Only trust the row id's *type* when it carries a strong
+            # format literal — generic keyword matches (e.g., "pH" inside
+            # a buffer-row label) would otherwise flip a "Lot Number"
+            # column from text to number.
+            row_strong_ftype = (
+                classify_field_type(row_id, keyword_map, geometry_hint=hint)
+                if row_id and _has_strong_format_hint(row_id) else None
+            )
+            col_ftype = column_types.get(cell.col)
+            if col_ftype and col_ftype != "text":
+                ftype = col_ftype
+            elif col_ftype == "text" and cell_ftype in {"time", "date", "number"}:
+                ftype = cell_ftype
+            elif col_ftype == "text" and row_strong_ftype in {"time", "date", "number"}:
+                ftype = row_strong_ftype
+            else:
+                ftype = col_ftype or cell_ftype
             out.append(_emit_from_cell(
                 cell, display_label, row_id, col_header, label_conf,
                 field_type=ftype, page_num=page_num,

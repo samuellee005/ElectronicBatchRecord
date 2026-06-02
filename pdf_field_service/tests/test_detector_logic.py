@@ -66,7 +66,9 @@ class CellFirstContractTests(unittest.TestCase):
             f"Expected exactly one input cell, got {len(sugs)}: {sugs}",
         )
         s = sugs[0]
-        self.assertEqual(s["fieldType"], "number")
+        # "Batch Number" names an alphanumeric identifier (a SKU-style
+        # value), not a numeric quantity — classified as text.
+        self.assertEqual(s["fieldType"], "text")
         self.assertIn("Batch Number", s["labelText"])
 
     def test_merged_cell_input_emits_one_wide_field(self) -> None:
@@ -186,6 +188,83 @@ class TypeClassificationTests(unittest.TestCase):
         self.assertEqual(
             fields.classify_field_type("Notes", kw, geometry_hint="tiny_square"),
             "checkbox",
+        )
+
+    def test_lot_number_classified_as_text_not_number(self) -> None:
+        """Lot/Part/Batch/Serial/Catalog numbers are alphanumeric SKUs.
+
+        The bare "number" / "no." / "id" keywords in the number bucket
+        used to misclassify every such field. The text-identifier guard
+        must beat the number keyword.
+        """
+        kw = detector._load_field_type_keywords()
+        for label in (
+            "Lot Number",
+            "Part Number",
+            "Batch Number",
+            "Catalog Number",
+            "Catalogue Number",
+            "Serial Number",
+            "Document No.",
+            "PO Number",
+            "Reference No",
+            "Product Code",
+        ):
+            self.assertEqual(
+                fields.classify_field_type(label, kw), "text",
+                f"{label!r} should classify as text, not numeric",
+            )
+
+    def test_trailing_id_label_is_text(self) -> None:
+        """Equipment-style IDs ("Balance ID", "Vessel ID") are alphanumeric."""
+        kw = detector._load_field_type_keywords()
+        for label in ("Balance ID", "Vessel ID", "Pump ID", "Equipment ID"):
+            self.assertEqual(
+                fields.classify_field_type(label, kw), "text",
+                f"{label!r} should classify as text",
+            )
+
+    def test_number_label_still_classified_as_number(self) -> None:
+        """The text-identifier guard must NOT swallow real numeric labels."""
+        kw = detector._load_field_type_keywords()
+        for label in (
+            "Number of vials",
+            "RNA concentration (mg/mL)",
+            "Pressure (psi)",
+            "Tare weight (g)",
+        ):
+            self.assertEqual(
+                fields.classify_field_type(label, kw), "number",
+                f"{label!r} should remain numeric",
+            )
+
+    def test_multi_word_date_time_label_classified_as_time(self) -> None:
+        """Multi-word labels with HH:MM should be time, not text.
+
+        Without the format-hint override, ``len(label.split()) >= 5``
+        previously bumped these into the ambiguity fallback.
+        """
+        kw = detector._load_field_type_keywords()
+        for label in (
+            "Start Date and Time (HH:MM)",
+            "End Date and Time (HH:MM)",
+            "Additional thawing Start Date and time (DDMMYYYY, HH:MM)",
+        ):
+            self.assertEqual(
+                fields.classify_field_type(label, kw), "time",
+                f"{label!r} should classify as time",
+            )
+
+    def test_date_format_label_classified_as_date(self) -> None:
+        """A pure DDMMYYYY-style format hint disambiguates to date."""
+        kw = detector._load_field_type_keywords()
+        self.assertEqual(
+            fields.classify_field_type("Manufacture Date (DDMMYYYY)", kw),
+            "date",
+        )
+        self.assertEqual(
+            fields.classify_field_type("Expiry (DD/MM/YYYY)", kw),
+            "date",
         )
 
 
@@ -582,8 +661,10 @@ class TestBatchRecord2BomTests(unittest.TestCase):
         # the column header substring.
         expected = {
             "Vendor": "text",
-            "Part Number": "number",
-            "Lot Number": "number",
+            # "Lot Number" / "Part Number" name alphanumeric identifiers,
+            # not numeric quantities — text, not number.
+            "Part Number": "text",
+            "Lot Number": "text",
             "Expiration Date": "date",
             "Recorded By/Date": "date",  # may also be text — date acceptable
         }
