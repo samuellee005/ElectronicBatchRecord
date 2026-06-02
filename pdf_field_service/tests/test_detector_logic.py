@@ -704,6 +704,81 @@ class TestBatchRecordFixtureTests(unittest.TestCase):
             )
 
 
+class RepeatingRowDetectionTests(unittest.TestCase):
+    """A homogeneous data-log table (anonymous empty rows under one
+    header — e.g., a UFDF pressure log) should be tagged `repeating`
+    so the frontend can collapse it into one "+ Add row" widget.
+
+    Tables where every row carries a distinct row identifier (BoM,
+    Equipment) must NOT be tagged.
+    """
+
+    def _make_table(self, headers: list[str], data_rows: list[list[str]]):
+        doc, page = _new_page(width=612.0, height=792.0)
+        n_cols = len(headers)
+        n_rows = 1 + len(data_rows)
+        x0, x1 = 60.0, 540.0
+        y0 = 100.0
+        row_h = 30.0
+        _draw_rect(page, x0, y0, x1, y0 + row_h * n_rows)
+        # Column dividers
+        col_w = (x1 - x0) / n_cols
+        for c in range(1, n_cols):
+            _draw_line(page, x0 + c * col_w, y0, x0 + c * col_w, y0 + row_h * n_rows)
+        # Row dividers
+        for r in range(1, n_rows):
+            _draw_line(page, x0, y0 + r * row_h, x1, y0 + r * row_h)
+        # Header text
+        for c, h in enumerate(headers):
+            _put_text(page, x0 + c * col_w + 5, y0 + 18, h)
+        # Data text
+        for r, row in enumerate(data_rows):
+            for c, txt in enumerate(row):
+                if txt:
+                    _put_text(page, x0 + c * col_w + 5, y0 + (r + 1) * row_h + 18, txt)
+        return doc
+
+    def test_anonymous_log_rows_are_tagged_repeating(self) -> None:
+        # 3 columns of empty data rows under a header → repeating.
+        doc = self._make_table(
+            headers=["Time (min)", "Pressure (psi)", "Flow (mL/min)"],
+            data_rows=[["", "", ""] for _ in range(5)],
+        )
+        res = _detect(doc)
+        cell_sugs = [s for s in res["suggestions"] if s.get("fromCell")]
+        self.assertGreater(len(cell_sugs), 0)
+        # Every cell field should be flagged repeating with a shared id.
+        groups = {s.get("repeatGroupId") for s in cell_sugs if s.get("repeating")}
+        self.assertEqual(
+            len([s for s in cell_sugs if s.get("repeating")]),
+            len(cell_sugs),
+            f"expected all {len(cell_sugs)} cell fields tagged, got "
+            f"{sum(1 for s in cell_sugs if s.get('repeating'))}: {cell_sugs}",
+        )
+        self.assertEqual(len(groups - {None}), 1, f"expected 1 group, got {groups}")
+        rows_observed = {s.get("repeatRowsObserved") for s in cell_sugs if s.get("repeating")}
+        self.assertEqual(rows_observed, {5})
+
+    def test_labeled_rows_are_not_tagged(self) -> None:
+        # BoM-style: each data row has a distinct row label in col 0.
+        doc = self._make_table(
+            headers=["Material", "Vendor", "Lot Number"],
+            data_rows=[
+                ["Material A", "", ""],
+                ["Material B", "", ""],
+                ["Material C", "", ""],
+                ["Material D", "", ""],
+            ],
+        )
+        res = _detect(doc)
+        tagged = [s for s in res["suggestions"] if s.get("repeating")]
+        self.assertEqual(
+            tagged, [],
+            f"BoM-style table with distinct row ids should not be "
+            f"tagged repeating: {tagged}",
+        )
+
+
 class TestBatchRecord2BomTests(unittest.TestCase):
     """Pinned behaviour for the Bill of Materials table on page 1 of
     TestBatchRecord2.pdf. The table has 6 columns (Materials, Vendor,

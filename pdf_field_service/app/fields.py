@@ -52,6 +52,15 @@ class Suggestion:
     # for grouping / batch context.
     row_id: str = ""
     col_header: str = ""
+    # Repeating-row hint: when a table looks like a homogeneous data log
+    # (UFDF pressure/flow rows, fill-check Tare/Gross/Net rows, operator
+    # identification grids), every cell carries `repeating=True` plus a
+    # shared `repeat_group_id` and a row index within the group. The
+    # frontend can choose to collapse these into one "+ Add row" widget.
+    repeating: bool = False
+    repeat_group_id: str = ""
+    repeat_row_index: int = 0
+    repeat_rows_observed: int = 0
     # Machine-readable, snake_case identifier — unique across the
     # document. Assigned after label disambiguation.
     name: str = ""

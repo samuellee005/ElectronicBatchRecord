@@ -117,6 +117,64 @@ def _clamp_to_page(s: Suggestion, page_w: float, page_h: float) -> Suggestion:
     return s
 
 
+def _tag_repeating_row_tables(suggestions: list[Suggestion]) -> None:
+    """Mark suggestions that came from a homogeneous repeating-row table.
+
+    A repeating-row table has *anonymous* rows — they're just a sequence
+    of empty rows under a single header (UFDF pressure logs, fill-check
+    tare/gross/net rows, operator identification grids, documentation
+    comment lines). Rows in a BoM or Equipment table are NOT anonymous:
+    each carries a distinct material/equipment name as `row_id`, and
+    those should be left alone.
+
+    Heuristic: within one (page, tableId), find columns where the same
+    `col_header` (or label fallback) repeats across ≥4 rows AND those
+    rows have no meaningful `row_id` (empty, or all sharing a single
+    value). When such a column exists, flag every suggestion in the
+    table with `repeating=True`, a shared `repeat_group_id`
+    (`tbl_<id>_p<page>`), a row index, and the total rows observed —
+    the frontend can collapse them into one "+ Add row" widget.
+    """
+    by_table: dict[tuple[int, int], list[Suggestion]] = collections.defaultdict(list)
+    for s in suggestions:
+        if s.table_id is None or s.cell_col is None:
+            continue
+        by_table[(s.page, s.table_id)].append(s)
+
+    for (page, table_id), members in by_table.items():
+        if len(members) < 4:
+            continue
+        col_groups: dict[tuple[int, str], list[Suggestion]] = collections.defaultdict(list)
+        for s in members:
+            key = (s.cell_col or 0, (s.col_header or s.label_text).strip())
+            col_groups[key].append(s)
+        # A column qualifies as a repeating axis when (a) it has ≥4
+        # entries and (b) their row_ids are anonymous — empty, or every
+        # cell shares a single id (no per-row distinction).
+        def _anonymous(group: list[Suggestion]) -> bool:
+            row_ids = {(s.row_id or "").strip() for s in group}
+            row_ids.discard("")
+            return len(row_ids) <= 1
+        repeating_cols = [
+            g for g in col_groups.values()
+            if len(g) >= 4 and _anonymous(g)
+        ]
+        if not repeating_cols:
+            continue
+        rows_observed = max(len(g) for g in repeating_cols)
+        group_id = f"tbl_{table_id}_p{page}"
+        members_sorted = sorted(members, key=lambda x: (x.cell_row or 0, x.cell_col or 0))
+        seen_rows: dict[int, int] = {}
+        for s in members_sorted:
+            row = s.cell_row or 0
+            if row not in seen_rows:
+                seen_rows[row] = len(seen_rows)
+            s.repeating = True
+            s.repeat_group_id = group_id
+            s.repeat_row_index = seen_rows[row]
+            s.repeat_rows_observed = rows_observed
+
+
 def _disambiguate_labels(suggestions: list[Suggestion]) -> None:
     """Ensure every suggestion in the document has a label distinct from
     every other suggestion's label.
@@ -240,6 +298,11 @@ def _suggestion_to_dict(idx: int, s: Suggestion) -> dict[str, Any]:
         out["rowId"] = s.row_id
     if s.col_header:
         out["colHeader"] = s.col_header
+    if s.repeating:
+        out["repeating"] = True
+        out["repeatGroupId"] = s.repeat_group_id
+        out["repeatRowIndex"] = s.repeat_row_index
+        out["repeatRowsObserved"] = s.repeat_rows_observed
     return out
 
 
@@ -413,6 +476,7 @@ def detect_pdf(
                 # in a long batch record.
                 warnings.append(f"Page {i + 1}: skipped ({page_err!s}).")
 
+        _tag_repeating_row_tables(all_sug)
         _disambiguate_labels(all_sug)
         _assign_machine_names(all_sug)
         out = [_suggestion_to_dict(idx, s) for idx, s in enumerate(all_sug)]
