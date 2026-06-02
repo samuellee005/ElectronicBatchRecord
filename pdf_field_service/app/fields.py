@@ -373,6 +373,100 @@ def _is_step_identifier_header(header: str) -> bool:
     return bool(_STEP_IDENTIFIER_RE.match(header.strip()))
 
 
+def _summarize_instruction(text: str) -> str:
+    """Compress an instruction paragraph into a short anchor suitable for
+    use as a row_id.
+
+    Sentence-splitting (e.g., "Obtain a clean vessel.") truncates two
+    *different* steps to the same intro phrase. Instead, take the
+    leading slice of the *flattened* text up to ~120 chars, breaking at
+    a word boundary, so neighbouring sentences contribute discriminating
+    content when the first one is generic.
+    """
+    flat = re.sub(r"\s+", " ", (text or "").strip())
+    if not flat:
+        return ""
+    if len(flat) <= 120:
+        return flat
+    cut = flat[:120]
+    # Prefer the last sentence/clause boundary inside the window so we
+    # don't stop mid-thought; fall back to the last whitespace.
+    for delim in (". ", "; ", ", ", " "):
+        idx = cut.rfind(delim)
+        if idx >= 60:
+            cut = cut[:idx]
+            break
+    return cut.rstrip(" .,;") + "..."
+
+
+def _build_step_index(
+    geom: PageGeometry,
+    table_cell_texts: dict[int, dict[tuple[int, int], str]],
+) -> list[tuple[float, float, str]]:
+    """Build a per-page index of (y_min, y_max, step_label) for outer
+    process-step tables (`Step | Instructions | Signature` and friends).
+
+    Used to attach a step identifier as `row_id` to free-floating
+    underscore inputs (`Performed by/Date _______`) and merged-cell
+    nested fields. Without this, every `Performed by/Date` on every page
+    disambiguates with `(page N)` instead of a meaningful step anchor.
+
+    The step label comes from:
+      1. The Step column cell text (e.g., ``9.1.1.`` on ARCT-032), or
+      2. The first sentence-ish chunk of the Instructions cell when the
+         Step column is blank (ARCT-2601 / COVID-2LYO layout).
+    """
+    index: list[tuple[float, float, str]] = []
+    for table in geom.tables:
+        num_cols = len(table.col_bounds) - 1
+        num_rows = len(table.row_bounds) - 1
+        if num_cols < 2 or num_rows < 2:
+            continue
+        cell_texts = table_cell_texts.get(table.id, {})
+        col0_header = (cell_texts.get((0, 0), "") or "").strip()
+        if not _is_step_identifier_header(col0_header):
+            continue
+
+        # When a step's Instructions cell hosts a nested label/value
+        # sub-grid, the inner row dividers can split the outer step row
+        # into many geometry rows — col 0 holds the step id only on the
+        # top sliver, and the rest of the rows are empty. Walk through
+        # the outer rows once, anchoring on each row whose col 0 (or
+        # col 1, as a fallback) carries text; extend that step's
+        # y-range until the next anchor.
+        anchors: list[tuple[int, str]] = []
+        for row in range(1, num_rows):
+            label = (cell_texts.get((row, 0), "") or "").strip()
+            label = label.rstrip(".").strip()
+            if not _label_has_data(label):
+                instr = (cell_texts.get((row, 1), "") or "").strip()
+                if _label_has_data(instr):
+                    label = _summarize_instruction(instr)
+            if _label_has_data(label):
+                anchors.append((row, label))
+
+        for i, (row, label) in enumerate(anchors):
+            y0 = table.row_bounds[row]
+            if i + 1 < len(anchors):
+                y1 = table.row_bounds[anchors[i + 1][0]]
+            else:
+                y1 = table.row_bounds[num_rows]
+            index.append((y0, y1, label))
+    return index
+
+
+def _step_label_at(
+    step_index: list[tuple[float, float, str]],
+    y: float,
+    tol: float = 6.0,
+) -> str:
+    """Return the step label whose y-range contains `y`, or empty."""
+    for y0, y1, label in step_index:
+        if y0 - tol <= y <= y1 + tol:
+            return label
+    return ""
+
+
 def _is_unit_suffix(s: str) -> bool:
     """True when a suffix like 'mg', 'mL', 'g/mL', '%' looks like a
     measurement unit (and therefore implies a numeric input)."""
@@ -550,6 +644,7 @@ def _emit_underscore_inputs(
     geom: PageGeometry,
     keyword_map: dict[str, list[str]],
     debug_records: list[dict[str, Any]] | None = None,
+    step_index: list[tuple[float, float, str]] | None = None,
 ) -> list[Suggestion]:
     """Emit one input field per underscore-text slot.
 
@@ -557,6 +652,11 @@ def _emit_underscore_inputs(
     emission already covers that case as a single input. Slots inside
     label cells (where the cell carries instructions plus several blank
     underscore runs) and slots outside any cell are emitted here.
+
+    `step_index` (when supplied) maps y-ranges to the active process-step
+    label on that page. Free-floating fields like `Performed by/Date ___`
+    inherit that step as their `row_id`, so cross-page disambiguation
+    can anchor on the step rather than the page number.
     """
     out: list[Suggestion] = []
     inputs = _scan_underscore_inputs(geom.words)
@@ -624,6 +724,7 @@ def _emit_underscore_inputs(
         # the bottom of the box sits on the existing underline.
         field_h = 18.0
         field_y = max(0.0, rect.y1 - field_h)
+        step_row_id = _step_label_at(step_index or [], (rect.y + rect.y1) / 2)
         out.append(Suggestion(
             page=geom.page_num,
             kind="underscore_input",
@@ -636,6 +737,7 @@ def _emit_underscore_inputs(
             confidence=0.65 if label_conf >= 0.6 else 0.5,
             from_cell=False,
             label_confidence=label_conf,
+            row_id=step_row_id,
         ))
         if debug_records is not None:
             debug_records.append({
@@ -655,6 +757,7 @@ def _emit_nested_table_fields(
     keyword_map: dict[str, list[str]],
     next_table_id: int,
     debug_records: list[dict[str, Any]] | None = None,
+    step_index: list[tuple[float, float, str]] | None = None,
 ) -> tuple[list[Suggestion], int]:
     """Detect a sub-table within a merged cell and emit one field per
     empty value cell.
@@ -733,6 +836,12 @@ def _emit_nested_table_fields(
             kind = "nested_cell_input"
             ftype = classify_field_type(label, keyword_map)
 
+        # Inherit the outer step's identifier so the same nested label
+        # repeated across many steps (e.g., "Balance ID", "Vessel ID")
+        # disambiguates by step instead of "(page N)".
+        step_row_id = _step_label_at(
+            step_index or [], c.bbox.y + c.bbox.h / 2,
+        )
         out.append(Suggestion(
             page=geom.page_num,
             kind=kind,
@@ -748,6 +857,7 @@ def _emit_nested_table_fields(
             cell_row=c.row,
             cell_col=c.col,
             label_confidence=0.7,
+            row_id=step_row_id,
         ))
         if debug_records is not None:
             debug_records.append({
@@ -1280,6 +1390,11 @@ def emit_page_fields(
         max((t.id for t in geom.tables), default=-1) + 1000
     )
 
+    # Per-page step y-index — feeds row_id into free-floating fields
+    # (underscore inputs, nested-table fields) so cross-page collisions
+    # disambiguate by step rather than "(page N)".
+    step_index = _build_step_index(geom, table_cell_texts)
+
     for table in geom.tables:
         cell_texts = table_cell_texts[table.id]
         num_cols = len(table.col_bounds) - 1
@@ -1381,6 +1496,7 @@ def emit_page_fields(
                     nested, nested_next_id = _emit_nested_table_fields(
                         cell, geom, keyword_map, nested_table_id_counter,
                         debug_records=debug_records,
+                        step_index=step_index,
                     )
                     out.extend(nested)
                     nested_table_id_counter = nested_next_id
@@ -1590,6 +1706,8 @@ def emit_page_fields(
     # such run is an independent input; the label is the caption beneath
     # it (or above for signature lines) and the field type is "number"
     # whenever a unit suffix is present.
-    out.extend(_emit_underscore_inputs(geom, keyword_map, debug_records))
+    out.extend(_emit_underscore_inputs(
+        geom, keyword_map, debug_records, step_index=step_index,
+    ))
 
     return out

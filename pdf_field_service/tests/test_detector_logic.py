@@ -661,14 +661,19 @@ class TestBatchRecord3UnderscoreInputsTests(unittest.TestCase):
 
     def test_units_trigger_number_field_type(self) -> None:
         res = self._detect_first_page()
-        # Any underscore_input whose label mentions "mass", "weight",
+        # Any underscore_input whose CAPTION mentions "mass", "weight",
         # "volume" or "concentration" should be a number field — those
-        # captions accompany unit-suffix slots in this fixture.
+        # captions accompany unit-suffix slots in this fixture. We test
+        # the caption only (the label segment before " — "), since
+        # step-aware disambiguation may append the surrounding step text
+        # to the display label and that step text can incidentally
+        # contain those tokens for non-numeric fields like
+        # "Performed by/Date".
         for s in res["suggestions"]:
             if s["kind"] != "underscore_input":
                 continue
-            label = s["labelText"].lower()
-            if any(k in label for k in ("mass", "weight", "volume", "concentration")):
+            caption = s["labelText"].split(" — ", 1)[0].lower()
+            if any(k in caption for k in ("mass", "weight", "volume", "concentration")):
                 self.assertEqual(
                     s["fieldType"], "number",
                     f"Numeric quantity should be number type: {s}",
