@@ -146,6 +146,29 @@ class LabelAssociationTests(unittest.TestCase):
         row_ids = {s.get("rowId") for s in row1}
         self.assertEqual(row_ids, {"Mixer A"})
 
+    def test_cell_text_handles_baseline_jitter_within_a_line(self) -> None:
+        """Words on the same visual line can differ by ~1pt of baseline
+        jitter (mixed glyphs with/without descenders). A bare
+        round-to-3-pt bucket can put them in different buckets and
+        scramble reading order, producing e.g. "°C) Storage Temperature
+        (2-8" from "Storage Temperature (2-8 °C)".
+
+        Greedy baseline clustering keeps them on the same line.
+        """
+        from app.geometry import Cell, Rect
+        cell = Cell(table_id=0, row=0, col=0, row_span=1, col_span=1,
+                    bbox=Rect(x=50.0, y=200.0, w=300.0, h=30.0))
+        # 4 words at very close y tops; "°C)" sits ~1pt above the others
+        # — exactly the jitter pattern observed on ARCT-2601 page 12.
+        words = [
+            (200.0, 207.5, 215.0, 219.5, "°C)"),
+            (60.0, 208.4, 110.0, 219.4, "Storage"),
+            (115.0, 208.4, 175.0, 219.4, "Temperature"),
+            (180.0, 208.4, 198.0, 219.4, "(2-8"),
+        ]
+        text = fields._cell_text(cell, words)
+        self.assertEqual(text, "Storage Temperature (2-8 °C)")
+
     def test_underscore_slot_in_grid_data_cell_uses_table_headers(self) -> None:
         """A cell whose only content is a unit suffix (`mg`) decorating an
         underscore slot should still pick up the table's row label and

@@ -106,17 +106,50 @@ def _cell_text(
     words: list[tuple[float, float, float, float, str]],
 ) -> str:
     """Concatenated text inside a cell in natural reading order
-    (top-to-bottom, then left-to-right). Underscore-fillers skipped."""
-    parts: list[tuple[float, float, str]] = []
-    for wx0, wy0, wx1, wy1, t in _words_in(words, cell.bbox, inset=0.5):
-        if _is_underscore_filler(t):
-            continue
-        # Bucket baselines within ~3pt so words on the same visual line
-        # don't get split apart by tiny y jitter from font rendering.
-        baseline = round(wy0 / 3.0) * 3.0
-        parts.append((baseline, wx0, t.strip()))
-    parts.sort(key=lambda p: (p[0], p[1]))
-    return " ".join(p[2] for p in parts if p[2]).strip()
+    (top-to-bottom, then left-to-right). Underscore-fillers skipped.
+
+    Words on the same visual line can show 1-2pt of baseline jitter
+    (e.g., a glyph with descenders + a glyph without), and a fixed-period
+    bucket like ``round(y/3)*3`` can split them across adjacent buckets
+    when the boundary happens to fall inside the jitter. We greedily
+    cluster word tops within ``BASELINE_TOL`` of each other instead, so
+    a label like "Storage Temperature (2-8 °C)" reads in order even
+    when "°C)" sits a fraction of a point above the rest of the line.
+    """
+    BASELINE_TOL = 4.0
+    raw = [
+        (wx0, wy0, t.strip())
+        for wx0, wy0, _wx1, _wy1, t in _words_in(words, cell.bbox, inset=0.5)
+        if not _is_underscore_filler(t)
+    ]
+    if not raw:
+        return ""
+    raw.sort(key=lambda p: (p[1], p[0]))
+    # Greedy line-clustering on word tops.
+    lines: list[list[tuple[float, float, str]]] = []
+    current: list[tuple[float, float, str]] = []
+    current_y = float("nan")
+    for wx0, wy0, t in raw:
+        if not current or abs(wy0 - current_y) <= BASELINE_TOL:
+            current.append((wx0, wy0, t))
+            current_y = (
+                sum(p[1] for p in current) / len(current)
+                if not current_y == current_y else  # NaN check
+                current_y * 0.5 + wy0 * 0.5
+            )
+            # Always recompute mean to stay anchored to the cluster.
+            current_y = sum(p[1] for p in current) / len(current)
+        else:
+            lines.append(current)
+            current = [(wx0, wy0, t)]
+            current_y = wy0
+    if current:
+        lines.append(current)
+    out: list[str] = []
+    for line in lines:
+        line.sort(key=lambda p: p[0])
+        out.extend(p[2] for p in line if p[2])
+    return " ".join(out).strip()
 
 
 def _label_has_data(label: str) -> bool:
