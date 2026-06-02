@@ -250,6 +250,117 @@ def _is_label_cell(
     return _cell_role(text, words_in_cell) == "label"
 
 
+def _split_tall_empty_cells(
+    table: Table,
+    cell_texts: dict[tuple[int, int], str],
+    words: list[tuple[float, float, float, float, str]],
+) -> list[Cell]:
+    """Return the table's cells with any tall, empty merged cell
+    virtually subdivided into one cell per neighbouring-column row.
+
+    Some forms render the rightmost column ("Recorded By/Date" on an
+    Equipment table, etc.) as a single tall cell spanning every data
+    row, because the inner row separators don't extend to the right
+    edge. The cell-emission loop sees one cell → emits one field, when
+    the operator clearly needs to fill in one signature per equipment.
+
+    For each empty cell with `row_span > 2`, we replace it with N virtual
+    sub-cells aligned to the row bounds of a neighbouring column. The
+    sub-cells inherit the parent's column index and carry per-row row
+    indexes so the existing `_find_label_parts_for_cell` picks up the
+    correct `row_id` from col 0.
+
+    Cells that already span just one row, or that contain content, are
+    returned unchanged. `cell_texts` is updated in place with empty
+    entries for each new virtual sub-cell.
+    """
+    out: list[Cell] = []
+    num_rows = len(table.row_bounds) - 1
+    if num_rows < 3:
+        return list(table.cells)
+
+    # Group existing cells by column so we can find a "donor" column
+    # whose per-row rows we can copy.
+    cells_by_col: dict[int, list[Cell]] = {}
+    for c in table.cells:
+        cells_by_col.setdefault(c.col, []).append(c)
+
+    for cell in table.cells:
+        if cell.row_span <= 2 or cell.col_span > 1:
+            out.append(cell)
+            continue
+        # Find a donor column with one cell per row inside the merged
+        # cell's row range. Pick the column with the *most* cells in
+        # that range (typically the row-id column).
+        first_row = cell.row
+        last_row = cell.row + cell.row_span - 1
+        best_donor: list[Cell] | None = None
+        best_count = 0
+        for c, group in cells_by_col.items():
+            if c == cell.col:
+                continue
+            within = [g for g in group if first_row <= g.row <= last_row and g.row_span == 1]
+            if len(within) > best_count:
+                best_donor = within
+                best_count = len(within)
+        if not best_donor or best_count < 3:
+            out.append(cell)
+            continue
+        # Only split when the merged cell's content is concentrated in
+        # the donor row(s) at its top — i.e., most donor rows would be
+        # empty if subdivided. Otherwise it's a legitimate "container"
+        # cell (instructions paragraph, signature block) and should
+        # stay a single field.
+        non_empty_rows = 0
+        for donor in best_donor:
+            y_low, y_high = donor.bbox.y, donor.bbox.y1
+            has_text = False
+            for wx0, wy0, wx1, wy1, t in words:
+                if not _label_has_data(t):
+                    continue
+                if _is_underscore_filler(t):
+                    continue
+                cx = (wx0 + wx1) / 2
+                cy = (wy0 + wy1) / 2
+                if (
+                    cell.bbox.x <= cx <= cell.bbox.x1
+                    and y_low <= cy <= y_high
+                ):
+                    has_text = True
+                    break
+            if has_text:
+                non_empty_rows += 1
+        empty_ratio = (len(best_donor) - non_empty_rows) / len(best_donor)
+        if empty_ratio < 0.6:
+            out.append(cell)
+            continue
+        # Synthesize one virtual sub-cell per donor row. Carry forward
+        # any text that lives in that vertical band so the existing
+        # role detector can mark filled donor rows (e.g., the header)
+        # as labels.
+        for donor in sorted(best_donor, key=lambda g: g.row):
+            sub_bbox = Rect(
+                x=cell.bbox.x,
+                y=donor.bbox.y,
+                w=cell.bbox.w,
+                h=donor.bbox.h,
+            )
+            sub_cell = Cell(
+                table_id=cell.table_id,
+                row=donor.row,
+                col=cell.col,
+                row_span=1,
+                col_span=1,
+                bbox=sub_bbox,
+            )
+            out.append(sub_cell)
+            cell_texts.setdefault(
+                (donor.row, cell.col),
+                _cell_text(sub_cell, words),
+            )
+    return out
+
+
 def _is_informational_table(
     table: Table,
     cell_texts: dict[tuple[int, int], str],
@@ -266,13 +377,18 @@ def _is_informational_table(
     The cell-role check filters underscore fillers, so a cell whose only
     content is `____` still counts as empty.
     """
-    # A cell merged across >2 rows or >2 columns is a "container" — it
-    # likely wraps a nested label/value sub-grid (Step|Instructions
-    # |Signature pages). Reference / TOC tables are uniform grids
-    # without such large merges, so the presence of one is a strong
-    # signal that this is a form, not static content.
+    # A cell merged across a substantial fraction of the table's rows
+    # (≥40%) — or merged across ≥3 columns — is a "container" cell
+    # that likely wraps a nested label/value sub-grid (e.g., the
+    # Instructions cell of a Step|Instructions|Signature page spans
+    # ~14 of 16 rows). Smaller row-grouping merges in static content
+    # tables (Analytical Testing Summary's 3-5 row sample-label groups
+    # in a 22-row table) don't qualify and the informational check
+    # below still skips those tables.
+    num_rows_total = len(table.row_bounds) - 1
+    row_threshold = max(5, int(num_rows_total * 0.4))
     for cell in table.cells:
-        if cell.row_span > 2 or cell.col_span > 2:
+        if cell.row_span >= row_threshold or cell.col_span >= 3:
             return False
 
     label_cells: set[tuple[int, int]] = set()
@@ -1639,7 +1755,8 @@ def emit_page_fields(
                     column_types[col] = classify_field_type(header_text, keyword_map)
                     column_header_texts[col] = header_text
 
-        for cell in table.cells:
+        cells_to_emit = _split_tall_empty_cells(table, cell_texts, words)
+        for cell in cells_to_emit:
             # Skip cells that are too small to plausibly hold an input.
             # Inter-table seam rows often produce ~5-9 pt-tall "cells"
             # whose only role is to separate two real tables.

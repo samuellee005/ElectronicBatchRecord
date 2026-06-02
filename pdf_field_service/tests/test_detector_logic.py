@@ -704,6 +704,59 @@ class TestBatchRecordFixtureTests(unittest.TestCase):
             )
 
 
+class TallEmptyColumnSplitTests(unittest.TestCase):
+    """A tall, empty merged cell that spans many rows of other columns
+    must be virtually split so each donor row gets its own field.
+
+    Mirrors the rightmost "Recorded By/Date" column of the Equipment
+    table on ARCT-2601 page 10, which is rendered as a single tall cell
+    while the other columns have one cell per equipment item.
+    """
+
+    def test_tall_empty_right_column_splits_per_row(self) -> None:
+        doc, page = _new_page()
+        # Outer table: 5 cols, 5 rows. Right column has NO horizontal
+        # rules through it — it's one tall merged cell.
+        x0, x1 = 60.0, 540.0
+        y0 = 100.0
+        row_h = 30.0
+        n_rows = 5  # 1 header + 4 data rows
+        # Top + bottom borders only on the right column edge.
+        _draw_rect(page, x0, y0, x1, y0 + row_h * n_rows)
+        # Vertical column dividers — last divider is at x = 470 so the
+        # rightmost column spans x=470..540.
+        for x in (140.0, 240.0, 340.0, 470.0):
+            _draw_line(page, x, y0, x, y0 + row_h * n_rows)
+        # Horizontal row separators — only between cols 0..3 (stop at
+        # x=470 so the right column stays merged).
+        for r in range(1, n_rows):
+            _draw_line(page, x0, y0 + r * row_h, 470.0, y0 + r * row_h)
+        # Header
+        _put_text(page, 70, y0 + 18, "Equipment")
+        _put_text(page, 150, y0 + 18, "Source")
+        _put_text(page, 250, y0 + 18, "Serial")
+        _put_text(page, 350, y0 + 18, "Calibration")
+        _put_text(page, 480, y0 + 18, "Recorded By")
+        # Row labels in col 0
+        for i, name in enumerate(("Mixer A", "Mixer B", "Pump X", "Pump Y"), start=1):
+            _put_text(page, 70, y0 + i * row_h + 18, name)
+
+        res = _detect(doc)
+        rec = [s for s in res["suggestions"] if "Recorded By" in s["labelText"]]
+        # Should produce one field per equipment row (4) — not just 1.
+        self.assertEqual(
+            len(rec), 4,
+            f"expected one Recorded By field per row, got {len(rec)}: "
+            f"{[s['labelText'] for s in rec]}",
+        )
+        labels = {s["labelText"] for s in rec}
+        for name in ("Mixer A", "Mixer B", "Pump X", "Pump Y"):
+            self.assertTrue(
+                any(name in l for l in labels),
+                f"row id {name!r} missing from Recorded By fields: {labels}",
+            )
+
+
 class RepeatingRowDetectionTests(unittest.TestCase):
     """A homogeneous data-log table (anonymous empty rows under one
     header — e.g., a UFDF pressure log) should be tagged `repeating`
