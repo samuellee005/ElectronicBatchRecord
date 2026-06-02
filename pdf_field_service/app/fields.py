@@ -22,6 +22,7 @@ from .geometry import (
     PageGeometry,
     Rect,
     Table,
+    VLine,
     _build_single_grid,
 )
 
@@ -324,14 +325,14 @@ def _split_tall_empty_cells(
             out.append(cell)
             continue
         # Only split when the merged cell's content is concentrated in
-        # the donor row(s) at its top — i.e., most donor rows would be
-        # empty if subdivided. Otherwise it's a legitimate "container"
-        # cell (instructions paragraph, signature block) and should
-        # stay a single field.
-        non_empty_rows = 0
-        for donor in best_donor:
-            y_low, y_high = donor.bbox.y, donor.bbox.y1
-            has_text = False
+        # the donor row at the very top — i.e., the cell looks like
+        # "<header text> + N empty data rows" (the Equipment "Recorded
+        # By/Date" column, the BoM "Recorded By/Date" column). A
+        # legitimate container cell (a signature block whose text sits
+        # in a middle row, an instructions paragraph) keeps text
+        # elsewhere and should stay a single field.
+        def _row_has_text(donor_cell: Cell) -> bool:
+            y_low, y_high = donor_cell.bbox.y, donor_cell.bbox.y1
             for wx0, wy0, wx1, wy1, t in words:
                 if not _label_has_data(t):
                     continue
@@ -343,14 +344,22 @@ def _split_tall_empty_cells(
                     cell.bbox.x <= cx <= cell.bbox.x1
                     and y_low <= cy <= y_high
                 ):
-                    has_text = True
-                    break
-            if has_text:
-                non_empty_rows += 1
-        empty_ratio = (len(best_donor) - non_empty_rows) / len(best_donor)
-        if empty_ratio < 0.6:
+                    return True
+            return False
+
+        donors_sorted = sorted(best_donor, key=lambda d: d.row)
+        # The first donor row may carry the merged cell's header text
+        # (e.g., "Recorded By"). All *other* donor rows must be empty
+        # within the merged cell's x-range; otherwise this is a
+        # container with content distributed across multiple rows.
+        head_donor = donors_sorted[0]
+        tail_donors = donors_sorted[1:]
+        if any(_row_has_text(d) for d in tail_donors):
             out.append(cell)
             continue
+        # If even the first donor row is empty, that's fine too —
+        # this is the gap-#9 "fully merged empty column" case.
+        _ = head_donor  # explicit no-op — accepted regardless
         # Synthesize one virtual sub-cell per donor row. Carry forward
         # any text that lives in that vertical band so the existing
         # role detector can mark filled donor rows (e.g., the header)
@@ -1021,105 +1030,153 @@ def _emit_nested_table_fields(
     inside the merged cell, and emit fields for empty value cells.
     """
     cell_bbox = merged_cell.bbox
-    # Inner H lines within (or on the bottom edge of) the cell.
-    inner_h = [
-        h for h in geom.h_lines
-        if cell_bbox.y < h.y < cell_bbox.y1
-        and h.x0 >= cell_bbox.x - 4
-        and h.x1 <= cell_bbox.x1 + 4
-    ]
-    if len(inner_h) < 2:
-        return [], next_table_id
-
-    # Inner V lines that span a substantial fraction of the cell — i.e.
-    # the inset sub-table's outer edges plus its column divider(s).
-    inner_v = [
+    # Collect every V line inside (or touching the boundary of) the
+    # merged cell. We deliberately drop the old 40%-of-parent-height
+    # threshold here because a merged Instructions cell can host
+    # *multiple* sub-tables stacked vertically (e.g., a "Target weight
+    # required" 2-col block followed by a "Tare / Gross / Net /
+    # Meets Criterion?" 4-col block at the bottom). Each cluster of
+    # V lines that share a y-range marks one sub-grid.
+    all_inner_v = [
         v for v in geom.v_lines
         if cell_bbox.x - 4 <= v.x <= cell_bbox.x1 + 4
         and v.y0 >= cell_bbox.y - 4
         and v.y1 <= cell_bbox.y1 + 4
-        and (v.y1 - v.y0) >= cell_bbox.h * 0.4
+        and (v.y1 - v.y0) >= 18.0  # discard tiny stubs that aren't column edges
     ]
-    if len(inner_v) < 2:
+    if len(all_inner_v) < 2:
         return [], next_table_id
 
-    # The sub-table's last row often closes on the merged cell's outer
-    # bottom border, which doesn't appear in `inner_h` because its
-    # x-range extends past the inner sub-table. Synthesise it from the
-    # inner V extents so the final row isn't lost.
-    sub_x_min = min(v.x for v in inner_v)
-    sub_x_max = max(v.x for v in inner_v)
-    synth_bottom = HLine(x0=sub_x_min, x1=sub_x_max, y=cell_bbox.y1)
-    inner_h = inner_h + [synth_bottom]
-
-    sub_table = _build_single_grid(inner_h, inner_v, table_id=next_table_id)
-    if sub_table is None or len(sub_table.cells) < 2:
-        return [], next_table_id
-
-    sub_texts = {
-        (c.row, c.col): _cell_text(c, geom.words) for c in sub_table.cells
-    }
-    out: list[Suggestion] = []
-    for c in sub_table.cells:
-        # Skip the sub-table's narrow seam cells (typical of inset
-        # borders that bracket the real cell content).
-        if c.bbox.h < 10.0 or c.bbox.w < 16.0:
-            continue
-        text = sub_texts[(c.row, c.col)]
-        words_in_cell = _words_in(geom.words, c.bbox, inset=0.5)
-        role = _cell_role(text, words_in_cell)
-        if role == "label":
-            continue
-        # Label = leftmost cell in this sub-row with text.
-        label = ""
-        for cc in range(0, c.col):
-            txt = sub_texts.get((c.row, cc), "")
-            if _label_has_data(txt):
-                label = _clean_label(txt)
+    # Cluster V lines by their (y0, y1) range — tolerant of small
+    # baseline jitter.
+    v_clusters: list[list[VLine]] = []
+    Y_TOL = 4.0
+    for v in sorted(all_inner_v, key=lambda v: (v.y0, v.x)):
+        placed = False
+        for cluster in v_clusters:
+            ref = cluster[0]
+            if abs(v.y0 - ref.y0) <= Y_TOL and abs(v.y1 - ref.y1) <= Y_TOL:
+                cluster.append(v)
+                placed = True
                 break
-        if not _label_has_data(label):
+        if not placed:
+            v_clusters.append([v])
+
+    out: list[Suggestion] = []
+    sub_table_for_cell: dict[int, Table] = {}
+    sub_texts_for_table: dict[int, dict[tuple[int, int], str]] = {}
+
+    for cluster in v_clusters:
+        # Need at least 3 V lines to form a 2-column sub-grid (left
+        # border + 1 inner divider + right border). Two V lines alone
+        # is just the parent column's edges, not an inner sub-table.
+        if len(cluster) < 3:
+            continue
+        cluster_y0 = min(v.y0 for v in cluster)
+        cluster_y1 = max(v.y1 for v in cluster)
+        cluster_x0 = min(v.x for v in cluster)
+        cluster_x1 = max(v.x for v in cluster)
+
+        cluster_h = [
+            h for h in geom.h_lines
+            if cluster_y0 - 2.0 <= h.y <= cluster_y1 + 2.0
+            and h.x0 >= cluster_x0 - 6.0
+            and h.x1 <= cluster_x1 + 6.0
+        ]
+
+        # Synthesise the bottom rule when the sub-table's bottom is
+        # shared with the merged cell's bottom border (or just below an
+        # H line we already collected). Without this, the last row of
+        # the inner grid never closes.
+        has_bottom = any(abs(h.y - cluster_y1) <= 2.0 for h in cluster_h)
+        if not has_bottom:
+            cluster_h.append(HLine(x0=cluster_x0, x1=cluster_x1, y=cluster_y1))
+        has_top = any(abs(h.y - cluster_y0) <= 2.0 for h in cluster_h)
+        if not has_top:
+            cluster_h.append(HLine(x0=cluster_x0, x1=cluster_x1, y=cluster_y0))
+
+        if len(cluster_h) < 2:
             continue
 
-        if role == "checkbox":
-            kind = "nested_cell_checkbox"
-            ftype = "checkbox"
-        else:
-            kind = "nested_cell_input"
-            ftype = classify_field_type(label, keyword_map)
-
-        # Inherit the outer step's identifier so the same nested label
-        # repeated across many steps (e.g., "Balance ID", "Vessel ID")
-        # disambiguates by step instead of "(page N)".
-        step_row_id = _step_label_at(
-            step_index or [], c.bbox.y + c.bbox.h / 2,
+        sub_table = _build_single_grid(
+            cluster_h, cluster, table_id=next_table_id,
         )
-        out.append(Suggestion(
-            page=geom.page_num,
-            kind=kind,
-            field_type=ftype,
-            x=c.bbox.x,
-            y=c.bbox.y,
-            width=c.bbox.w,
-            height=c.bbox.h,
-            label_text=label,
-            confidence=0.7,
-            from_cell=True,
-            table_id=sub_table.id,
-            cell_row=c.row,
-            cell_col=c.col,
-            label_confidence=0.7,
-            row_id=step_row_id,
-        ))
-        if debug_records is not None:
-            debug_records.append({
-                "stage": "nested_cell",
-                "tableId": sub_table.id,
-                "row": c.row, "col": c.col,
-                "decision": "input",
-                "label": label,
-                "fieldType": ftype,
-            })
-    return out, next_table_id + 1
+        if sub_table is None or len(sub_table.cells) < 2:
+            continue
+        next_table_id += 1
+
+        sub_texts = {
+            (c.row, c.col): _cell_text(c, geom.words) for c in sub_table.cells
+        }
+        sub_table_for_cell[sub_table.id] = sub_table
+        sub_texts_for_table[sub_table.id] = sub_texts
+        for c in sub_table.cells:
+            # Skip the sub-table's narrow seam cells (typical of inset
+            # borders that bracket the real cell content).
+            if c.bbox.h < 10.0 or c.bbox.w < 16.0:
+                continue
+            text = sub_texts[(c.row, c.col)]
+            words_in_cell = _words_in(geom.words, c.bbox, inset=0.5)
+            role = _cell_role(text, words_in_cell)
+            if role == "label":
+                continue
+            # Label = leftmost cell in this sub-row with text. Fall back
+            # to the cell directly above (row 0, same column) so a
+            # column-header style sub-grid (Tare/Gross/Net/Meets
+            # Criterion?) emits something meaningful for the data row.
+            label = ""
+            for cc in range(0, c.col):
+                txt = sub_texts.get((c.row, cc), "")
+                if _label_has_data(txt):
+                    label = _clean_label(txt)
+                    break
+            if not _label_has_data(label) and c.row > 0:
+                hdr = sub_texts.get((0, c.col), "")
+                if _label_has_data(hdr):
+                    label = _clean_label(hdr)
+            if not _label_has_data(label):
+                continue
+
+            if role == "checkbox":
+                kind = "nested_cell_checkbox"
+                ftype = "checkbox"
+            else:
+                kind = "nested_cell_input"
+                ftype = classify_field_type(label, keyword_map)
+
+            # Inherit the outer step's identifier so the same nested
+            # label repeated across many steps (e.g., "Balance ID",
+            # "Vessel ID") disambiguates by step instead of "(page N)".
+            step_row_id = _step_label_at(
+                step_index or [], c.bbox.y + c.bbox.h / 2,
+            )
+            out.append(Suggestion(
+                page=geom.page_num,
+                kind=kind,
+                field_type=ftype,
+                x=c.bbox.x,
+                y=c.bbox.y,
+                width=c.bbox.w,
+                height=c.bbox.h,
+                label_text=label,
+                confidence=0.7,
+                from_cell=True,
+                table_id=sub_table.id,
+                cell_row=c.row,
+                cell_col=c.col,
+                label_confidence=0.7,
+                row_id=step_row_id,
+            ))
+            if debug_records is not None:
+                debug_records.append({
+                    "stage": "nested_cell",
+                    "tableId": sub_table.id,
+                    "row": c.row, "col": c.col,
+                    "decision": "input",
+                    "label": label,
+                    "fieldType": ftype,
+                })
+    return out, next_table_id
 
 
 def _emit_from_underline(
@@ -1791,6 +1848,16 @@ def emit_page_fields(
             text = cell_texts[(cell.row, cell.col)]
             words_in_cell = _words_in(words, cell.bbox, inset=0.5)
             role = _cell_role(text, words_in_cell)
+
+            # A merged container cell that *contains* a nested sub-grid
+            # with a Yes/No question (e.g., "Tare / Gross / Net / Meets
+            # Criterion?  Yes / No" at the bottom of a step's
+            # Instructions cell) reads as a checkbox prompt at the top
+            # level — but the actual checkbox lives in the inner row.
+            # Re-route to the label branch so nested-table emission
+            # runs and produces the per-row fields.
+            if role == "checkbox" and (cell.row_span > 1 or cell.col_span > 1):
+                role = "label"
 
             if role == "label":
                 if debug_records is not None:

@@ -726,6 +726,69 @@ class TestBatchRecordFixtureTests(unittest.TestCase):
             )
 
 
+class StackedNestedSubGridTests(unittest.TestCase):
+    """A merged step-Instructions cell can host multiple sub-tables
+    stacked vertically. The bottom sub-table often shares its bottom
+    border with the parent cell — and its V-lines span only a small
+    fraction of the parent's height — so the previous "single sub-grid
+    per merged cell" path missed it entirely.
+
+    Concrete real-world example: COVID-2LYO p35/p36 step 11.5.2 where
+    a 4-column Tare weight / Gross weight / Net Weight / Meets
+    Criterion? grid sits flush at the bottom of the Instructions cell.
+    """
+
+    def test_two_stacked_sub_grids_in_one_merged_cell(self) -> None:
+        doc, page = _new_page(width=612.0, height=792.0)
+        # Outer Step|Instructions|Signature: 3 cols, 3 rows.
+        # Step | Instructions (merged 1-row, but a tall cell) | Signature
+        out_y0 = 100.0
+        out_y1 = 460.0
+        _draw_rect(page, 60, out_y0, 540, out_y1)
+        _draw_line(page, 120, out_y0, 120, out_y1)  # Step | Instructions
+        _draw_line(page, 470, out_y0, 470, out_y1)  # Instructions | Signature
+        _draw_line(page, 60, 130, 540, 130)  # below outer header row
+        _put_text(page, 70, 120, "Step")
+        _put_text(page, 250, 120, "Instructions")
+        _put_text(page, 480, 120, "Signature")
+
+        # First inner sub-grid: 2-col "Target weight | Balance ID"
+        # placed near the top of the merged Instructions cell.
+        sub1_y0, sub1_y1 = 160.0, 240.0
+        _draw_line(page, 140, sub1_y0, 140, sub1_y1)  # left
+        _draw_line(page, 260, sub1_y0, 260, sub1_y1)  # divider
+        _draw_line(page, 440, sub1_y0, 440, sub1_y1)  # right
+        _draw_line(page, 140, sub1_y0, 440, sub1_y0)  # top
+        _draw_line(page, 140, 200, 440, 200)  # mid
+        _draw_line(page, 140, sub1_y1, 440, sub1_y1)  # bottom
+        _put_text(page, 150, sub1_y0 + 20, "Target weight")
+        _put_text(page, 270, sub1_y0 + 20, "Balance ID")
+
+        # Second inner sub-grid: 4-col Tare / Gross / Net / Meets at the
+        # very bottom — its BOTTOM RULE IS THE PARENT'S BOTTOM border
+        # (no explicit H line drawn at sub2_y1).
+        sub2_y0 = 380.0
+        sub2_y1 = out_y1  # ← shared with parent's bottom border
+        for x in (140, 220, 300, 380, 440):
+            _draw_line(page, x, sub2_y0, x, sub2_y1)
+        _draw_line(page, 140, sub2_y0, 440, sub2_y0)  # top
+        _draw_line(page, 140, 420, 440, 420)  # mid (between header and data row)
+        _put_text(page, 150, sub2_y0 + 20, "Tare weight")
+        _put_text(page, 230, sub2_y0 + 20, "Gross weight")
+        _put_text(page, 310, sub2_y0 + 20, "Net Weight")
+        _put_text(page, 390, sub2_y0 + 20, "Meets?")
+
+        res = _detect(doc)
+        labels = [s["labelText"] for s in res["suggestions"]]
+        # Both sub-grid columns must produce a field.
+        for want in ("Target weight", "Balance ID", "Tare weight",
+                     "Gross weight", "Net Weight", "Meets?"):
+            self.assertTrue(
+                any(want in l for l in labels),
+                f"missing column {want!r} in {labels}",
+            )
+
+
 class TallEmptyColumnSplitTests(unittest.TestCase):
     """A tall, empty merged cell that spans many rows of other columns
     must be virtually split so each donor row gets its own field.
