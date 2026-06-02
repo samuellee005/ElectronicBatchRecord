@@ -224,6 +224,15 @@ def _is_informational_table(
     The cell-role check filters underscore fillers, so a cell whose only
     content is `____` still counts as empty.
     """
+    # A cell merged across >2 rows or >2 columns is a "container" — it
+    # likely wraps a nested label/value sub-grid (Step|Instructions
+    # |Signature pages). Reference / TOC tables are uniform grids
+    # without such large merges, so the presence of one is a strong
+    # signal that this is a form, not static content.
+    for cell in table.cells:
+        if cell.row_span > 2 or cell.col_span > 2:
+            return False
+
     label_cells: set[tuple[int, int]] = set()
     input_cells: set[tuple[int, int]] = set()
     for cell in table.cells:
