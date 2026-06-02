@@ -415,6 +415,28 @@ class YesNoCheckboxTests(unittest.TestCase):
         self.assertEqual(s["fieldType"], "checkbox")
         self.assertIn("Approved", s["labelText"])
 
+    def test_wrapped_question_with_trailing_yes_no_is_checkbox(self) -> None:
+        """A real-world cell can wrap a question across multiple lines
+        and end with the Yes/No prompt. The previous 4-word cap
+        rejected such cells; we now accept them when they contain a
+        literal "?" and the binary pair sits in the trailing portion.
+        """
+        self.assertTrue(fields._is_checkbox_prompt(
+            "Storage time at 2-8 °C < 48 hours? Yes / No"
+        ))
+        self.assertTrue(fields._is_checkbox_prompt(
+            "Is mRNA solution completely thawed? "
+            "If yes, keep at 2-8ºC until use. "
+            "If no, store at ambient temperature (18-25ºC). Yes / No"
+        ))
+        # Long descriptive paragraph that incidentally mentions yes/no
+        # in its body — still NOT a checkbox prompt.
+        self.assertFalse(fields._is_checkbox_prompt(
+            "Yes the operator confirms that the procedure was followed. "
+            "No abnormalities were observed during the manufacturing run "
+            "and no deviations were reported by the supervisor."
+        ))
+
     def test_normal_yes_in_long_sentence_is_not_checkbox_prompt(self) -> None:
         from app import fields as F
         self.assertFalse(F._is_checkbox_prompt("Yes the operator confirmed the lot"))

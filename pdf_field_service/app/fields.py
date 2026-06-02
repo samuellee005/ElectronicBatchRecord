@@ -196,6 +196,23 @@ def _is_checkbox_prompt(text: str) -> bool:
         return False
     word_count = len(re.findall(r"[A-Za-z]+", cleaned))
     if word_count > 4:
+        # A long cell is still a checkbox prompt when it asks a question
+        # whose binary answer trails the text — e.g.
+        # "Storage time at 2-8 °C < 48 hours? Yes / No" or
+        # "Is mRNA solution completely thawed? … Yes / No".
+        # We require a literal "?" anywhere in the cell AND both poles
+        # of a binary pair in the trailing portion, so a long
+        # descriptive sentence that incidentally mentions "yes" or "no"
+        # won't trip the rule.
+        if "?" not in cleaned:
+            return False
+        tail = cleaned[-60:]
+        tail_tokens = {
+            m.group(0).lower()
+            for m in _CHECKBOX_TOKEN_RE.finditer(tail)
+        }
+        if {"yes", "no"} <= tail_tokens or {"pass", "fail"} <= tail_tokens:
+            return True
         return False
     tokens = {m.group(0).lower() for m in _CHECKBOX_TOKEN_RE.finditer(cleaned)}
     if not tokens:
