@@ -726,6 +726,64 @@ class TestBatchRecordFixtureTests(unittest.TestCase):
             )
 
 
+class BlankUnitInputScannerTests(unittest.TestCase):
+    """ARCT-032 batch records render calculation slots as plain
+    whitespace followed by a unit token (`        mg`, `=          mL`)
+    with no underscore characters. The scanner must:
+
+      * detect each such slot in an equation context (multiple unit
+        tokens stacked nearby), and
+      * NOT spawn fields from random short-word "units" that happen to
+        sit alone on a page header line.
+    """
+
+    def test_blank_then_mg_is_detected_in_equation_context(self) -> None:
+        words = [
+            # Three "mg" tokens stacked across a + ... = layout.
+            (200.0, 100.0, 215.0, 112.0, "mg"),
+            (160.0, 120.0, 168.0, 132.0, "+"),
+            (300.0, 120.0, 315.0, 132.0, "mg"),
+            (380.0, 120.0, 388.0, 132.0, "="),
+            (500.0, 120.0, 515.0, 132.0, "mg"),
+        ]
+        slots = fields._scan_blank_unit_inputs(words)
+        self.assertEqual(
+            len(slots), 3,
+            f"expected 3 blank+mg slots, got {len(slots)}: {slots}",
+        )
+
+    def test_isolated_unit_in_header_text_is_ignored(self) -> None:
+        """A single short word that *looks* like a unit but sits alone
+        on a page-header band (no other unit tokens nearby) must NOT
+        spawn a slot."""
+        words = [
+            (60.0, 36.0, 100.0, 48.0, "Title:"),
+            (110.0, 36.0, 130.0, 48.0, "mg"),  # accidental "mg" in the title
+        ]
+        slots = fields._scan_blank_unit_inputs(words)
+        self.assertEqual(slots, [])
+
+    def test_underscore_filler_to_left_skipped(self) -> None:
+        """When the explicit underscore scanner already covers a slot
+        (e.g., `________ mg`), the blank+unit scanner stays out of it.
+        """
+        words = [
+            (100.0, 100.0, 200.0, 112.0, "________"),
+            (210.0, 100.0, 225.0, 112.0, "mg"),
+            (300.0, 100.0, 315.0, 112.0, "mg"),  # second mg makes the equation context
+            (250.0, 100.0, 260.0, 112.0, "="),
+        ]
+        slots = fields._scan_blank_unit_inputs(words)
+        # The mg next to the underscores is owned by the underscore
+        # scanner; the second mg may or may not produce a slot here,
+        # but the first one shouldn't.
+        for s in slots:
+            self.assertGreater(
+                s["rect"].x, 200.0,
+                f"slot leaked into underscore territory: {s}",
+            )
+
+
 class StackedNestedSubGridTests(unittest.TestCase):
     """A merged step-Instructions cell can host multiple sub-tables
     stacked vertically. The bottom sub-table often shares its bottom

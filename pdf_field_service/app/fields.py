@@ -717,6 +717,126 @@ def _scan_underscore_inputs(
     return out
 
 
+# Strict list of measurement units that can mark an empty-space input
+# slot on its left. Any short word matching `_is_unit_suffix` is too
+# permissive — page-header tokens like "ID" or "RNA" would falsely
+# trigger. Match case-insensitively at the call site.
+_KNOWN_BLANK_UNIT_TOKENS = frozenset({
+    "mg", "ml", "g", "kg", "μl", "ul", "l",
+    "mg/ml", "g/ml", "ml/min", "g/min",
+    "°c", "°f", "ºc", "ºf",
+    "%", "psi", "bar", "rpm", "ppm",
+    "μm", "um", "nm", "cm", "mm",
+    "mmol/kg", "mosm/kg",
+    "min", "hr", "hour", "s", "sec",
+})
+
+_ARITH_OPERATORS = frozenset({"+", "-", "=", "/", "x", "X", "*", "÷"})
+
+
+def _scan_blank_unit_inputs(
+    words: list[tuple[float, float, float, float, str]],
+    min_gap: float = 28.0,
+    max_gap: float = 260.0,
+    baseline_tol: float = 4.0,
+    equation_y_window: float = 30.0,
+) -> list[dict[str, Any]]:
+    """Find input slots rendered as plain whitespace followed by a unit
+    token (`        mg`, `=                  ml`).
+
+    ARCT-032 batch records render calculation slots this way — there is
+    no underscore character in the PDF text, only spacing. We detect
+    each *known* measurement-unit token whose same-baseline strip to the
+    left is empty for at least ``min_gap`` points and which sits in
+    an equation context, then turn the gap into an input slot.
+
+    "Equation context" means at least one OTHER known-unit token sits
+    within ``equation_y_window`` points vertically on the page (e.g.,
+    three `mg` tokens stacked across an `A + B = C` layout). Without
+    this guard a stray unit-like word in a page header would falsely
+    spawn a slot.
+
+    A neighbouring underscore-filler word means the explicit underscore
+    scanner already owns the slot — we leave it alone to avoid
+    double-emitting.
+    """
+    candidates: list[tuple[float, float, float, float, str]] = [
+        w for w in words if w[4].strip().lower() in _KNOWN_BLANK_UNIT_TOKENS
+    ]
+    if len(candidates) < 2:
+        return []
+    # Pre-compute y-centres for the equation-context check.
+    cand_ycs = [
+        ((c[1] + c[3]) / 2, c) for c in candidates
+    ]
+
+    out: list[dict[str, Any]] = []
+    for unit_x0, unit_y0, unit_x1, unit_y1, ut in candidates:
+        baseline_cy = (unit_y0 + unit_y1) / 2
+
+        # Equation context: at least one *other* known unit token within
+        # the y window.
+        has_neighbour = False
+        for other_cy, other in cand_ycs:
+            if other is (unit_x0, unit_y0, unit_x1, unit_y1, ut):
+                continue
+            if other == (unit_x0, unit_y0, unit_x1, unit_y1, ut):
+                continue
+            if abs(other_cy - baseline_cy) <= equation_y_window:
+                has_neighbour = True
+                break
+        if not has_neighbour:
+            continue
+
+        # Find the rightmost word to the left on the same baseline.
+        nearest_left_x1 = unit_x0 - max_gap
+        nearest_left_token: str = ""
+        for ox0, oy0, ox1, oy1, ot in words:
+            if (ox0, oy0, ox1, oy1, ot) == (
+                unit_x0, unit_y0, unit_x1, unit_y1, ut
+            ):
+                continue
+            ocy = (oy0 + oy1) / 2
+            if abs(ocy - baseline_cy) > baseline_tol:
+                continue
+            if ox1 > unit_x0:
+                continue
+            if ox1 > nearest_left_x1:
+                nearest_left_x1 = ox1
+                nearest_left_token = ot.strip()
+        # Underscore-filler on the left → existing scanner owns it.
+        if _is_underscore_filler(nearest_left_token):
+            continue
+        # When a word *is* found within the search strip, only accept
+        # it as a slot boundary if it's an arithmetic operator or a
+        # short numeric (e.g., "0.99") — long words to the left mean
+        # the unit is part of running text, not an equation.
+        if nearest_left_token:
+            cleaned = re.sub(r"[\s.,;:]", "", nearest_left_token)
+            is_operator = cleaned in _ARITH_OPERATORS
+            is_short_numeric = bool(re.fullmatch(r"[\d.]{1,6}", cleaned))
+            is_other_unit = cleaned.lower() in _KNOWN_BLANK_UNIT_TOKENS
+            if not (is_operator or is_short_numeric or is_other_unit):
+                continue
+        gap = unit_x0 - nearest_left_x1
+        if gap < min_gap:
+            continue
+        slot_x0 = nearest_left_x1
+        slot_rect = Rect(
+            x=slot_x0,
+            y=unit_y0,
+            w=max(8.0, gap),
+            h=max(2.0, unit_y1 - unit_y0),
+        )
+        out.append({
+            "rect": slot_rect,
+            "baseline_y": unit_y1,
+            "suffix": ut.strip(),
+            "orig": ut,
+        })
+    return out
+
+
 def _find_underscore_label(
     input_rect: Rect,
     words: list[tuple[float, float, float, float, str]],
@@ -859,6 +979,9 @@ def _emit_underscore_inputs(
     """
     out: list[Suggestion] = []
     inputs = _scan_underscore_inputs(geom.words)
+    # Also pick up "blank space + unit suffix" slots (ARCT-032 style
+    # calculation rows that lack underscores entirely).
+    inputs.extend(_scan_blank_unit_inputs(geom.words))
     if not inputs:
         return out
 
