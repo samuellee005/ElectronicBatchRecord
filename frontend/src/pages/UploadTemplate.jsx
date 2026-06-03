@@ -8,6 +8,7 @@ import {
 } from '../api/client'
 import FieldPreview from '../components/forms/FieldPreview'
 import PdfViewer from '../components/PdfViewer'
+import PdfPageScrubber from '../components/PdfPageScrubber'
 import {
   suggestionsToFormFields,
   buildFieldFromSuggestion,
@@ -33,6 +34,8 @@ export default function UploadTemplate() {
   const [enabledIds, setEnabledIds] = useState(() => new Set())
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 })
   const [currentPage, setCurrentPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(0)
+  const pdfRef = useRef(null)
   const [uploadedFilename, setUploadedFilename] = useState(null)
   const [detectDebugEnabled, setDetectDebugEnabled] = useState(false)
   const fileBufferRef = useRef(null)
@@ -294,9 +297,16 @@ export default function UploadTemplate() {
     }
   }, [suggestions])
 
-  const onPageRendered = useCallback(({ page, width, height }) => {
+  const onPageRendered = useCallback(({ page, totalPages: total, width, height }) => {
     setCurrentPage(page)
+    if (typeof total === 'number' && total > 0) setTotalPages(total)
     setCanvasSize({ width, height })
+  }, [])
+
+  const goToPdfPage = useCallback((page) => {
+    const api = pdfRef.current
+    if (!api?.goToPage) return
+    api.goToPage(page)
   }, [])
 
   return (
@@ -427,10 +437,21 @@ export default function UploadTemplate() {
           <div className="upload-preview-layout">
             <div className="upload-preview-pdf">
               <PdfViewer
+                ref={pdfRef}
                 pdfUrl={pdfUrl}
                 scale={DESIGN_SCALE}
                 onPageRendered={onPageRendered}
                 hidePagination={false}
+                paginationPosition="both"
+                paginationScrubber={
+                  totalPages > 1 ? (
+                    <PdfPageScrubber
+                      currentPage={currentPage}
+                      totalPages={totalPages}
+                      onGoToPage={goToPdfPage}
+                    />
+                  ) : undefined
+                }
               >
                 {canvasSize.width > 0 &&
                   suggestions

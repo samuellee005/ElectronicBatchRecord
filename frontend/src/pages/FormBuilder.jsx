@@ -2171,9 +2171,13 @@ export default function FormBuilder() {
                   onMouseDown={(e) => handleFieldMouseDown(e, field)}
                   onResizeMouseDown={(e) => handleResizeMouseDown(e, field)}
                   onDelete={() => deleteField(field.id)}
+                  // Selection happens in `handleFieldMouseDown` — the
+                  // onClick handler only stops propagation so the
+                  // canvas overlay's deselect doesn't fire. Calling
+                  // handleFieldSelect here would double-toggle on
+                  // shift+click (mousedown adds, click removes).
                   onClick={(e) => {
                     e.stopPropagation()
-                    handleFieldSelect(field.id, e)
                   }}
                 />
               ))}
