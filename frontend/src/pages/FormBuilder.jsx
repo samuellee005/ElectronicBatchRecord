@@ -729,7 +729,18 @@ export default function FormBuilder() {
   const pendingFieldScrollToRef = useRef(null)
 
   const [fields, setFields] = useState([])
-  const [selectedFieldId, setSelectedFieldId] = useState(null)
+  // Multi-select: a Set of field IDs. Single-selection workflows still
+  // work — derive `selectedFieldId` below as the lone selected id when
+  // exactly one is in the set, else null.
+  const [selectedFieldIds, setSelectedFieldIds] = useState(() => new Set())
+  // Clipboard for copy/paste across pages. Stash both the captured
+  // snapshot of fields and the count so the paste button stays in sync.
+  const clipboardFieldsRef = useRef([])
+  const [clipboardCount, setClipboardCount] = useState(0)
+  const [showPasteModal, setShowPasteModal] = useState(false)
+  const [pasteTargetPages, setPasteTargetPages] = useState(() => new Set())
+  const [copyToastVisible, setCopyToastVisible] = useState(false)
+  const copyToastTimerRef = useRef(null)
   const [scale, setScale] = useState(1.5)
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(0)
@@ -775,9 +786,39 @@ export default function FormBuilder() {
   // Position guidelines (dragged field edges for ruler alignment)
   const [positionGuides, setPositionGuides] = useState(null)
 
+  const selectedFieldId = useMemo(
+    () => (selectedFieldIds.size === 1 ? Array.from(selectedFieldIds)[0] : null),
+    [selectedFieldIds],
+  )
   const selectedField = useMemo(
     () => fields.find((f) => f.id === selectedFieldId) || null,
     [fields, selectedFieldId],
+  )
+
+  // Replace the current selection with a single id (or clear when null).
+  const selectSingle = useCallback((id) => {
+    setSelectedFieldIds(id == null ? new Set() : new Set([id]))
+  }, [])
+  // Add / remove a single id without affecting the rest of the set.
+  const toggleSelect = useCallback((id) => {
+    if (id == null) return
+    setSelectedFieldIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
+  // Replacement for the old `setSelectedFieldId(field.id)` calls — the
+  // first arg is the id (or null), the second is the source event so we
+  // can branch on shift / cmd / ctrl modifiers.
+  const handleFieldSelect = useCallback(
+    (id, ev) => {
+      const isMulti = !!ev && (ev.shiftKey || ev.metaKey || ev.ctrlKey)
+      if (isMulti) toggleSelect(id)
+      else selectSingle(id)
+    },
+    [selectSingle, toggleSelect],
   )
 
   useEffect(() => {
@@ -1012,7 +1053,7 @@ export default function FormBuilder() {
   const focusFieldOnCanvas = useCallback(
     (field) => {
       if (!field) return
-      setSelectedFieldId(field.id)
+      selectSingle(field.id)
       const p = field.page || 1
       if (p !== currentPage) {
         pendingFieldScrollToRef.current = field.id
@@ -1029,7 +1070,7 @@ export default function FormBuilder() {
         })
       }
     },
-    [currentPage, goToPdfPage],
+    [currentPage, goToPdfPage, selectSingle],
   )
 
   // Zoom handlers
@@ -1046,15 +1087,44 @@ export default function FormBuilder() {
       }
       if (e.key === 'Escape') {
         if (showSaveModal) setShowSaveModal(false)
+        if (showPasteModal) setShowPasteModal(false)
       }
-      if (e.key === 'Delete' && selectedFieldId) {
-        setFields((prev) => normalizeFieldGroupOrder(prev.filter((f) => f.id !== selectedFieldId)))
-        setSelectedFieldId(null)
+      if (e.key === 'Delete' && selectedFieldIds.size > 0) {
+        const toRemove = new Set(selectedFieldIds)
+        setFields((prev) => normalizeFieldGroupOrder(prev.filter((f) => !toRemove.has(f.id))))
+        setSelectedFieldIds(new Set())
+      }
+      // Cmd/Ctrl + C copies the currently-selected fields onto an
+      // in-app clipboard. Ignored when the user is typing in an input
+      // (let the browser's own copy work for text).
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'C')) {
+        const tag = e.target?.tagName
+        const editing =
+          tag === 'INPUT' ||
+          tag === 'TEXTAREA' ||
+          e.target?.isContentEditable
+        if (editing) return
+        if (selectedFieldIds.size === 0) return
+        const snapshot = fields
+          .filter((f) => selectedFieldIds.has(f.id))
+          .map((f) => JSON.parse(JSON.stringify(f)))
+        if (snapshot.length === 0) return
+        clipboardFieldsRef.current = snapshot
+        setClipboardCount(snapshot.length)
+        setCopyToastVisible(true)
+        if (copyToastTimerRef.current) {
+          clearTimeout(copyToastTimerRef.current)
+        }
+        copyToastTimerRef.current = setTimeout(() => {
+          setCopyToastVisible(false)
+          copyToastTimerRef.current = null
+        }, 1800)
+        e.preventDefault()
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [showSaveModal, selectedFieldId])
+  }, [showSaveModal, showPasteModal, selectedFieldIds, fields])
 
   // Ctrl+scroll zoom on canvas
   const handleCanvasWheel = useCallback((e) => {
@@ -1107,8 +1177,8 @@ export default function FormBuilder() {
         .reduce((m, f) => Math.max(m, Number(f.orderInGroup) || 0), 0)
       return [...prev, { ...newField, orderInGroup: maxO + 1 }]
     })
-    setSelectedFieldId(newField.id)
-  }, [canvasSize, scale])
+    selectSingle(newField.id)
+  }, [canvasSize, scale, selectSingle])
 
   const updateField = useCallback((id, updates) => {
     setFields((prev) => {
@@ -1127,8 +1197,76 @@ export default function FormBuilder() {
 
   const deleteField = useCallback((id) => {
     setFields((prev) => normalizeFieldGroupOrder(prev.filter((f) => f.id !== id)))
-    setSelectedFieldId((prev) => (prev === id ? null : prev))
+    setSelectedFieldIds((prev) => {
+      if (!prev.has(id)) return prev
+      const next = new Set(prev)
+      next.delete(id)
+      return next
+    })
   }, [])
+
+  // Mint a fresh field id with the same shape `addField` uses.
+  const mintFieldId = useCallback(
+    () => 'field_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+    [],
+  )
+
+  const openPasteModal = useCallback(() => {
+    if (clipboardCount === 0) return
+    setPasteTargetPages(new Set([currentPage]))
+    setShowPasteModal(true)
+  }, [clipboardCount, currentPage])
+
+  const togglePasteTargetPage = useCallback((pageNum) => {
+    setPasteTargetPages((prev) => {
+      const next = new Set(prev)
+      if (next.has(pageNum)) next.delete(pageNum)
+      else next.add(pageNum)
+      return next
+    })
+  }, [])
+
+  // Apply the clipboard to one or many target pages. Each clone keeps
+  // the original geometry (x/y/width/height) and properties, but gets
+  // fresh ids so the new fields don't collide with the originals.
+  const pasteFieldsToPages = useCallback(
+    (targetPages) => {
+      const snapshot = clipboardFieldsRef.current
+      if (!snapshot.length || !targetPages.length) return
+      const clones = []
+      for (const target of targetPages) {
+        for (const f of snapshot) {
+          const clone = JSON.parse(JSON.stringify(f))
+          clone.id = mintFieldId()
+          clone.page = target
+          // Tables keep their internal part IDs — those are scoped to
+          // the field instance and won't collide with sibling fields
+          // because the parent field id is fresh.
+          clones.push(clone)
+        }
+      }
+      if (!clones.length) return
+      setFields((prev) => {
+        const maxO = prev
+          .filter((f) => !f.stageInProcess?.trim())
+          .reduce((m, f) => Math.max(m, Number(f.orderInGroup) || 0), 0)
+        const stamped = clones.map((c, i) => ({
+          ...c,
+          orderInGroup: maxO + 1 + i,
+        }))
+        return normalizeFieldGroupOrder([...prev, ...stamped])
+      })
+      // Select the newly-pasted set on the *current* page (if it was a
+      // target) so the user has immediate visual feedback.
+      if (targetPages.includes(currentPage)) {
+        const idsOnCurrent = clones
+          .filter((c) => c.page === currentPage)
+          .map((c) => c.id)
+        setSelectedFieldIds(new Set(idsOnCurrent))
+      }
+    },
+    [currentPage, mintFieldId],
+  )
 
   // -- Snap logic --
 
@@ -1379,12 +1517,14 @@ export default function FormBuilder() {
       offsetX: e.clientX - fieldRect.left,
       offsetY: e.clientY - fieldRect.top,
     }
-    setSelectedFieldId(field.id)
+    // Shift/Cmd/Ctrl + click toggles in the multi-select set; plain
+    // click replaces the selection with this field.
+    handleFieldSelect(field.id, e)
   }
 
   const handleResizeMouseDown = (e, field) => {
     e.stopPropagation()
-    setSelectedFieldId(field.id)
+    selectSingle(field.id)
     resizeState.current = {
       active: true,
       fieldId: field.id,
@@ -1398,7 +1538,7 @@ export default function FormBuilder() {
   // Click overlay background to deselect
   const handleOverlayClick = (e) => {
     if (e.target === overlayRef.current) {
-      setSelectedFieldId(null)
+      selectSingle(null)
     }
   }
 
@@ -1583,6 +1723,21 @@ export default function FormBuilder() {
       <div className="fb-header">
         <h1>Form Builder</h1>
         <div className="fb-header-actions">
+          {selectedFieldIds.size > 1 && (
+            <span className="fb-selection-count" title="Selected fields">
+              {selectedFieldIds.size} selected
+            </span>
+          )}
+          {clipboardCount > 0 && (
+            <button
+              type="button"
+              className="fb-btn fb-btn-ghost"
+              onClick={openPasteModal}
+              title="Paste copied fields onto one or more pages"
+            >
+              Paste {clipboardCount} field{clipboardCount === 1 ? '' : 's'}…
+            </button>
+          )}
           <button className="fb-btn fb-btn-success" onClick={openSaveModal}>
             Save Form
           </button>
@@ -1591,6 +1746,11 @@ export default function FormBuilder() {
           </Link>
         </div>
       </div>
+      {copyToastVisible && (
+        <div className="fb-copy-toast" role="status" aria-live="polite">
+          Copied {clipboardCount} field{clipboardCount === 1 ? '' : 's'}
+        </div>
+      )}
 
       <div className="fb-main">
         {/* Components Panel - collapsible; vertical toggle on right edge */}
@@ -2005,7 +2165,7 @@ export default function FormBuilder() {
                 <FormField
                   key={field.id}
                   field={field}
-                  selected={selectedFieldId === field.id}
+                  selected={selectedFieldIds.has(field.id)}
                   scaleFactor={scaleFactor}
                   onFieldUpdate={(updates) => updateField(field.id, updates)}
                   onMouseDown={(e) => handleFieldMouseDown(e, field)}
@@ -2013,7 +2173,7 @@ export default function FormBuilder() {
                   onDelete={() => deleteField(field.id)}
                   onClick={(e) => {
                     e.stopPropagation()
-                    setSelectedFieldId(field.id)
+                    handleFieldSelect(field.id, e)
                   }}
                 />
               ))}
@@ -2193,6 +2353,86 @@ export default function FormBuilder() {
       )}
 
       {/* Save Modal */}
+      {showPasteModal && (
+        <div className="fb-modal-backdrop" onClick={() => setShowPasteModal(false)}>
+          <div
+            className="fb-save-modal fb-paste-modal"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              className="fb-modal-close"
+              onClick={() => setShowPasteModal(false)}
+              title="Close"
+            >
+              &times;
+            </button>
+            <h3>Paste to pages</h3>
+            <p className="fb-paste-modal-blurb">
+              {clipboardCount} field{clipboardCount === 1 ? '' : 's'} will be
+              cloned at the same (x, y) on each selected page. Fresh field IDs
+              are minted so the originals stay untouched.
+            </p>
+            <div className="fb-paste-modal-actions">
+              <button
+                type="button"
+                className="fb-btn fb-btn-ghost"
+                onClick={() =>
+                  setPasteTargetPages(
+                    new Set(
+                      Array.from({ length: Math.max(1, totalPages) }, (_, i) => i + 1),
+                    ),
+                  )
+                }
+              >
+                Select all
+              </button>
+              <button
+                type="button"
+                className="fb-btn fb-btn-ghost"
+                onClick={() => setPasteTargetPages(new Set())}
+              >
+                Clear
+              </button>
+            </div>
+            <div className="fb-paste-modal-pages">
+              {Array.from({ length: Math.max(1, totalPages) }, (_, i) => i + 1).map(
+                (p) => (
+                  <label key={p} className="fb-paste-modal-page">
+                    <input
+                      type="checkbox"
+                      checked={pasteTargetPages.has(p)}
+                      onChange={() => togglePasteTargetPage(p)}
+                    />
+                    <span>Page {p}{p === currentPage ? ' (current)' : ''}</span>
+                  </label>
+                ),
+              )}
+            </div>
+            <div className="fb-paste-modal-footer">
+              <button
+                type="button"
+                className="fb-btn fb-btn-ghost"
+                onClick={() => setShowPasteModal(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="fb-btn fb-btn-success"
+                disabled={pasteTargetPages.size === 0}
+                onClick={() => {
+                  pasteFieldsToPages(Array.from(pasteTargetPages).sort((a, b) => a - b))
+                  setShowPasteModal(false)
+                }}
+              >
+                Paste to {pasteTargetPages.size} page
+                {pasteTargetPages.size === 1 ? '' : 's'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showSaveModal && (
         <div className="fb-modal-backdrop" onClick={() => setShowSaveModal(false)}>
           <div className="fb-save-modal" onClick={(e) => e.stopPropagation()}>
