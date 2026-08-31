@@ -62,9 +62,14 @@ function ebr_db_user_fetch_by_username(string $username): ?array
         return null;
     }
     $pdo = ebr_pg_pdo();
+    // db_user can hold more than one row per username (e.g. a stale disabled
+    // duplicate). Without ordering, LIMIT 1 may return the disabled one and
+    // lock out a person whose account is live, so prefer an enabled row.
     $st = $pdo->prepare(
         'SELECT db_user_id, username, password, first_name, last_name, email, disabled
-         FROM db_user WHERE LOWER(username) = LOWER(:u) LIMIT 1'
+         FROM db_user WHERE LOWER(username) = LOWER(:u)
+         ORDER BY (COALESCE(UPPER(TRIM(disabled)), \'N\') = \'Y\'), db_user_id
+         LIMIT 1'
     );
     $st->execute(['u' => $u]);
     $row = $st->fetch(PDO::FETCH_ASSOC);
