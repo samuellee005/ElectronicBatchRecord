@@ -149,6 +149,18 @@ function ebr_pg_connection_params(): array
 }
 
 /**
+ * Human-readable connection target for error messages: "db4 on arcturus.discoverybase.net:5432".
+ * Never includes the password.
+ */
+function ebr_pg_target_label(): string
+{
+    $p = ebr_pg_connection_params();
+    $host = $p['host'] !== '' ? $p['host'] : '(no EBR_PG_HOST)';
+
+    return sprintf('%s on %s:%d', $p['dbname'], $host, $p['port']);
+}
+
+/**
  * Shared PDO instance for PostgreSQL (lazy).
  */
 function ebr_pg_pdo(): PDO

@@ -90,14 +90,21 @@ function handleFileUpload($file) {
         ebr_db_pdf_template_insert('tpl_' . bin2hex(random_bytes(8)), $uniqueName, (string) ($file['name'] ?? ''), $binary);
     } catch (Throwable $e) {
         error_log('ebr_db_pdf_template_insert: ' . $e->getMessage());
-        $hint = '';
         $msg = $e->getMessage();
+        // Name the target first: the usual cause is talking to the wrong database
+        // (EBR_DEPLOYMENT / EBR_PG_DATABASE decide it), not a missing schema.
+        $hint = ' Target: ' . ebr_pg_target_label() . '.';
         if (str_contains($msg, 'ebr_pdf_templates') && str_contains($msg, 'does not exist')) {
-            $hint = ' Run scripts/apply-schema.php (ensure database/schema.sql includes ebr_pdf_templates).';
+            $hint .= ' Table ebr_pdf_templates does not exist there — confirm that is the intended database'
+                . ' before running scripts/apply-schema.php against it.';
         } elseif (str_contains($msg, '23505') || stripos($msg, 'duplicate key') !== false || stripos($msg, 'unique constraint') !== false) {
-            $hint = ' Duplicate filename; try uploading again.';
+            $hint .= ' Duplicate filename; try uploading again.';
         } elseif (str_contains($msg, 'permission denied') || str_contains($msg, 'must be owner')) {
-            $hint = ' Database user may lack INSERT on ebr_pdf_templates.';
+            $hint .= ' Database user may lack INSERT on ebr_pdf_templates.';
+        } elseif (str_contains($msg, '08006') || str_contains($msg, '08001') || stripos($msg, 'timeout expired') !== false
+            || stripos($msg, 'could not connect') !== false || stripos($msg, 'connection refused') !== false
+            || stripos($msg, 'could not translate host name') !== false) {
+            $hint .= ' Could not reach that server — check network/VPN access and EBR_PG_HOST.';
         }
         $show = getenv('EBR_SHOW_UPLOAD_ERRORS');
         if ($show !== false && $show !== '' && strtolower((string) $show) !== '0' && strtolower((string) $show) !== 'false') {
