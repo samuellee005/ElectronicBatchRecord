@@ -1,5 +1,6 @@
 # Postgres credentials live in .env (EBR_PG_HOST/USER/PASSWORD).
-# Dev default: EBR_LOGIN_BYPASS_DB=1 lets any username sign in.
+# Logins are checked against `db_user`; EBR_LOGIN_BYPASS_DB=1 (local only)
+# lets any username sign in without that table.
 services:
   ebr:
     build:
@@ -11,7 +12,11 @@ services:
     env_file:
       - .env
     environment:
-      EBR_LOGIN_BYPASS_DB: "1"
+      # Real logins: users come from the enterprise `db_user` table and the
+      # password is verified against the stored value. Needs
+      # `GRANT SELECT ON public.db_user TO ebr;` on the deployment database.
+      # Local dev has no db_user — docker-compose.local.yml turns bypass back on.
+      EBR_REQUIRE_PASSWORD: "1"
       # Inter-container DNS — reaches pdf-detect over the compose network.
       EBR_PDF_DETECT_URL: "http://pdf-detect:8000"
       # Selects database db4 (see ebr_resolve_pg_database in includes/db.php);

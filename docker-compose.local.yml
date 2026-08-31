@@ -14,6 +14,9 @@
 services:
   ebr:
     environment:
+      # The container Postgres has no `db_user` table, so accept any username
+      # here instead of failing every login. Server deploys keep real auth.
+      EBR_LOGIN_BYPASS_DB: "1"
       # Overrides the .env values loaded by env_file in the base file.
       EBR_PG_HOST: db
       EBR_PG_PORT: "5432"

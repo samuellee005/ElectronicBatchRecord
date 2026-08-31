@@ -19,7 +19,9 @@ function ebr_db_user_is_disabled(array $row): bool
 }
 
 /**
- * Verify password against stored value (bcrypt/argon, MD5 hex, or legacy plain text).
+ * Verify password against stored value (bcrypt/argon, SHA-1 hex, MD5 hex, or
+ * legacy plain text). db4's db_user stores 40-char hex digests for almost every
+ * account, so the SHA-1 branch is the one that carries real logins there.
  */
 function ebr_db_user_verify_password(string $plain, ?string $stored): bool
 {
@@ -33,6 +35,12 @@ function ebr_db_user_verify_password(string $plain, ?string $stored): bool
     // Modern PHP password_hash / crypt hashes
     if (str_starts_with($stored, '$2') || str_starts_with($stored, '$argon')) {
         return password_verify($plain, $stored);
+    }
+    // 40-char hex (SHA-1) — the format used by the enterprise directory
+    if (strlen($stored) === 40 && ctype_xdigit($stored)) {
+        $h = strtolower($stored);
+
+        return hash_equals($h, sha1($plain)) || hash_equals($h, sha1(strtolower($plain)));
     }
     // 32-char hex (common legacy MD5)
     if (strlen($stored) === 32 && ctype_xdigit($stored)) {
