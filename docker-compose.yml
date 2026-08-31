@@ -1,9 +1,5 @@
 # Postgres credentials live in .env (EBR_PG_HOST/USER/PASSWORD).
 # Dev default: EBR_LOGIN_BYPASS_DB=1 lets any username sign in.
-#
-# Local dev uses the `db` service below. To point at the shared Arcturus
-# Postgres instead, delete the EBR_PG_* overrides in `ebr` (the values in
-# .env take over) — that host is only reachable on its network/VPN.
 services:
   ebr:
     build:
@@ -18,15 +14,8 @@ services:
       EBR_LOGIN_BYPASS_DB: "1"
       # Inter-container DNS — reaches pdf-detect over the compose network.
       EBR_PDF_DETECT_URL: "http://pdf-detect:8000"
-      # Local Postgres (overrides .env, which points at Arcturus).
-      EBR_PG_HOST: db
-      EBR_PG_PORT: "5432"
-      EBR_PG_USER: ebr
-      # EBR_PG_PASSWORD comes from .env via env_file above.
-      EBR_PG_DATABASE: dev
     depends_on:
       - pdf-detect
-      - db
     ports:
       - "127.0.0.1:8080:8080"
 
@@ -39,20 +28,3 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:8000:8000"
-
-  db:
-    image: postgres:16-alpine
-    container_name: ebr-db
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ebr
-      # Interpolated from .env (gitignored) so no credential lands in this file.
-      POSTGRES_PASSWORD: ${EBR_PG_PASSWORD}
-      POSTGRES_DB: dev
-    volumes:
-      - ebr-pgdata:/var/lib/postgresql/data
-    ports:
-      - "127.0.0.1:5432:5432"
-
-volumes:
-  ebr-pgdata:

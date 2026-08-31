@@ -1,0 +1,39 @@
+# Opt-in local Postgres — NEVER used by the server deployment.
+#
+# The base docker-compose.yml points the app at the Postgres in .env
+# (Arcturus), which is only reachable on its network. Off that network,
+# layer this file on top to run a throwaway database in a container:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml up -d
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml \
+#     exec ebr php scripts/apply-schema.php     # first run only
+#
+# Deliberately publishes no host port: servers already run Postgres on
+# 5432, and binding it here fails with "address already in use". Reach it
+# with `docker exec -it ebr-db psql -U ebr -d dev`.
+services:
+  ebr:
+    environment:
+      # Overrides the .env values loaded by env_file in the base file.
+      EBR_PG_HOST: db
+      EBR_PG_PORT: "5432"
+      EBR_PG_USER: ebr
+      # EBR_PG_PASSWORD still comes from .env via env_file.
+      EBR_PG_DATABASE: dev
+    depends_on:
+      - db
+
+  db:
+    image: postgres:16-alpine
+    container_name: ebr-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ebr
+      # Interpolated from .env (gitignored) so no credential lands in this file.
+      POSTGRES_PASSWORD: ${EBR_PG_PASSWORD}
+      POSTGRES_DB: dev
+    volumes:
+      - ebr-pgdata:/var/lib/postgresql/data
+
+volumes:
+  ebr-pgdata:
