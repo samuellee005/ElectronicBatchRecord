@@ -11,6 +11,21 @@ if (typeof window !== 'undefined' && !pdfjs.GlobalWorkerOptions.workerSrc) {
   pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`
 }
 
+/**
+ * Page size in Form Builder design pixels, used to map field geometry
+ * between templates whose pages are not the same size.
+ *
+ * @param {string} url e.g. `/uploads/<file>.pdf`
+ * @param {number} pageNumber 1-based
+ * @returns {Promise<{width: number, height: number}>}
+ */
+export async function pageDesignSize(url, pageNumber = 1) {
+  const pdf = await pdfjs.getDocument(url).promise
+  const page = await pdf.getPage(Math.min(Math.max(1, pageNumber), pdf.numPages))
+  const vp = page.getViewport({ scale: DESIGN_SCALE })
+  return { width: vp.width, height: vp.height }
+}
+
 function rectPtsToDesignForPage(page, rectPts) {
   const vp = page.getViewport({ scale: DESIGN_SCALE })
   // The detector emits top-left-origin PDF points (PyMuPDF / pdfplumber
