@@ -132,20 +132,11 @@ export default function FieldPreview({ field, selected = false, onFieldUpdate, r
           }}
         >
           <div className="fb-collab-preview-row">
-            <span>Primary</span>
-            <select className="fb-field-input" disabled>
-              <option>—</option>
-            </select>
+            <span>Collaborators on this batch</span>
           </div>
           <div className="fb-collab-preview-row">
-            <span>Reviewer</span>
-            <select className="fb-field-input" disabled>
-              <option>—</option>
-            </select>
+            <em>Names print here when the batch is created</em>
           </div>
-          <label className="fb-preview-radio">
-            <input type="checkbox" disabled /> Reviewer records all entry
-          </label>
         </div>
       )
     case 'table':

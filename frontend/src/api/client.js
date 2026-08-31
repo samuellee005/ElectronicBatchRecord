@@ -239,7 +239,15 @@ export async function testGhostscript() {
   return request('/includes/test-ghostscript.php')
 }
 
-/** @returns {Promise<{ success: boolean, users: Array<{ id: string, displayName: string, active: boolean, role: 'admin'|'user' }> }>} */
+/**
+ * @returns {Promise<{
+ *   success: boolean,
+ *   users: Array<{
+ *     id: string, displayName: string, active: boolean, role: 'admin'|'user',
+ *     dbUserId: number|null, username: string, linked: boolean
+ *   }>
+ * }>}
+ */
 export async function listActiveUsers(all = false) {
   const q = all ? '?all=1' : ''
   return request(`/includes/list-active-users.php${q}`)
@@ -326,4 +334,58 @@ export async function detectPdfFields(file, opts = {}) {
     throw err
   }
   return data
+}
+
+// ─── Collaboration ──────────────────────────────────────────────────────────
+
+/**
+ * Enabled accounts from the enterprise `db_user` table, for linking roster entries.
+ * @returns {Promise<{ success: boolean, users: Array<{ dbUserId: number, username: string, displayName: string, email: string }> }>}
+ */
+export async function listDbUsers(search = '') {
+  const q = search ? `?q=${encodeURIComponent(search)}` : ''
+  return request(`/includes/list-db-users.php${q}`)
+}
+
+/** Current collaborator roster for a batch. Pass history to include removed members. */
+export async function listBatchCollaborators(batchId, history = false) {
+  const params = new URLSearchParams({ batchId })
+  if (history) params.set('history', '1')
+  return request(`/includes/batch-collaborators.php?${params.toString()}`)
+}
+
+/**
+ * Add and/or remove collaborators on a batch.
+ * @param {{ batchId: string, add?: number[], remove?: number[] }} body dbUserId values
+ */
+export async function updateBatchCollaborators(body) {
+  return request('/includes/batch-collaborators.php', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+/**
+ * Live Collab — prove a collaborator is present by their own credentials. Opens a fixed
+ * presence window; does NOT change who is logged in.
+ * @param {{ batchId: string, username: string, password: string }} body
+ */
+export async function verifyCollaborator(body) {
+  return request('/includes/collab-verify.php', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+/** Who currently holds a valid presence window on a batch. */
+export async function getCollabPresence(batchId) {
+  return request(`/includes/collab-presence.php?batchId=${encodeURIComponent(batchId)}`)
+}
+
+/** End a presence window early ("step away"). */
+export async function endCollabPresence(batchId, presenceId) {
+  return request('/includes/collab-presence.php', {
+    method: 'POST',
+    body: JSON.stringify({ batchId, presenceId, action: 'end' }),
+  })
 }

@@ -16,6 +16,7 @@ import {
   Bars3Icon,
   ArrowUturnLeftIcon,
   ArrowUturnRightIcon,
+  ArrowDownOnSquareIcon,
 } from '@heroicons/react/24/outline'
 import PdfViewer from '../components/PdfViewer'
 import PdfPageScrubber from '../components/PdfPageScrubber'
@@ -28,6 +29,7 @@ import {
   loadTemplateSuggestions,
 } from '../api/client'
 import { useUserPrefs } from '../context/UserPrefsContext'
+import { pageDesignSize } from '../utils/pdfDesignCoords'
 import { buildTableMergeLayout, tableCellKey } from '../utils/tableMergeLayout'
 import { DEFAULT_TABLE_COL_WIDTH, DEFAULT_TABLE_ROW_HEIGHT, tableColWidthPx, tableRowHeightPx } from '../utils/tableFieldDims'
 import { FORM_FIELD_DEFAULTS, DEFAULT_INPUT_FONT_PX } from '../utils/formFieldDefaults'
@@ -80,6 +82,66 @@ function buildOrderedStageNames(fields) {
   return [...seen.entries()]
     .sort((a, b) => a[1] - b[1] || a[0].localeCompare(b[0]))
     .map(([name]) => name)
+}
+
+/**
+ * Label/name collisions matter beyond cosmetics: Data Search builds its
+ * columns from labels and merges same-label values into one column, so
+ * imported duplicates would silently fold into the original's column.
+ */
+function uniqueLabel(label, taken) {
+  const base = String(label ?? '').trim() || 'Field'
+  if (!taken.has(base.toLowerCase())) return base
+  for (let n = 2; ; n++) {
+    const candidate = `${base} ${n}`
+    if (!taken.has(candidate.toLowerCase())) return candidate
+  }
+}
+
+function slugifyName(label) {
+  return (
+    String(label ?? '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '') || 'field'
+  )
+}
+
+function uniqueName(name, taken) {
+  const base = slugifyName(name)
+  if (!taken.has(base)) return base
+  for (let n = 2; ; n++) {
+    const candidate = `${base}_${n}`
+    if (!taken.has(candidate)) return candidate
+  }
+}
+
+/**
+ * Map a field's geometry from one template's page onto another's. Scales
+ * uniformly (the smaller of the two ratios) so fields keep their aspect and
+ * stay on the page; identical page sizes are a no-op.
+ */
+function mapFieldGeometry(field, sourceSize, targetSize) {
+  const usable =
+    sourceSize?.width > 0 && sourceSize?.height > 0 && targetSize?.width > 0 && targetSize?.height > 0
+  const factor = usable
+    ? Math.min(targetSize.width / sourceSize.width, targetSize.height / sourceSize.height)
+    : 1
+  const scaled =
+    Math.abs(factor - 1) < 0.01
+      ? { x: field.x, y: field.y, width: field.width, height: field.height }
+      : {
+          x: field.x * factor,
+          y: field.y * factor,
+          width: Math.max(8, field.width * factor),
+          height: Math.max(8, field.height * factor),
+        }
+  if (!usable) return scaled
+  return {
+    ...scaled,
+    x: Math.max(0, Math.min(scaled.x, targetSize.width - scaled.width)),
+    y: Math.max(0, Math.min(scaled.y, targetSize.height - scaled.height)),
+  }
 }
 
 function reorderStringArray(arr, fromIndex, toIndex) {
@@ -741,6 +803,25 @@ export default function FormBuilder() {
   const clipboardFieldsRef = useRef([])
   const [clipboardCount, setClipboardCount] = useState(0)
   const [showPasteModal, setShowPasteModal] = useState(false)
+  // Import fields from another saved form (any template).
+  const [showImportModal, setShowImportModal] = useState(false)
+  const [importForms, setImportForms] = useState([])
+  const [importFormsLoading, setImportFormsLoading] = useState(false)
+  const [importSourceId, setImportSourceId] = useState('')
+  const [importSource, setImportSource] = useState(null)
+  const [importSourceLoading, setImportSourceLoading] = useState(false)
+  const [importSourceError, setImportSourceError] = useState('')
+  const [importSelectedIds, setImportSelectedIds] = useState(() => new Set())
+  const [importTargetPage, setImportTargetPage] = useState('keep')
+
+  const closeImportModal = useCallback(() => {
+    setShowImportModal(false)
+    setImportSourceId('')
+    setImportSource(null)
+    setImportSelectedIds(new Set())
+    setImportSourceError('')
+  }, [])
+
   const [pasteTargetPages, setPasteTargetPages] = useState(() => new Set())
   const [copyToastVisible, setCopyToastVisible] = useState(false)
   const copyToastTimerRef = useRef(null)
@@ -1110,6 +1191,7 @@ export default function FormBuilder() {
       if (e.key === 'Escape') {
         if (showSaveModal) setShowSaveModal(false)
         if (showPasteModal) setShowPasteModal(false)
+        if (showImportModal) closeImportModal()
       }
       // Cmd/Ctrl+Z undo, Cmd/Ctrl+Shift+Z or Ctrl+Y redo. Skipped while
       // typing so the browser's own undo still works inside a text box.
@@ -1161,7 +1243,7 @@ export default function FormBuilder() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [showSaveModal, showPasteModal, selectedFieldIds, fields, undo, redo])
+  }, [showSaveModal, showPasteModal, showImportModal, closeImportModal, selectedFieldIds, fields, undo, redo])
 
   // Ctrl+scroll zoom on canvas
   const handleCanvasWheel = useCallback((e) => {
@@ -1304,6 +1386,211 @@ export default function FormBuilder() {
     },
     [currentPage, mintFieldId],
   )
+
+  // -- Import fields from another saved form --
+
+  // Page geometry of the current template, in design pixels.
+  const targetPageSize = useMemo(
+    () => ({
+      width: canvasSize.width > 0 ? (canvasSize.width * DESIGN_SCALE) / scale : 0,
+      height: canvasSize.height > 0 ? (canvasSize.height * DESIGN_SCALE) / scale : 0,
+    }),
+    [canvasSize, scale],
+  )
+
+  const openImportModal = useCallback(() => {
+    setShowImportModal(true)
+    setImportSourceError('')
+    setImportFormsLoading(true)
+    listForms()
+      .then((data) => {
+        if (!data.success || !data.forms) {
+          setImportForms([])
+          return
+        }
+        const usable = data.forms
+          .filter((f) => f.isLatest !== false && (f.fieldCount ?? 0) > 0 && f.id !== urlFormId)
+          .sort((a, b) => a.name.localeCompare(b.name) || (b.version ?? 1) - (a.version ?? 1))
+        setImportForms(usable)
+      })
+      .catch(() => setImportForms([]))
+      .finally(() => setImportFormsLoading(false))
+  }, [urlFormId])
+
+  // Load the chosen source form, plus its page size when it sits on a
+  // different template (field coordinates are page-relative).
+  useEffect(() => {
+    if (!showImportModal || !importSourceId) {
+      setImportSource(null)
+      return
+    }
+    let cancelled = false
+    setImportSourceLoading(true)
+    setImportSourceError('')
+    const meta = importForms.find((f) => f.id === importSourceId)
+    loadFormById(importSourceId)
+      .then(async (data) => {
+        if (cancelled) return
+        const srcFields = data.success && data.form?.fields ? data.form.fields : null
+        if (!srcFields?.length) {
+          setImportSource(null)
+          setImportSourceError('That form has no fields to import.')
+          return
+        }
+        const srcPdf = data.form.pdfFile || meta?.pdfFile || ''
+        const samePdf = srcPdf === pdfFile
+        let sourceSize = null
+        if (!samePdf && srcPdf) {
+          try {
+            sourceSize = await pageDesignSize(`/uploads/${srcPdf}`, 1)
+          } catch {
+            sourceSize = null
+          }
+        }
+        if (cancelled) return
+        const fieldsIn = srcFields.map((f) => ({ ...f, page: f.page || 1 }))
+        setImportSource({
+          id: importSourceId,
+          name: data.form.name || meta?.name || 'Form',
+          version: data.form.version ?? meta?.version,
+          pdfFile: srcPdf,
+          samePdf,
+          sourceSize,
+          sizeUnknown: !samePdf && !sourceSize,
+          fields: fieldsIn,
+        })
+        setImportSelectedIds(new Set(fieldsIn.map((f) => f.id)))
+        setImportTargetPage(samePdf ? 'keep' : String(currentPage))
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setImportSource(null)
+          setImportSourceError('Could not load that form.')
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setImportSourceLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+    // currentPage is intentionally read once per source selection.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showImportModal, importSourceId, importForms, pdfFile])
+
+  // Source fields grouped by stage, in the order the source form lists them.
+  const importGroups = useMemo(() => {
+    if (!importSource) return []
+    const stages = buildOrderedStageNames(importSource.fields)
+    const groups = []
+    const unassigned = sortFieldsInGroupList(importSource.fields, '')
+    if (unassigned.length) groups.push({ key: '', name: 'Unassigned', fields: unassigned })
+    for (const name of stages) {
+      groups.push({ key: name, name, fields: sortFieldsInGroupList(importSource.fields, name) })
+    }
+    return groups
+  }, [importSource])
+
+  const toggleImportField = useCallback((id) => {
+    setImportSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
+
+  const toggleImportGroup = useCallback((group) => {
+    setImportSelectedIds((prev) => {
+      const next = new Set(prev)
+      const allOn = group.fields.every((f) => next.has(f.id))
+      for (const f of group.fields) {
+        if (allOn) next.delete(f.id)
+        else next.add(f.id)
+      }
+      return next
+    })
+  }, [])
+
+  /**
+   * Clone the selected source fields into this form: fresh ids, de-duplicated
+   * labels/names, stages carried over (unknown ones appended to the stage
+   * order), and geometry mapped when the templates differ.
+   */
+  const importSelectedFields = useCallback(() => {
+    const src = importSource
+    if (!src) return
+    const chosen = src.fields.filter((f) => importSelectedIds.has(f.id))
+    if (!chosen.length) return
+
+    const labels = new Set(
+      fields.map((f) => String(f.label ?? '').trim().toLowerCase()).filter(Boolean),
+    )
+    const names = new Set(fields.map((f) => slugifyName(f.name || f.label)))
+    const stageOrders = new Map()
+    for (const f of fields) {
+      const k = stageKey(f)
+      if (k && !stageOrders.has(k)) stageOrders.set(k, Number(f.stageOrder) || 9999)
+    }
+    let nextStageOrder = nextUnusedStageOrder(fields)
+    const groupMax = new Map()
+    for (const f of fields) {
+      const k = stageKey(f)
+      groupMax.set(k, Math.max(groupMax.get(k) || 0, Number(f.orderInGroup) || 0))
+    }
+    const pageCount = Math.max(1, totalPages)
+    const mapGeometry = !src.samePdf && src.sourceSize && targetPageSize.width > 0
+
+    const clones = chosen.map((f) => {
+      const clone = JSON.parse(JSON.stringify(f))
+      clone.id = mintFieldId()
+      const label = uniqueLabel(clone.label, labels)
+      labels.add(label.toLowerCase())
+      clone.label = label
+      const name = uniqueName(clone.name || label, names)
+      names.add(name)
+      clone.name = name
+      clone.page =
+        importTargetPage === 'keep'
+          ? Math.min(Math.max(1, Number(f.page) || 1), pageCount)
+          : Math.min(Math.max(1, Number(importTargetPage) || 1), pageCount)
+      if (mapGeometry) {
+        Object.assign(clone, mapFieldGeometry(clone, src.sourceSize, targetPageSize))
+      }
+      const k = stageKey(clone)
+      if (k) {
+        if (!stageOrders.has(k)) {
+          stageOrders.set(k, nextStageOrder)
+          nextStageOrder += 1
+        }
+        clone.stageOrder = stageOrders.get(k)
+      } else {
+        clone.stageOrder = null
+      }
+      const n = (groupMax.get(k) || 0) + 1
+      groupMax.set(k, n)
+      clone.orderInGroup = n
+      return clone
+    })
+
+    setFields(normalizeFieldGroupOrder([...fields, ...clones]))
+    const firstPage = clones[0].page
+    const onFirstPage = clones.filter((c) => c.page === firstPage).map((c) => c.id)
+    setSelectedFieldIds(new Set(onFirstPage))
+    if (firstPage !== currentPage) goToPdfPage(firstPage)
+    closeImportModal()
+  }, [
+    closeImportModal,
+    currentPage,
+    fields,
+    goToPdfPage,
+    importSelectedIds,
+    importSource,
+    importTargetPage,
+    mintFieldId,
+    targetPageSize,
+    totalPages,
+  ])
 
   // -- Snap logic --
 
@@ -1789,6 +2076,15 @@ export default function FormBuilder() {
               {selectedFieldIds.size} selected
             </span>
           )}
+          <button
+            type="button"
+            className="fb-btn fb-btn-ghost"
+            onClick={openImportModal}
+            title="Copy fields from another saved form into this one"
+          >
+            <ArrowDownOnSquareIcon className="fb-btn-leading-icon" />
+            Import fields…
+          </button>
           {clipboardCount > 0 && (
             <button
               type="button"
@@ -2418,6 +2714,153 @@ export default function FormBuilder() {
       )}
 
       {/* Save Modal */}
+      {showImportModal && (
+        <div className="fb-modal-backdrop" onClick={closeImportModal}>
+          <div
+            className="fb-save-modal fb-import-modal"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button className="fb-modal-close" onClick={closeImportModal} title="Close">
+              &times;
+            </button>
+            <h3>Import fields from another form</h3>
+            <p className="fb-paste-modal-blurb">
+              Fields are copied, not linked: they get fresh IDs and the source form is
+              left untouched. Duplicate labels are numbered so Data Search keeps them in
+              separate columns.
+            </p>
+
+            <div className="fb-form-group">
+              <label htmlFor="fb-import-source">Source form</label>
+              <select
+                id="fb-import-source"
+                value={importSourceId}
+                onChange={(e) => setImportSourceId(e.target.value)}
+                disabled={importFormsLoading}
+              >
+                <option value="">
+                  {importFormsLoading
+                    ? 'Loading forms…'
+                    : importForms.length
+                      ? '-- Select a form --'
+                      : 'No other saved forms with fields'}
+                </option>
+                {importForms.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.name} (v{Number(f.version ?? 1).toFixed(1)}) — {f.fieldCount} field
+                    {f.fieldCount === 1 ? '' : 's'}
+                    {f.pdfFile === pdfFile ? ' — this template' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {importSourceLoading && <p className="fb-hint">Loading fields…</p>}
+            {importSourceError && <p className="fb-import-warning">{importSourceError}</p>}
+
+            {importSource && !importSourceLoading && (
+              <>
+                {!importSource.samePdf && (
+                  <p className="fb-import-warning">
+                    {importSource.sizeUnknown
+                      ? `Built on a different template (${importSource.pdfFile}); its page size could not be read, so positions are copied as-is. Check placement after importing.`
+                      : `Built on a different template (${importSource.pdfFile}). Positions are scaled to this page and clamped inside it — check placement after importing.`}
+                  </p>
+                )}
+                <div className="fb-import-toolbar">
+                  <span className="fb-hint">
+                    {importSelectedIds.size} of {importSource.fields.length} selected
+                  </span>
+                  <div className="fb-paste-modal-actions">
+                    <button
+                      type="button"
+                      className="fb-btn fb-btn-ghost"
+                      onClick={() =>
+                        setImportSelectedIds(new Set(importSource.fields.map((f) => f.id)))
+                      }
+                    >
+                      Select all
+                    </button>
+                    <button
+                      type="button"
+                      className="fb-btn fb-btn-ghost"
+                      onClick={() => setImportSelectedIds(new Set())}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
+
+                <div className="fb-import-list">
+                  {importGroups.map((group) => (
+                    <div key={group.key || '__unassigned'} className="fb-import-group">
+                      <label className="fb-import-group-head">
+                        <input
+                          type="checkbox"
+                          checked={group.fields.every((f) => importSelectedIds.has(f.id))}
+                          onChange={() => toggleImportGroup(group)}
+                        />
+                        <span>{group.name}</span>
+                        <span className="fb-import-group-count">{group.fields.length}</span>
+                      </label>
+                      {group.fields.map((f) => (
+                        <label key={f.id} className="fb-import-field">
+                          <input
+                            type="checkbox"
+                            checked={importSelectedIds.has(f.id)}
+                            onChange={() => toggleImportField(f.id)}
+                          />
+                          <span className="fb-import-field-label">{f.label || f.name || f.id}</span>
+                          <span className="fb-import-field-meta">
+                            {f.type} · p{f.page || 1}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+
+                <div className="fb-form-group">
+                  <label htmlFor="fb-import-page">Place on</label>
+                  <select
+                    id="fb-import-page"
+                    value={importTargetPage}
+                    onChange={(e) => setImportTargetPage(e.target.value)}
+                  >
+                    <option value="keep">Same page numbers as the source form</option>
+                    {Array.from({ length: Math.max(1, totalPages) }, (_, i) => i + 1).map((p) => (
+                      <option key={p} value={String(p)}>
+                        Page {p}
+                        {p === currentPage ? ' (current)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="fb-hint">
+                    Stages come across with their fields; stages this form does not have
+                    are added at the end of the list. Import is one undo step.
+                  </p>
+                </div>
+              </>
+            )}
+
+            <div className="fb-paste-modal-footer">
+              <button type="button" className="fb-btn fb-btn-ghost" onClick={closeImportModal}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="fb-btn fb-btn-success"
+                disabled={!importSource || importSelectedIds.size === 0}
+                onClick={importSelectedFields}
+              >
+                Import {importSelectedIds.size} field
+                {importSelectedIds.size === 1 ? '' : 's'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showPasteModal && (
         <div className="fb-modal-backdrop" onClick={() => setShowPasteModal(false)}>
           <div
@@ -2984,7 +3427,9 @@ function PropertiesForm({ field, existingStages, fields, onUpdate }) {
             placeholder="Optional instructions for analysts"
           />
           <small className="fb-hint">
-            Manage users under <strong>Active Users</strong> in the nav.
+            This field prints the batch&rsquo;s collaborator roster; it is not filled in during entry.
+            Collaborators are chosen when a batch is created, from the roster under{' '}
+            <strong>User administration</strong> in the nav.
           </small>
         </div>
       )}

@@ -47,6 +47,8 @@ function ebr_active_users_ensure_seeded(): void
                     'displayName' => trim((string) ($u['displayName'] ?? '')) ?: (string) $u['id'],
                     'active' => !empty($u['active']),
                     'role' => ebr_normalize_active_user_role($u['role'] ?? null),
+                    'dbUserId' => null,
+                    'username' => '',
                 ];
             }
         }
@@ -73,12 +75,16 @@ function ebr_active_users_ensure_seeded(): void
             'displayName' => 'User One',
             'active' => true,
             'role' => 'user',
+            'dbUserId' => null,
+            'username' => '',
         ],
         [
             'id' => 'user_' . uniqid(),
             'displayName' => 'User Two',
             'active' => true,
             'role' => 'user',
+            'dbUserId' => null,
+            'username' => '',
         ],
     ];
     try {
@@ -101,11 +107,16 @@ try {
 
 $out = [];
 foreach ($rows as $row) {
+    $dbUserId = $row['dbUserId'] ?? null;
+    $dbUserId = ($dbUserId === null || $dbUserId === '' || (int) $dbUserId <= 0) ? null : (int) $dbUserId;
     $row = [
         'id' => (string) ($row['id'] ?? ''),
         'displayName' => trim((string) ($row['displayName'] ?? '')),
         'active' => !empty($row['active']),
         'role' => ebr_normalize_active_user_role($row['role'] ?? null),
+        'dbUserId' => $dbUserId,
+        'username' => trim((string) ($row['username'] ?? '')),
+        'linked' => $dbUserId !== null,
     ];
     if ($row['displayName'] === '') {
         $row['displayName'] = $row['id'];

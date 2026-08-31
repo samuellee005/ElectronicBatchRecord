@@ -8,6 +8,7 @@ if (defined('EBR_PDF_BATCH_EXPORT_LOADED')) {
 define('EBR_PDF_BATCH_EXPORT_LOADED', true);
 
 require_once __DIR__ . '/db-pdf-templates.php';
+require_once __DIR__ . '/db-batch-collab.php';
 
 function ebr_get_effective_value($entry) {
     if ($entry === null || !is_array($entry)) {
@@ -23,7 +24,67 @@ function ebr_get_effective_value($entry) {
     return $entry['v'];
 }
 
+/**
+ * Collaborator roster for the batch currently being rendered. The `collaborator` field prints
+ * the batch's roster rather than any value stored in the field, so the printed record always
+ * shows who was actually designated.
+ *
+ * @param list<array<string, mixed>>|null $set Pass a list to set, null to read.
+ * @return list<array<string, mixed>>
+ */
+function ebr_pdf_batch_collaborators($set = null) {
+    static $roster = [];
+    if ($set !== null) {
+        $roster = $set;
+    }
+    return $roster;
+}
+
+/**
+ * "Rec:" attribution under a field. Accepts the current object shape
+ * { displayName, username, verified, ... } and the legacy bare display-name string.
+ */
+function ebr_format_pdf_recorded_by($v) {
+    if ($v === null || $v === '') {
+        return '';
+    }
+    if (is_string($v)) {
+        return $v;
+    }
+    if (!is_array($v)) {
+        return ebr_format_pdf_value($v);
+    }
+
+    $name = trim((string) ($v['displayName'] ?? ''));
+    if ($name === '') {
+        $name = trim((string) ($v['username'] ?? ''));
+    }
+    if ($name === '') {
+        return '';
+    }
+    // Entries saved on a deployment without password checking carry verified=false; say so
+    // rather than letting them read like verified attributions.
+    if (array_key_exists('verified', $v) && !$v['verified']) {
+        return $name . ' (unverified)';
+    }
+
+    return $name;
+}
+
 function ebr_format_pdf_field_value($field, $v) {
+    if (($field['type'] ?? '') === 'collaborator') {
+        $names = [];
+        foreach (ebr_pdf_batch_collaborators() as $c) {
+            $n = trim((string) ($c['displayName'] ?? ''));
+            if ($n === '') {
+                $n = trim((string) ($c['username'] ?? ''));
+            }
+            if ($n !== '') {
+                $names[] = $n;
+            }
+        }
+        return $names === [] ? '' : implode(', ', $names);
+    }
     if (($field['type'] ?? '') === 'checkbox') {
         if ($v === null || $v === '') {
             return '';
@@ -766,6 +827,21 @@ function ebr_build_batch_pdf_binary($form, $formData, $batch) {
 
     $DESIGN_SCALE = 1.5;
 
+    // Collaborator fields print the batch's designated roster, so load it once per export.
+    // A caller may pass it on the batch array (avoids a second query); otherwise look it up.
+    $roster = (isset($batch['collaborators']) && is_array($batch['collaborators']))
+        ? $batch['collaborators']
+        : [];
+    if ($roster === [] && !empty($batch['id'])) {
+        try {
+            $roster = ebr_db_collab_list((string) $batch['id']);
+        } catch (Throwable $e) {
+            error_log('ebr pdf-batch-export collaborators: ' . $e->getMessage());
+            $roster = [];
+        }
+    }
+    ebr_pdf_batch_collaborators($roster);
+
     $effective = [];
     foreach ($form['fields'] as $field) {
         $id = $field['id'];
@@ -844,13 +920,13 @@ function ebr_build_batch_pdf_binary($form, $formData, $batch) {
                 if (is_array($ent) && !empty($ent['recordedBy'])) {
                     $pdf->SetFont('Helvetica', 'I', 6);
                     $pdf->SetXY($x, $y + $fh - 8);
-                    $pdf->Cell($fw, 8, 'Rec: ' . ebr_format_pdf_value($ent['recordedBy']), 0, 0, 'C');
+                    $pdf->Cell($fw, 8, 'Rec: ' . ebr_format_pdf_recorded_by($ent['recordedBy']), 0, 0, 'C');
                     $pdf->SetFont('Helvetica', '', 8);
                 }
             } elseif (is_array($ent) && !empty($ent['recordedBy'])) {
                 $pdf->SetXY($x, $y + $fh);
                 $pdf->SetFont('Helvetica', 'I', 6);
-                $pdf->Cell($fw, 10, 'Rec: ' . ebr_format_pdf_value($ent['recordedBy']), 0, 0, 'C');
+                $pdf->Cell($fw, 10, 'Rec: ' . ebr_format_pdf_recorded_by($ent['recordedBy']), 0, 0, 'C');
                 $pdf->SetFont('Helvetica', '', 8);
             }
 
@@ -863,14 +939,40 @@ function ebr_build_batch_pdf_binary($form, $formData, $batch) {
         $pdf->SetAutoPageBreak(true, 56.7);
     }
 
-    if (!empty($batch['completedSignOffBy'])) {
+    if ($roster !== [] || !empty($batch['completedSignOffBy'])) {
         $pdf->AddPage('P', 'A4');
-        $pdf->SetFont('Helvetica', 'B', 12);
-        $pdf->Cell(0, 10, 'Batch record sign-off', 0, 1);
-        $pdf->SetFont('Helvetica', '', 10);
-        $sigAt = $batch['completedSignOffAt'] ?? $batch['completedAt'] ?? '';
-        $pdf->Cell(0, 8, 'Secondary reviewer sign-off: ' . ebr_format_pdf_value($batch['completedSignOffBy']), 0, 1);
-        $pdf->Cell(0, 8, 'Signed off at: ' . ebr_format_pdf_value($sigAt), 0, 1);
+
+        if ($roster !== []) {
+            $pdf->SetFont('Helvetica', 'B', 12);
+            $pdf->Cell(0, 10, 'Batch collaborators', 0, 1);
+            $pdf->SetFont('Helvetica', '', 10);
+            foreach ($roster as $c) {
+                $name = trim((string) ($c['displayName'] ?? '')) ?: trim((string) ($c['username'] ?? ''));
+                if ($name === '') {
+                    continue;
+                }
+                $line = $name;
+                $un = trim((string) ($c['username'] ?? ''));
+                if ($un !== '' && $un !== $name) {
+                    $line .= ' (' . $un . ')';
+                }
+                $addedAt = trim((string) ($c['addedAt'] ?? ''));
+                if ($addedAt !== '') {
+                    $line .= ' — added ' . $addedAt;
+                }
+                $pdf->Cell(0, 7, $line, 0, 1);
+            }
+            $pdf->Ln(4);
+        }
+
+        if (!empty($batch['completedSignOffBy'])) {
+            $pdf->SetFont('Helvetica', 'B', 12);
+            $pdf->Cell(0, 10, 'Batch record sign-off', 0, 1);
+            $pdf->SetFont('Helvetica', '', 10);
+            $sigAt = $batch['completedSignOffAt'] ?? $batch['completedAt'] ?? '';
+            $pdf->Cell(0, 8, 'Signed off by: ' . ebr_format_pdf_value($batch['completedSignOffBy']), 0, 1);
+            $pdf->Cell(0, 8, 'Signed off at: ' . ebr_format_pdf_value($sigAt), 0, 1);
+        }
     }
 
     return $pdf->Output('S');

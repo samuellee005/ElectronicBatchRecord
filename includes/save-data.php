@@ -6,6 +6,9 @@ require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/require-login.php';
 require_once __DIR__ . '/batch-record.php';
 require_once __DIR__ . '/db-data-entries.php';
+require_once __DIR__ . '/db-batch-collab.php';
+require_once __DIR__ . '/db-forms.php';
+require_once __DIR__ . '/entry-attribution.php';
 
 header('Content-Type: application/json');
 
@@ -48,6 +51,68 @@ if ($batchId === '') {
     $batchId = null;
 }
 
+$sessionUser = ebr_current_user();
+
+// Writes to a batch are limited to its creator and current collaborators; viewing stays open.
+// Attribution claims in the payload are then checked against the Live Collab presence ledger.
+if ($batchId !== null) {
+    try {
+        $batchRecord = ebr_db_batch_fetch_by_id($batchId);
+    } catch (Throwable $e) {
+        // Never fall through to an unchecked save: if the batch cannot be read, neither the
+        // write gate nor the attribution check can run.
+        error_log('ebr save-data batch fetch: ' . $e->getMessage());
+        http_response_code(503);
+        echo json_encode([
+            'success' => false,
+            'message' => 'Could not read the batch record to check permissions. Nothing was saved.',
+        ]);
+        exit;
+    }
+
+    if ($batchRecord !== null) {
+        if (!ebr_db_collab_user_can_write($batchRecord, $sessionUser)) {
+            http_response_code(403);
+            echo json_encode([
+                'success' => false,
+                'message' => 'You are not a collaborator on this batch record, so you cannot save data to it.',
+                'code' => 'not_a_collaborator',
+            ]);
+            exit;
+        }
+
+        $fieldLabels = [];
+        try {
+            $form = ebr_db_forms_fetch_by_id((string) $data['formId']);
+            foreach ((($form['fields'] ?? []) ?: []) as $f) {
+                if (is_array($f) && isset($f['id'])) {
+                    $fieldLabels[(string) $f['id']] = trim((string) ($f['label'] ?? '')) ?: (string) $f['id'];
+                }
+            }
+        } catch (Throwable $e) {
+            // Labels are only used to make error messages readable.
+        }
+
+        $checked = ebr_attribution_validate_payload(
+            $dataPayload,
+            $batchId,
+            ebr_collab_verification_available(),
+            $fieldLabels
+        );
+        if ($checked['errors'] !== []) {
+            http_response_code(422);
+            echo json_encode([
+                'success' => false,
+                'message' => 'Some entries could not be attributed to a verified user, so nothing was saved.',
+                'code' => 'attribution_invalid',
+                'errors' => array_values(array_slice($checked['errors'], 0, 20)),
+            ]);
+            exit;
+        }
+        $dataPayload = $checked['data'];
+    }
+}
+
 $dataEntry = [
     'id' => $entryId,
     'formId' => $data['formId'],
@@ -59,6 +124,8 @@ $dataEntry = [
     'stages' => $data['stages'] ?? [],
     'savedAt' => $data['savedAt'] ?? date('c'),
     'filename' => $filename,
+    'savedByUserId' => $sessionUser !== null ? $sessionUser['id'] : null,
+    'savedByUsername' => $sessionUser !== null ? $sessionUser['username'] : '',
 ];
 
 if (ebr_debug_save_enabled()) {

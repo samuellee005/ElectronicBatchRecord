@@ -119,3 +119,77 @@ CREATE TABLE IF NOT EXISTS ebr_user_preferences (
 CREATE INDEX IF NOT EXISTS idx_ebr_user_preferences_updated ON ebr_user_preferences (updated_at DESC);
 
 -- db_user: shared enterprise login table (see database/db_user.sql). This app only SELECTs it; do not create it here.
+
+---STATEMENT---
+-- Link the EBR collaborator roster to real accounts in `db_user` so a person can be
+-- re-authenticated (Live Collab). Legacy rows keep NULL and are not selectable as collaborators.
+ALTER TABLE ebr_active_users ADD COLUMN IF NOT EXISTS db_user_id INTEGER;
+
+---STATEMENT---
+ALTER TABLE ebr_active_users ADD COLUMN IF NOT EXISTS username TEXT;
+
+---STATEMENT---
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ebr_active_users_db_user_id
+    ON ebr_active_users (db_user_id) WHERE db_user_id IS NOT NULL;
+
+---STATEMENT---
+-- People designated on a batch at creation time. Membership is never hard-deleted:
+-- removal sets removed_at so the record retains who was on it and when.
+CREATE TABLE IF NOT EXISTS ebr_batch_collaborators (
+    id TEXT PRIMARY KEY,
+    batch_id TEXT NOT NULL REFERENCES ebr_batch_records (id) ON DELETE CASCADE,
+    db_user_id INTEGER NOT NULL,
+    username TEXT NOT NULL,
+    display_name TEXT NOT NULL DEFAULT '',
+    added_by_user_id INTEGER,
+    added_by_username TEXT,
+    added_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    removed_by_user_id INTEGER,
+    removed_by_username TEXT,
+    removed_at TIMESTAMPTZ
+);
+
+---STATEMENT---
+CREATE INDEX IF NOT EXISTS idx_ebr_batch_collab_batch ON ebr_batch_collaborators (batch_id);
+
+---STATEMENT---
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ebr_batch_collab_active
+    ON ebr_batch_collaborators (batch_id, db_user_id) WHERE removed_at IS NULL;
+
+---STATEMENT---
+-- Live Collab presence ledger: one row per credential verification. Fixed window —
+-- verified at verified_at, valid until expires_at, no sliding extension.
+CREATE TABLE IF NOT EXISTS ebr_batch_presence (
+    id TEXT PRIMARY KEY,
+    batch_id TEXT NOT NULL REFERENCES ebr_batch_records (id) ON DELETE CASCADE,
+    db_user_id INTEGER NOT NULL,
+    username TEXT NOT NULL,
+    display_name TEXT NOT NULL DEFAULT '',
+    verified_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL,
+    ended_at TIMESTAMPTZ,
+    verified_ip TEXT,
+    verified_by_session_user_id INTEGER
+);
+
+---STATEMENT---
+CREATE INDEX IF NOT EXISTS idx_ebr_batch_presence_batch ON ebr_batch_presence (batch_id, expires_at DESC);
+
+---STATEMENT---
+-- Server-derived attribution on saved entries (previously no user was recorded at all).
+ALTER TABLE ebr_data_entries ADD COLUMN IF NOT EXISTS saved_by_user_id INTEGER;
+
+---STATEMENT---
+ALTER TABLE ebr_data_entries ADD COLUMN IF NOT EXISTS saved_by_username TEXT;
+
+---STATEMENT---
+ALTER TABLE ebr_batch_records ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER;
+
+---STATEMENT---
+ALTER TABLE ebr_batch_records ADD COLUMN IF NOT EXISTS completed_sign_off_user_id INTEGER;
+
+---STATEMENT---
+-- How presence was established: 'password' = the person re-entered their own credentials
+-- (another collaborator at a shared machine); 'session' = they are the signed-in user, whose
+-- identity was already proved at login. Both attribute entries; the record keeps which it was.
+ALTER TABLE ebr_batch_presence ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'password';

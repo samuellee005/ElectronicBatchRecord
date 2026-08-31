@@ -25,8 +25,36 @@ function searchDataGetEffectiveValue($entry)
     return $entry['v'];
 }
 
+/**
+ * "Recorded by" attribution: the object shape { displayName, username, verified, ... }
+ * written since Live Collab, or the bare display-name string used before it.
+ */
+function searchDataFormatRecordedBy($v)
+{
+    if ($v === null || $v === '') {
+        return '';
+    }
+    if (is_string($v)) {
+        return $v;
+    }
+    if (!is_array($v)) {
+        return searchDataFormatValue($v);
+    }
+
+    $name = trim((string) ($v['displayName'] ?? '')) ?: trim((string) ($v['username'] ?? ''));
+    if ($name === '') {
+        return '';
+    }
+
+    return (array_key_exists('verified', $v) && !$v['verified']) ? $name . ' (unverified)' : $name;
+}
+
 function searchDataFormatFieldValue($f, $v)
 {
+    // The collaborator field prints the batch roster, which is not stored in the entry.
+    if (($f['type'] ?? '') === 'collaborator') {
+        return '';
+    }
     if (($f['type'] ?? '') === 'checkbox') {
         if ($v === null || $v === '') {
             return '';
@@ -145,7 +173,10 @@ foreach ($batchRows as $batch) {
             $raw = $formData[$fid] ?? null;
             $val = searchDataFormatFieldValue($f, searchDataGetEffectiveValue($raw));
             if (is_array($raw) && !empty($raw['recordedBy'])) {
-                $val .= ' [rec: ' . searchDataFormatValue($raw['recordedBy']) . ']';
+                $rec = searchDataFormatRecordedBy($raw['recordedBy']);
+                if ($rec !== '') {
+                    $val .= ' [rec: ' . $rec . ']';
+                }
             }
             if (isset($fieldValues[$label])) {
                 $fieldValues[$label] .= ' | ' . $val;

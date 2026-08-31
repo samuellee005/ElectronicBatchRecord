@@ -5,6 +5,7 @@
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/require-login.php';
 require_once __DIR__ . '/db-active-users.php';
+require_once __DIR__ . '/db-db-user.php';
 
 header('Content-Type: application/json');
 
@@ -21,6 +22,7 @@ if (!$input || !isset($input['users']) || !is_array($input['users'])) {
 
 $sanitized = [];
 $seen = [];
+$seenDbUserIds = [];
 foreach ($input['users'] as $u) {
     if (!is_array($u)) {
         continue;
@@ -35,11 +37,51 @@ foreach ($input['users'] as $u) {
     $seen[$id] = true;
     $roleRaw = isset($u['role']) ? strtolower(trim((string) $u['role'])) : '';
     $role = ($roleRaw === 'admin') ? 'admin' : 'user';
+
+    $displayName = trim((string) ($u['displayName'] ?? ''));
+    $username = trim((string) ($u['username'] ?? ''));
+    $dbUserId = isset($u['dbUserId']) && $u['dbUserId'] !== '' ? (int) $u['dbUserId'] : 0;
+
+    // Resolve the link against db_user so the roster carries canonical identity, not typed text.
+    // A roster entry with no valid link stays usable for display but cannot be a collaborator.
+    if ($dbUserId > 0) {
+        if (isset($seenDbUserIds[$dbUserId])) {
+            echo json_encode([
+                'success' => false,
+                'message' => 'The same account is linked to more than one roster entry.',
+            ]);
+            exit;
+        }
+        try {
+            $row = ebr_db_user_fetch_by_id($dbUserId);
+        } catch (Throwable $e) {
+            error_log('ebr save-active-users: ' . $e->getMessage());
+            $row = null;
+        }
+        if ($row === null) {
+            echo json_encode([
+                'success' => false,
+                'message' => 'Account #' . $dbUserId . ' was not found in db_user; remove or re-pick that roster entry.',
+            ]);
+            exit;
+        }
+        $seenDbUserIds[$dbUserId] = true;
+        $username = (string) $row['username'];
+        if ($displayName === '') {
+            $displayName = ebr_db_user_display_name($row);
+        }
+    } else {
+        $dbUserId = 0;
+        $username = '';
+    }
+
     $sanitized[] = [
         'id' => preg_replace('/[^a-zA-Z0-9_-]/', '_', $id) ?: 'user_' . uniqid(),
-        'displayName' => trim((string) ($u['displayName'] ?? '')) ?: 'Unnamed',
+        'displayName' => $displayName !== '' ? $displayName : 'Unnamed',
         'active' => !empty($u['active']),
         'role' => $role,
+        'dbUserId' => $dbUserId > 0 ? $dbUserId : null,
+        'username' => $username,
     ];
 }
 

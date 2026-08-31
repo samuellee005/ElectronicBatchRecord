@@ -160,3 +160,122 @@
 .au-msg.err {
   color: #c00;
 }
+
+.au-notice--warn {
+  background: #fff8e6;
+  border-color: #f0d8a0;
+  color: #6b4e14;
+  margin: 14px 20px 0;
+  max-width: none;
+}
+
+.au-page-header .au-notice--warn {
+  margin: 0 0 16px;
+  max-width: 52rem;
+}
+
+.au-unlinked {
+  font-size: 0.8rem;
+  color: #a05a00;
+  background: #fff3dd;
+  border: 1px solid #f0d8a0;
+  border-radius: 999px;
+  padding: 2px 10px;
+  white-space: nowrap;
+}
+
+/* ─── Account picker ─────────────────────────────────────────────────────── */
+
+.au-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(20, 22, 32, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 1000;
+}
+
+.au-modal {
+  background: #fff;
+  border-radius: 12px;
+  padding: 22px;
+  width: min(520px, 100%);
+  max-height: min(640px, 90vh);
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.24);
+}
+
+.au-modal h3 {
+  margin: 0 0 8px;
+  font-size: 1.1rem;
+  color: #1a1a1a;
+}
+
+.au-modal-desc {
+  margin: 0 0 14px;
+  font-size: 0.85rem;
+  color: #555;
+  line-height: 1.5;
+}
+
+.au-pick-search {
+  max-width: none;
+  margin-bottom: 12px;
+}
+
+.au-pick-list {
+  flex: 1;
+  overflow-y: auto;
+  border: 1px solid #eee;
+  border-radius: 8px;
+  min-height: 120px;
+}
+
+.au-pick-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  padding: 10px 14px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid #f0f0f0;
+  cursor: pointer;
+}
+
+.au-pick-item:last-child {
+  border-bottom: none;
+}
+
+.au-pick-item:hover,
+.au-pick-item:focus-visible {
+  background: #f0f4ff;
+}
+
+.au-pick-name {
+  font-weight: 600;
+  color: #222;
+}
+
+.au-pick-meta {
+  font-size: 0.8rem;
+  color: #777;
+}
+
+.au-pick-empty {
+  padding: 20px 14px;
+  color: #777;
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+.au-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 16px;
+}

@@ -123,3 +123,66 @@ function ebr_db_user_to_session_payload(array $row): array
         'role' => $role,
     ];
 }
+
+/**
+ * @return array<string, mixed>|null
+ */
+function ebr_db_user_fetch_by_id(int $dbUserId): ?array
+{
+    if ($dbUserId <= 0) {
+        return null;
+    }
+    $pdo = ebr_pg_pdo();
+    $st = $pdo->prepare(
+        'SELECT db_user_id, username, password, first_name, last_name, email, disabled
+         FROM db_user WHERE db_user_id = :i LIMIT 1'
+    );
+    $st->execute(['i' => $dbUserId]);
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+
+    return $row ?: null;
+}
+
+/**
+ * Display name for a `db_user` row: "First Last", falling back to username.
+ */
+function ebr_db_user_display_name(array $row): string
+{
+    $d = trim(trim((string) ($row['first_name'] ?? '')) . ' ' . trim((string) ($row['last_name'] ?? '')));
+
+    return $d !== '' ? $d : (string) ($row['username'] ?? '');
+}
+
+/**
+ * Enabled accounts from `db_user`, for the roster admin picker. Read-only, no password column.
+ *
+ * @return list<array{dbUserId:int, username:string, displayName:string, email:string}>
+ */
+function ebr_db_user_list_enabled(string $search = '', int $limit = 500): array
+{
+    $pdo = ebr_pg_pdo();
+    $sql = "SELECT db_user_id, username, first_name, last_name, email
+            FROM db_user WHERE COALESCE(UPPER(TRIM(disabled)), 'N') <> 'Y'";
+    $params = [];
+    $q = trim($search);
+    if ($q !== '') {
+        $sql .= ' AND (username ILIKE :q OR first_name ILIKE :q OR last_name ILIKE :q OR email ILIKE :q)';
+        $params['q'] = '%' . $q . '%';
+    }
+    $sql .= ' ORDER BY LOWER(COALESCE(last_name, username)), LOWER(COALESCE(first_name, \'\')) LIMIT ' . max(1, min(2000, $limit));
+
+    $st = $pdo->prepare($sql);
+    $st->execute($params);
+
+    $out = [];
+    while ($row = $st->fetch(PDO::FETCH_ASSOC)) {
+        $out[] = [
+            'dbUserId' => (int) $row['db_user_id'],
+            'username' => (string) $row['username'],
+            'displayName' => ebr_db_user_display_name($row),
+            'email' => (string) ($row['email'] ?? ''),
+        ];
+    }
+
+    return $out;
+}

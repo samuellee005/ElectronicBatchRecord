@@ -37,6 +37,16 @@ function ebr_db_batch_ts_param($v): string
     return $s;
 }
 
+/** Nullable INTEGER user id column — 0/'' becomes NULL. */
+function ebr_db_batch_user_id_param($v): ?int
+{
+    if ($v === null || $v === '' || (int) $v <= 0) {
+        return null;
+    }
+
+    return (int) $v;
+}
+
 /** Nullable timestamptz (completed_at, sign-off). */
 function ebr_db_batch_ts_nullable_param($v): ?string
 {
@@ -73,10 +83,14 @@ function ebr_db_batch_row_to_api(array $row): array
         'updatedAt' => ebr_db_ts_to_iso($row['updated_at'] ?? null) ?? '',
         'completedAt' => ebr_db_ts_to_iso($row['completed_at'] ?? null),
         'createdBy' => $row['created_by'],
+        'createdByUserId' => isset($row['created_by_user_id']) && $row['created_by_user_id'] !== null
+            ? (int) $row['created_by_user_id'] : null,
         'lastEntryId' => $row['last_entry_id'],
         'lastEntryFilename' => $row['last_entry_filename'],
         'completedSignOffBy' => $row['completed_sign_off_by'],
         'completedSignOffAt' => $row['completed_sign_off_at'],
+        'completedSignOffUserId' => isset($row['completed_sign_off_user_id']) && $row['completed_sign_off_user_id'] !== null
+            ? (int) $row['completed_sign_off_user_id'] : null,
     ];
 }
 
@@ -112,12 +126,14 @@ function ebr_db_batch_insert(array $record): void
     $sql = <<<'SQL'
 INSERT INTO ebr_batch_records (
     id, form_id, form_name, pdf_file, title, description, status,
-    created_at, updated_at, completed_at, created_by,
-    last_entry_id, last_entry_filename, completed_sign_off_by, completed_sign_off_at
+    created_at, updated_at, completed_at, created_by, created_by_user_id,
+    last_entry_id, last_entry_filename, completed_sign_off_by, completed_sign_off_at,
+    completed_sign_off_user_id
 ) VALUES (
     :id, :form_id, :form_name, :pdf_file, :title, :description, :status,
-    :created_at, :updated_at, :completed_at, :created_by,
-    :last_entry_id, :last_entry_filename, :completed_sign_off_by, :completed_sign_off_at
+    :created_at, :updated_at, :completed_at, :created_by, :created_by_user_id,
+    :last_entry_id, :last_entry_filename, :completed_sign_off_by, :completed_sign_off_at,
+    :completed_sign_off_user_id
 )
 SQL;
     $st = $pdo->prepare($sql);
@@ -136,10 +152,12 @@ SQL;
         'updated_at' => ebr_db_batch_ts_param($record['updatedAt'] ?? null),
         'completed_at' => ebr_db_batch_ts_nullable_param($record['completedAt'] ?? null),
         'created_by' => $cb,
+        'created_by_user_id' => ebr_db_batch_user_id_param($record['createdByUserId'] ?? null),
         'last_entry_id' => $record['lastEntryId'] ?? null,
         'last_entry_filename' => $record['lastEntryFilename'] ?? null,
         'completed_sign_off_by' => $record['completedSignOffBy'] ?? null,
         'completed_sign_off_at' => ebr_db_batch_ts_nullable_param($record['completedSignOffAt'] ?? null),
+        'completed_sign_off_user_id' => ebr_db_batch_user_id_param($record['completedSignOffUserId'] ?? null),
     ]);
 }
 
@@ -204,10 +222,12 @@ UPDATE ebr_batch_records SET
     updated_at = :updated_at,
     completed_at = :completed_at,
     created_by = :created_by,
+    created_by_user_id = :created_by_user_id,
     last_entry_id = :last_entry_id,
     last_entry_filename = :last_entry_filename,
     completed_sign_off_by = :completed_sign_off_by,
-    completed_sign_off_at = :completed_sign_off_at
+    completed_sign_off_at = :completed_sign_off_at,
+    completed_sign_off_user_id = :completed_sign_off_user_id
 WHERE id = :id
 SQL;
     $st = $pdo->prepare($sql);
@@ -226,10 +246,12 @@ SQL;
         'updated_at' => ebr_db_batch_ts_param($merged['updatedAt'] ?? null),
         'completed_at' => ebr_db_batch_ts_nullable_param($merged['completedAt'] ?? null),
         'created_by' => $cb,
+        'created_by_user_id' => ebr_db_batch_user_id_param($merged['createdByUserId'] ?? null),
         'last_entry_id' => $merged['lastEntryId'] ?? null,
         'last_entry_filename' => $merged['lastEntryFilename'] ?? null,
         'completed_sign_off_by' => $merged['completedSignOffBy'] ?? null,
         'completed_sign_off_at' => ebr_db_batch_ts_nullable_param($merged['completedSignOffAt'] ?? null),
+        'completed_sign_off_user_id' => ebr_db_batch_user_id_param($merged['completedSignOffUserId'] ?? null),
     ]);
 
     return ebr_db_batch_fetch_by_id($batchId);

@@ -7,6 +7,7 @@ require_once __DIR__ . '/require-login.php';
 require_once __DIR__ . '/batch-record.php';
 require_once __DIR__ . '/db-data-entries.php';
 require_once __DIR__ . '/db-forms.php';
+require_once __DIR__ . '/db-batch-collab.php';
 
 header('Content-Type: application/json');
 
@@ -57,10 +58,36 @@ if (!$foundForm) {
     exit;
 }
 
+$sessionUser = ebr_current_user();
+
+try {
+    // The signed-in user proved their identity at login, so they get a window without
+    // re-entering a password. Anyone else at this machine verifies in Live Collab.
+    ebr_db_presence_ensure_session($batchId, $sessionUser, ebr_collab_presence_minutes());
+    $collaborators = ebr_db_collab_list($batchId);
+    $presence = ebr_db_presence_active($batchId);
+} catch (Throwable $e) {
+    error_log('ebr get-batch-record collab: ' . $e->getMessage());
+    $collaborators = [];
+    $presence = [];
+}
+
 echo json_encode([
     'success' => true,
     'batch' => $batch,
     'form' => $foundForm,
     'formData' => $formData,
     'entry' => $entryRaw,
+    'collaborators' => $collaborators,
+    'presence' => $presence,
+    'presenceMinutes' => ebr_collab_presence_minutes(),
+    'verificationAvailable' => ebr_collab_verification_available(),
+    // Viewing is open to every signed-in user; writing is limited to the creator and collaborators.
+    'canWrite' => ebr_db_collab_user_can_write($batch, $sessionUser),
+    'sessionUser' => $sessionUser === null ? null : [
+        'dbUserId' => $sessionUser['id'],
+        'username' => $sessionUser['username'],
+        'displayName' => ebr_current_display_name(),
+    ],
+    'serverTime' => date('c'),
 ]);

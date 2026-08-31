@@ -13,6 +13,9 @@ import {
   getBatchRecord,
   exportBatchPdfBlob,
   listActiveUsers,
+  verifyCollaborator,
+  getCollabPresence,
+  endCollabPresence,
 } from '../api/client'
 import { useUserPrefs } from '../context/UserPrefsContext'
 import './DataEntry.css'
@@ -322,17 +325,75 @@ function ReadonlyCheckboxValue({ value, className = '' }) {
   )
 }
 
+/**
+ * Fields that only display information and are never filled in, locked, or corrected.
+ * The collaborator field shows the batch's roster, so it has no value of its own.
+ */
+function isDisplayOnlyField(field) {
+  return field?.type === 'collaborator'
+}
+
+/**
+ * Attribution stamped on an entry or correction:
+ * { userId, username, displayName, presenceId, at, verified }.
+ * Records written before Live Collab stored a bare display-name string, so every read of an
+ * attribution goes through here.
+ */
+function attributionName(by) {
+  if (by == null || by === '') return ''
+  if (typeof by === 'string') return by
+  if (typeof by !== 'object') return String(by)
+  const name = String(by.displayName || by.username || '').trim()
+  if (!name) return ''
+  return by.verified === false ? `${name} (unverified)` : name
+}
+
+/**
+ * Build the attribution for something recorded right now under an open presence window.
+ * Returns undefined with no window, so nothing can be attributed to an unverified person.
+ */
+function buildAttribution(presenceRow) {
+  if (!presenceRow) return undefined
+  return {
+    userId: presenceRow.dbUserId,
+    username: presenceRow.username,
+    displayName: presenceRow.displayName,
+    presenceId: presenceRow.id,
+    at: new Date().toISOString(),
+  }
+}
+
+/** Milliseconds until a presence window lapses; <= 0 means it already has. */
+function presenceRemainingMs(presenceRow, now) {
+  if (!presenceRow?.expiresAt) return 0
+  const t = new Date(presenceRow.expiresAt).getTime()
+  return Number.isFinite(t) ? t - now : 0
+}
+
+function formatRemaining(ms) {
+  if (ms <= 0) return 'expired'
+  const mins = Math.floor(ms / 60000)
+  if (mins >= 60) {
+    const h = Math.floor(mins / 60)
+    return `${h}h ${mins % 60}m left`
+  }
+  if (mins >= 1) return `${mins} min left`
+  return 'under a minute left'
+}
+
 function displayFieldValue(field, value) {
   if (field.type === 'multiselect') {
     const arr = parseMultiselectValue(value)
     return arr.length ? arr.join(', ') : '—'
   }
   if (field.type === 'collaborator') {
-    if (!value || typeof value !== 'object') return '—'
-    const p = value.primaryDisplayName || value.primaryUserId || '—'
-    const s = value.secondaryDisplayName || value.secondaryUserId || '—'
-    const rec = value.reviewerIsDesignatedRecorder ? ' · Reviewer records all entry' : ''
-    return `Primary: ${p} · Reviewer: ${s}${rec}`
+    // Legacy records stored a primary/secondary pair here; show it so old batches still read.
+    if (value && typeof value === 'object' && (value.primaryDisplayName || value.secondaryDisplayName)) {
+      const p = value.primaryDisplayName || value.primaryUserId || '—'
+      const sec = value.secondaryDisplayName || value.secondaryUserId || '—'
+      return `${p}, ${sec}`
+    }
+    return ''
   }
   if (isTableField(field)) {
     const { cells } = normalizeTableValue(value)
@@ -374,44 +435,11 @@ function isFieldValueFilled(field, value) {
   if (field.type === 'multiselect') {
     return parseMultiselectValue(value).length > 0
   }
-  if (field.type === 'collaborator') {
-    if (!value || typeof value !== 'object') return false
-    const a = value.primaryUserId
-    const b = value.secondaryUserId
-    return !!(a && b && a !== b)
-  }
+  if (isDisplayOnlyField(field)) return true
   if (isTableField(field)) {
     return isTableFieldFilled(field, value)
   }
   return value !== undefined && value !== null && value !== '' && (typeof value !== 'string' || value.trim() !== '')
-}
-
-function getCollaboratorPolicy(formConfig, formData, idToName) {
-  if (!formConfig?.fields || !idToName) return null
-  for (const f of formConfig.fields) {
-    if (f.type !== 'collaborator') continue
-    const ent = formData[f.id]
-    if (!isFieldEntryLocked(ent)) continue
-    const v = getEffectiveValue(ent)
-    if (!v || typeof v !== 'object') continue
-    const { primaryUserId, secondaryUserId, reviewerIsDesignatedRecorder } = v
-    if (!primaryUserId || !secondaryUserId || primaryUserId === secondaryUserId) continue
-    return {
-      fieldId: f.id,
-      primaryName: idToName[primaryUserId] || primaryUserId,
-      secondaryName: idToName[secondaryUserId] || secondaryUserId,
-      reviewerIsDesignatedRecorder: !!reviewerIsDesignatedRecorder,
-    }
-  }
-  return null
-}
-
-function collaboratorDraft(value) {
-  const base = { primaryUserId: '', secondaryUserId: '', reviewerIsDesignatedRecorder: false }
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
-    return { ...base, ...value }
-  }
-  return base
 }
 
 function buildStages(fields) {
@@ -797,23 +825,13 @@ function computeFieldPanelAnchorStyle(fieldId) {
 function initializeCorrectionDraft(field, rawValue) {
   if (field.type === 'multiselect') return parseMultiselectValue(rawValue)
   if (field.type === 'checkbox') return rawValue === true || rawValue === 'true' || rawValue === 1
-  if (field.type === 'collaborator') return collaboratorDraft(rawValue)
   if (field.type === 'table') return normalizeTableValue(rawValue)
   return rawValue ?? ''
 }
 
-function normalizeCorrectionForSave(field, newValue, activeUsers) {
+function normalizeCorrectionForSave(field, newValue) {
   if (field.type === 'multiselect')
     return [...(Array.isArray(newValue) ? newValue : parseMultiselectValue(newValue))]
-  if (field.type === 'collaborator') {
-    const cv = collaboratorDraft(newValue)
-    const map = Object.fromEntries(activeUsers.map((u) => [u.id, u.displayName]))
-    return {
-      ...cv,
-      primaryDisplayName: map[cv.primaryUserId] || cv.primaryUserId,
-      secondaryDisplayName: map[cv.secondaryUserId] || cv.secondaryUserId,
-    }
-  }
   if (field.type === 'table') return normalizeTableValue(newValue)
   return newValue
 }
@@ -865,10 +883,10 @@ function FieldAuditDetails({ entry, formatTs, correctionRef }) {
           <span className="de-field-panel-v">{formatTs(lockedAt)}</span>
         </div>
       )}
-      {recordedBy != null && recordedBy !== '' && (
+      {attributionName(recordedBy) !== '' && (
         <div className="de-field-panel-row">
           <span className="de-field-panel-k">Recorded by</span>
-          <span className="de-field-panel-v">{recordedBy}</span>
+          <span className="de-field-panel-v">{attributionName(recordedBy)}</span>
         </div>
       )}
       {correctionRef != null && (
@@ -881,8 +899,34 @@ function FieldAuditDetails({ entry, formatTs, correctionRef }) {
         <ul className="de-field-panel-correction-list">
           {corrs.map((c, i) => (
             <li key={i}>
-              {formatTs(c.at)} — {c.by || '—'}
+              {formatTs(c.at)} — {attributionName(c.by) || '—'}
             </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+/**
+ * The collaborator field prints the batch's designated roster. It is not an input — the roster
+ * is set when the batch is created and managed from the Live Collab panel, so the printed
+ * record always reflects the real membership rather than a value someone typed into a box.
+ */
+function CollaboratorRoster({ collaborators, helpText, className = '' }) {
+  const names = (collaborators || [])
+    .map((c) => String(c.displayName || c.username || '').trim())
+    .filter(Boolean)
+
+  return (
+    <div className={`overlay-collab-roster ${className}`.trim()}>
+      {helpText && <p className="overlay-collab-help">{helpText}</p>}
+      {names.length === 0 ? (
+        <p className="overlay-collab-empty">No collaborators on this batch record.</p>
+      ) : (
+        <ul className="overlay-collab-names">
+          {names.map((n, i) => (
+            <li key={`${n}-${i}`}>{n}</li>
           ))}
         </ul>
       )}
@@ -903,8 +947,8 @@ function FieldDetailPanel({
   onStartCorrection,
   onClose,
   correctionRef,
-  activeUsers,
-  collaboratorSetupComplete,
+  collaborators = [],
+  recordingBlocked = false,
   formatTs,
   className = '',
   style: panelStyle,
@@ -919,11 +963,10 @@ function FieldDetailPanel({
   const fieldLocked = isFieldEntryLocked(entry)
   const stageLocked = !stageAccessible || batchReadOnly
   const req = isRequired(field)
-  const blockedByCollaborator =
-    field.type !== 'collaborator' && !collaboratorSetupComplete
+  const blockedByCollaborator = !isDisplayOnlyField(field) && recordingBlocked
   const hasValue = isFieldValueFilled(field, value)
   const canSubmit =
-    hasValue && !fieldLocked && !stageLocked && !blockedByCollaborator
+    hasValue && !fieldLocked && !stageLocked && !blockedByCollaborator && !isDisplayOnlyField(field)
 
   const isEditingCorrectionHere =
     editingCorrectionId === field.id && fieldLocked && !batchReadOnly
@@ -1073,54 +1116,12 @@ function FieldDetailPanel({
         break
       }
       case 'collaborator': {
-        const cv = collaboratorDraft(editSourceValue)
-        const opts = activeUsers.filter((u) => u.active !== false)
         valueEditor = (
-          <div className="overlay-collaborator de-field-panel-collab">
-            {field.helpText && <p className="overlay-collab-help">{field.helpText}</p>}
-            <label className="overlay-collab-label">
-              Primary analyst
-              <select
-                value={cv.primaryUserId}
-                onChange={(e) =>
-                  setFieldValue({ ...cv, primaryUserId: e.target.value })
-                }
-              >
-                <option value="">— Select —</option>
-                {opts.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.displayName}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="overlay-collab-label">
-              Secondary reviewer
-              <select
-                value={cv.secondaryUserId}
-                onChange={(e) =>
-                  setFieldValue({ ...cv, secondaryUserId: e.target.value })
-                }
-              >
-                <option value="">— Select —</option>
-                {opts.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.displayName}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="overlay-collab-check">
-              <input
-                type="checkbox"
-                checked={!!cv.reviewerIsDesignatedRecorder}
-                onChange={(e) =>
-                  setFieldValue({ ...cv, reviewerIsDesignatedRecorder: e.target.checked })
-                }
-              />
-              Secondary reviewer is the designated recorder for all data entry
-            </label>
-          </div>
+          <CollaboratorRoster
+            collaborators={collaborators}
+            helpText={field.helpText}
+            className="de-field-panel-collab"
+          />
         )
         break
       }
@@ -1180,7 +1181,7 @@ function FieldDetailPanel({
       correctionDraft !== undefined
     ) {
       e.preventDefault()
-      onSaveCorrection(field.id, normalizeCorrectionForSave(field, correctionDraft, activeUsers))
+      onSaveCorrection(field.id, normalizeCorrectionForSave(field, correctionDraft))
       return
     }
     if (!canSubmit || !onLockField) return
@@ -1270,7 +1271,7 @@ function FieldDetailPanel({
                 onClick={() =>
                   onSaveCorrection(
                     field.id,
-                    normalizeCorrectionForSave(field, correctionDraft, activeUsers),
+                    normalizeCorrectionForSave(field, correctionDraft),
                   )
                 }
               >
@@ -1355,10 +1356,10 @@ function FieldAuditInfoPopover({ entry, formatTs, correctionRef }) {
               <span className="overlay-audit-info-val">{formatTs(lockedAt)}</span>
             </div>
           )}
-          {recordedBy != null && recordedBy !== '' && (
+          {attributionName(recordedBy) !== '' && (
             <div className="overlay-audit-info-row">
               <span className="overlay-audit-info-key">Recorded by</span>
-              <span className="overlay-audit-info-val">{recordedBy}</span>
+              <span className="overlay-audit-info-val">{attributionName(recordedBy)}</span>
             </div>
           )}
           {correctionRef != null && (
@@ -1580,8 +1581,8 @@ function OverlayField({
   correctionRef,
   scale: currentScale = DESIGN_SCALE,
   readOnly = false,
-  activeUsers = [],
-  collaboratorSetupComplete = true,
+  collaborators = [],
+  recordingBlocked = false,
   onFieldPanelToggle,
   fieldPanelActive = false,
 }) {
@@ -1852,56 +1853,11 @@ function OverlayField({
       )
       break
     case 'collaborator': {
-      const cv = collaboratorDraft(value)
-      const opts = activeUsers.filter((u) => u.active !== false)
       input = (
-        <div className="overlay-collaborator overlay-collaborator--compact">
-          <label className="overlay-collab-label">
-            Primary analyst
-            <select
-              value={cv.primaryUserId}
-              disabled={stageLocked}
-              onChange={(e) =>
-                onChange(field.id, { ...cv, primaryUserId: e.target.value })
-              }
-            >
-              <option value="">— Select —</option>
-              {opts.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.displayName}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="overlay-collab-label">
-            Secondary reviewer
-            <select
-              value={cv.secondaryUserId}
-              disabled={stageLocked}
-              onChange={(e) =>
-                onChange(field.id, { ...cv, secondaryUserId: e.target.value })
-              }
-            >
-              <option value="">— Select —</option>
-              {opts.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.displayName}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="overlay-collab-check">
-            <input
-              type="checkbox"
-              checked={!!cv.reviewerIsDesignatedRecorder}
-              disabled={stageLocked}
-              onChange={(e) =>
-                onChange(field.id, { ...cv, reviewerIsDesignatedRecorder: e.target.checked })
-              }
-            />
-            Secondary reviewer is the designated recorder for all data entry
-          </label>
-        </div>
+        <CollaboratorRoster
+          collaborators={collaborators}
+          className="overlay-collab-roster--compact"
+        />
       )
       break
     }
@@ -1927,11 +1883,14 @@ function OverlayField({
       )
   }
 
-  const blockedByCollaborator =
-    field.type !== 'collaborator' && !collaboratorSetupComplete
+  const blockedByCollaborator = !isDisplayOnlyField(field) && recordingBlocked
 
   const canSubmitOverlay =
-    isFieldValueFilled(field, value) && !fieldLocked && !stageLocked && !blockedByCollaborator
+    isFieldValueFilled(field, value) &&
+    !fieldLocked &&
+    !stageLocked &&
+    !blockedByCollaborator &&
+    !isDisplayOnlyField(field)
 
   const handleOverlayKeyDown = (e) => {
     if (e.key !== 'Enter') return
@@ -1952,7 +1911,9 @@ function OverlayField({
       onKeyDown={handleOverlayKeyDown}
     >
       {blockedByCollaborator && (
-        <p className="overlay-collab-block-hint">Complete the Collaborator Entry field first.</p>
+        <p className="overlay-collab-block-hint">
+          Verify who is entering data in Live Collab first.
+        </p>
       )}
       {input}
     </div>,
@@ -2042,6 +2003,12 @@ export default function DataEntry() {
           if (res.formData && typeof res.formData === 'object') {
             setFormData(res.formData)
           }
+          setCollaborators(Array.isArray(res.collaborators) ? res.collaborators : [])
+          setPresence(Array.isArray(res.presence) ? res.presence : [])
+          if (typeof res.presenceMinutes === 'number') setPresenceMinutes(res.presenceMinutes)
+          setVerificationAvailable(!!res.verificationAvailable)
+          setSessionUser(res.sessionUser || null)
+          if (typeof res.canWrite === 'boolean') setCanWrite(res.canWrite)
         }
       })
       .catch(() => { })
@@ -2162,13 +2129,37 @@ export default function DataEntry() {
   const [editingCorrectionId, setEditingCorrectionId] = useState(null)
   /** Draft value while correcting a locked field (Field detail panel only). */
   const [correctionDraft, setCorrectionDraft] = useState(null)
-  const [activeUsers, setActiveUsers] = useState([])
-  const [recorderModalFieldId, setRecorderModalFieldId] = useState(null)
   const [correctionModal, setCorrectionModal] = useState(null)
-  const [editorRole, setEditorRole] = useState('primary')
-  const [editorOther, setEditorOther] = useState('')
   const [completeModalOpen, setCompleteModalOpen] = useState(false)
-  const [completeSignOffChecked, setCompleteSignOffChecked] = useState(false)
+
+  // ─── Collaboration ────────────────────────────────────────────────────────
+  /** Roster picked at batch creation; also what the collaborator field prints. */
+  const [collaborators, setCollaborators] = useState([])
+  /** Open Live Collab windows: who has proved they are here, and until when. */
+  const [presence, setPresence] = useState([])
+  const [presenceMinutes, setPresenceMinutes] = useState(30)
+  const [verificationAvailable, setVerificationAvailable] = useState(false)
+  const [sessionUser, setSessionUser] = useState(null)
+  const [canWrite, setCanWrite] = useState(true)
+  /** db_user id of whoever is currently at the keyboard; entries are attributed to them. */
+  const [activeRecorderId, setActiveRecorderId] = useState(null)
+  const [liveCollabOpen, setLiveCollabOpen] = useState(false)
+  const [verifyTarget, setVerifyTarget] = useState(null)
+  const [verifyPassword, setVerifyPassword] = useState('')
+  const [verifyError, setVerifyError] = useState(null)
+  const [verifyBusy, setVerifyBusy] = useState(false)
+  /** Drives the countdown on open windows so they visibly lapse without a reload. */
+  const [nowTick, setNowTick] = useState(() => Date.now())
+
+  // Batch creation
+  const [rosterOptions, setRosterOptions] = useState([])
+  const [newBatchCollaboratorIds, setNewBatchCollaboratorIds] = useState([])
+
+  // Completion sign-off (re-authentication)
+  const [signOffUsername, setSignOffUsername] = useState('')
+  const [signOffPassword, setSignOffPassword] = useState('')
+  const [signOffError, setSignOffError] = useState(null)
+  const [signOffBusy, setSignOffBusy] = useState(false)
   const [pdfPreviewOpen, setPdfPreviewOpen] = useState(false)
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState(null)
   const [pdfPreviewLoading, setPdfPreviewLoading] = useState(false)
@@ -2177,57 +2168,90 @@ export default function DataEntry() {
 
   const formConfigRef = useRef(null)
   formConfigRef.current = formConfig
-  const activeUsersRef = useRef([])
-  activeUsersRef.current = activeUsers
   const batchIdRef = useRef(batchId)
   batchIdRef.current = batchId
 
+  // Only linked, active roster entries can be collaborators — an unlinked name has no account
+  // to re-authenticate against.
   useEffect(() => {
-    if (!formConfig?.fields?.some((f) => f.type === 'collaborator')) return
+    if (batchId) return
     listActiveUsers()
       .then((r) => {
-        if (r.success && Array.isArray(r.users)) setActiveUsers(r.users)
+        if (r.success && Array.isArray(r.users)) {
+          setRosterOptions(r.users.filter((u) => u.linked && u.active !== false))
+        }
       })
       .catch(() => { })
-  }, [formConfig?.id])
+  }, [batchId])
 
-  const userIdToName = useMemo(
-    () => Object.fromEntries(activeUsers.map((u) => [u.id, u.displayName])),
-    [activeUsers],
+  const refreshPresence = useCallback(async (bid) => {
+    if (!bid) return
+    try {
+      const res = await getCollabPresence(bid)
+      if (res.success) {
+        setPresence(Array.isArray(res.presence) ? res.presence : [])
+        setCollaborators(Array.isArray(res.collaborators) ? res.collaborators : [])
+        if (typeof res.presenceMinutes === 'number') setPresenceMinutes(res.presenceMinutes)
+        setVerificationAvailable(!!res.verificationAvailable)
+        if (res.sessionUser) setSessionUser(res.sessionUser)
+        if (typeof res.canWrite === 'boolean') setCanWrite(res.canWrite)
+      }
+    } catch {
+      /* leave the last known state in place */
+    }
+  }, [])
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNowTick(Date.now()), 15000)
+    return () => window.clearInterval(id)
+  }, [])
+
+  useEffect(() => {
+    if (!batchId || isCompleted) return undefined
+    const id = window.setInterval(() => { refreshPresence(batchId) }, 60000)
+    return () => window.clearInterval(id)
+  }, [batchId, isCompleted, refreshPresence])
+
+  /** Windows that have not lapsed. Recomputed on each tick so the UI expires on its own. */
+  const activePresence = useMemo(
+    () => presence.filter((p) => presenceRemainingMs(p, nowTick) > 0),
+    [presence, nowTick],
   )
 
-  const collaboratorPolicy = useMemo(
-    () => getCollaboratorPolicy(formConfig, formData, userIdToName),
-    [formConfig, formData, userIdToName],
+  const activeRecorder = useMemo(
+    () => activePresence.find((p) => p.dbUserId === activeRecorderId) || null,
+    [activePresence, activeRecorderId],
   )
+  const activeRecorderRef = useRef(null)
+  activeRecorderRef.current = activeRecorder
 
-  const firstCollabField = useMemo(
-    () => formConfig?.fields?.find((f) => f.type === 'collaborator'),
-    [formConfig],
-  )
-  const collaboratorSetupComplete =
-    !firstCollabField || isFieldEntryLocked(formData[firstCollabField.id])
+  // Default to the signed-in user once they hold a window, so the common case — one person
+  // working alone — needs no extra clicks.
+  useEffect(() => {
+    if (activeRecorderId != null || !sessionUser) return
+    const mine = activePresence.find((p) => p.dbUserId === sessionUser.dbUserId)
+    if (mine) setActiveRecorderId(mine.dbUserId)
+  }, [activeRecorderId, sessionUser, activePresence])
 
-  function idToNameMap() {
-    return Object.fromEntries(activeUsersRef.current.map((u) => [u.id, u.displayName]))
-  }
+  const verificationAvailableRef = useRef(false)
+  verificationAvailableRef.current = verificationAvailable
+
+  /** With no verified person at the keyboard there is nobody to attribute an entry to. */
+  const recordingBlocked = verificationAvailable && !activeRecorder
+
+  // Drop the selection as soon as that person's window lapses, so the next entry cannot
+  // silently inherit an expired verification.
+  useEffect(() => {
+    if (activeRecorderId != null && !activeRecorder) setActiveRecorderId(null)
+  }, [activeRecorderId, activeRecorder])
+
 
   // Field change handler: store as audit object with timestamp on first entry
   const handleFieldChange = useCallback((id, value) => {
     lastActivityRef.current[id] = Date.now()
     setFormData((prev) => {
       const field = formConfigRef.current?.fields?.find((f) => f.id === id)
-      if (
-        field?.type === 'collaborator' &&
-        value &&
-        typeof value === 'object' &&
-        !Array.isArray(value)
-      ) {
-        const existing = prev[id]
-        const prevV = isFieldEntryObject(existing) ? collaboratorDraft(existing.v) : collaboratorDraft()
-        const merged = { ...prevV, ...value }
-        return { ...prev, [id]: normalizeEntry(existing, merged, { setEnteredAt: true }) }
-      }
+      if (isDisplayOnlyField(field)) return prev
       if (
         field?.type === 'table' &&
         value &&
@@ -2256,12 +2280,13 @@ export default function DataEntry() {
       const current = formDataRef.current
       const cfg = formConfigRef.current
       const now = Date.now()
-      const policy = getCollaboratorPolicy(cfg, current, idToNameMap())
-      const perEntryNoRecorder = policy && !policy.reviewerIsDesignatedRecorder
+      const recorder = activeRecorderRef.current
+      // Nothing may auto-lock without someone verified to own it.
+      if (verificationAvailableRef.current && !recorder) return
       let next = null
       cfg.fields.forEach((f) => {
         const id = f.id
-        if (f.type === 'collaborator') return
+        if (isDisplayOnlyField(f)) return
         const entry = current[id]
         if (!entry) return
         const effective = getEffectiveValue(entry)
@@ -2278,16 +2303,13 @@ export default function DataEntry() {
           return
         }
         if (isFieldEntryLocked(entry)) return
-        if (perEntryNoRecorder) return
         const last = lastActivityRef.current[id] ?? 0
         if (now - last >= IDLE_LOCK_MS) {
           if (!next) next = { ...current }
-          const recordedBy =
-            policy && policy.reviewerIsDesignatedRecorder ? policy.secondaryName : undefined
           next[id] = normalizeEntry(entry, effective, {
             setEnteredAt: false,
             setLockedAt: true,
-            recordedBy,
+            recordedBy: buildAttribution(recorder),
           })
         }
       })
@@ -2297,33 +2319,17 @@ export default function DataEntry() {
   }, [formConfig?.fields])
 
   const handleSaveCorrectionRequest = useCallback((fieldId, newValue) => {
-    setEditorRole('primary')
-    const pol = getCollaboratorPolicy(
-      formConfigRef.current,
-      formDataRef.current,
-      idToNameMap(),
-    )
-    setEditorOther(pol ? '' : displayName)
     setCorrectionModal({ fieldId, newValue })
-  }, [displayName])
+  }, [])
 
   const confirmCorrectionSave = useCallback(() => {
     if (!correctionModal) return
-    const policy = getCollaboratorPolicy(
-      formConfigRef.current,
-      formDataRef.current,
-      idToNameMap(),
-    )
-    let by = ''
-    if (policy) {
-      if (editorRole === 'primary') by = policy.primaryName
-      else if (editorRole === 'secondary') by = policy.secondaryName
-      else by = editorOther.trim()
-    } else {
-      by = editorOther.trim() || displayName
-    }
-    if (!by) {
-      window.alert('Specify who is making this edit.')
+    const recorder = activeRecorderRef.current
+    const by = verificationAvailableRef.current
+      ? buildAttribution(recorder)
+      : buildAttribution(recorder) ?? displayName
+    if (verificationAvailableRef.current && !by) {
+      window.alert('Verify who is at the keyboard in Live Collab before saving a correction.')
       return
     }
     const { fieldId, newValue } = correctionModal
@@ -2335,8 +2341,7 @@ export default function DataEntry() {
     setEditingCorrectionId(null)
     setCorrectionDraft(null)
     setCorrectionModal(null)
-    setEditorOther('')
-  }, [correctionModal, editorRole, editorOther, displayName])
+  }, [correctionModal, displayName])
 
   const handleLockField = useCallback((fieldId) => {
     const field = formConfigRef.current?.fields?.find((f) => f.id === fieldId)
@@ -2344,26 +2349,7 @@ export default function DataEntry() {
     const entry = fd[fieldId]
     const effective = getEffectiveValue(entry)
 
-    if (field?.type === 'collaborator') {
-      if (!isFieldValueFilled(field, effective)) {
-        window.alert(
-          'Select a primary analyst and secondary reviewer (two different active users).',
-        )
-        return
-      }
-      const cv = collaboratorDraft(effective)
-      const map = idToNameMap()
-      const v = {
-        ...cv,
-        primaryDisplayName: map[cv.primaryUserId] || cv.primaryUserId,
-        secondaryDisplayName: map[cv.secondaryUserId] || cv.secondaryUserId,
-      }
-      setFormData((prev) => ({
-        ...prev,
-        [fieldId]: normalizeEntry(prev[fieldId], v, { setEnteredAt: false, setLockedAt: true }),
-      }))
-      return
-    }
+    if (isDisplayOnlyField(field)) return
 
     if (field?.type === 'table' && isRequired(field) && !isFieldValueFilled(field, effective)) {
       window.alert('Fill all cells in this table before submitting.')
@@ -2380,12 +2366,17 @@ export default function DataEntry() {
     }
     if (isFieldEntryLocked(entry)) return
 
-    const policy = getCollaboratorPolicy(formConfigRef.current, fd, idToNameMap())
-    if (policy && !policy.reviewerIsDesignatedRecorder) {
-      setRecorderModalFieldId(fieldId)
+    // Every locked entry names a person who proved they were here. No verified recorder,
+    // no entry — the alternative is an attribution nobody can stand behind.
+    const recorder = activeRecorderRef.current
+    if (verificationAvailableRef.current && !recorder) {
+      window.alert(
+        'Open Live Collab and verify who is entering this data before submitting the field.',
+      )
+      setLiveCollabOpen(true)
       return
     }
-    const recordedBy = policy && policy.reviewerIsDesignatedRecorder ? policy.secondaryName : undefined
+    const recordedBy = buildAttribution(recorder)
     setFormData((prev) => {
       const ent = prev[fieldId]
       const eff = getEffectiveValue(ent)
@@ -2424,34 +2415,54 @@ export default function DataEntry() {
     return false
   }
 
-  const confirmRecorderLock = useCallback((role) => {
-    const fieldId = recorderModalFieldId
-    if (!fieldId) return
-    const policy = getCollaboratorPolicy(
-      formConfigRef.current,
-      formDataRef.current,
-      idToNameMap(),
-    )
-    if (!policy) {
-      setRecorderModalFieldId(null)
-      return
-    }
-    const name = role === 'primary' ? policy.primaryName : policy.secondaryName
-    setFormData((prev) => {
-      const ent = prev[fieldId]
-      const eff = getEffectiveValue(ent)
-      if (isFieldEntryLocked(ent)) return prev
-      return {
-        ...prev,
-        [fieldId]: normalizeEntry(ent, eff, {
-          setEnteredAt: false,
-          setLockedAt: true,
-          recordedBy: name,
-        }),
+  /**
+   * Live Collab — a collaborator proves they are at this machine with their own password.
+   * This never changes who is logged in; it opens a fixed presence window they can record under.
+   */
+  const submitVerification = useCallback(async (e) => {
+    e?.preventDefault?.()
+    if (!verifyTarget || !batchId) return
+    setVerifyBusy(true)
+    setVerifyError(null)
+    try {
+      const res = await verifyCollaborator({
+        batchId,
+        username: verifyTarget.username,
+        password: verifyPassword,
+      })
+      if (!res.success) {
+        setVerifyError(res.message || 'Verification failed.')
+        return
       }
-    })
-    setRecorderModalFieldId(null)
-  }, [recorderModalFieldId])
+      setVerifyPassword('')
+      setVerifyTarget(null)
+      if (typeof res.presenceMinutes === 'number') setPresenceMinutes(res.presenceMinutes)
+      // Whoever just proved they are here becomes the recorder — that is the point of verifying.
+      if (res.presence) {
+        setPresence((prev) => [
+          res.presence,
+          ...prev.filter((p) => p.dbUserId !== res.presence.dbUserId),
+        ])
+        setActiveRecorderId(res.presence.dbUserId)
+      }
+      await refreshPresence(batchId)
+    } catch (err) {
+      setVerifyError(err.message || 'Verification failed.')
+    } finally {
+      setVerifyBusy(false)
+    }
+  }, [verifyTarget, verifyPassword, batchId, refreshPresence])
+
+  const stepAway = useCallback(async (presenceRow) => {
+    if (!batchId || !presenceRow) return
+    try {
+      await endCollabPresence(batchId, presenceRow.id)
+    } catch {
+      /* refresh below reflects the real state either way */
+    }
+    if (activeRecorderId === presenceRow.dbUserId) setActiveRecorderId(null)
+    await refreshPresence(batchId)
+  }, [batchId, activeRecorderId, refreshPresence])
 
   const [pdfPageSize, setPdfPageSize] = useState({ width: 0, height: 0 })
   /** Saved when changing pages; applied in onPageRendered after the new page paints. */
@@ -2655,34 +2666,40 @@ export default function DataEntry() {
     a.click()
   }, [pdfPreviewUrl, pdfPreviewFilename])
 
+  /**
+   * @param {object} extra          merged into the update payload (sign-off credentials)
+   * @param {boolean} silentError   return the failure instead of alerting (modal shows it)
+   */
   const runCompleteBatch = useCallback(
-    async (extra = {}) => {
+    async (extra = {}, silentError = false) => {
       const effectiveBatchId = batchIdRef.current || batchId
       if (!effectiveBatchId) {
         alert('No batch record is open. Create or open a batch before marking complete.')
-        return
+        return { ok: false }
       }
       setSaving(true)
       try {
         const saved = await persistFormData({ silentSuccess: true, requireAllRequired: true })
-        if (!saved.ok) return
+        if (!saved.ok) return { ok: false }
 
         const payload = { batchId: effectiveBatchId, status: 'completed', ...extra }
         if (isEbrApiDebug()) {
           console.debug('[EBR DataEntry] mark complete', {
             batchId: effectiveBatchId,
             extraKeys: Object.keys(extra),
-            hasSignOff: !!(extra.completedSignOffBy || extra.completedSignOffAt),
+            hasSignOff: !!extra.signOffUsername,
           })
         }
         const res = await updateBatchRecord(payload)
         if (res.success) {
           navigate('/batch?filter=completed')
-        } else {
-          alert('Error: ' + (res.message || 'Unknown error'))
+          return { ok: true, res }
         }
+        if (!silentError) alert('Error: ' + (res.message || 'Unknown error'))
+        return { ok: false, res }
       } catch (err) {
-        alert('Error completing batch: ' + err.message)
+        if (!silentError) alert('Error completing batch: ' + err.message)
+        return { ok: false, error: err }
       } finally {
         setSaving(false)
       }
@@ -2692,27 +2709,40 @@ export default function DataEntry() {
 
   const handleComplete = useCallback(async () => {
     if (!batchId) return
-    if (collaboratorPolicy) {
-      setCompleteSignOffChecked(false)
+    // Completing is a signature. Where passwords are enforced the signer re-authenticates,
+    // even if they already hold an open Live Collab window.
+    if (verificationAvailable) {
+      setSignOffUsername(activeRecorder?.username || sessionUser?.username || '')
+      setSignOffPassword('')
+      setSignOffError(null)
       setCompleteModalOpen(true)
       return
     }
     if (!window.confirm('Mark this batch record as complete? This cannot be undone.')) return
     await runCompleteBatch()
-  }, [batchId, collaboratorPolicy, runCompleteBatch])
+  }, [batchId, verificationAvailable, activeRecorder, sessionUser, runCompleteBatch])
 
-  const confirmSecondarySignOff = useCallback(async () => {
-    if (!completeSignOffChecked || !collaboratorPolicy) {
-      window.alert('Confirm that the secondary reviewer is signing off on this batch.')
+  const confirmSignOff = useCallback(async (e) => {
+    e?.preventDefault?.()
+    if (!signOffUsername.trim() || !signOffPassword) {
+      setSignOffError('Enter the signer\u2019s username and password.')
       return
     }
-    setCompleteModalOpen(false)
-    setCompleteSignOffChecked(false)
-    await runCompleteBatch({
-      completedSignOffBy: collaboratorPolicy.secondaryName,
-      completedSignOffAt: new Date().toISOString(),
-    })
-  }, [completeSignOffChecked, collaboratorPolicy, runCompleteBatch])
+    setSignOffBusy(true)
+    setSignOffError(null)
+    const result = await runCompleteBatch(
+      { signOffUsername: signOffUsername.trim(), signOffPassword },
+      true,
+    )
+    setSignOffBusy(false)
+    if (result.ok) {
+      setCompleteModalOpen(false)
+      setSignOffPassword('')
+      return
+    }
+    setSignOffError(result.res?.message || result.error?.message || 'Could not complete the batch.')
+    setSignOffPassword('')
+  }, [signOffUsername, signOffPassword, runCompleteBatch])
 
   // Create batch
   const handleCreateBatch = useCallback(async () => {
@@ -2726,8 +2756,10 @@ export default function DataEntry() {
         title: batchTitle.trim(),
         description: batchDesc.trim(),
         createdBy: displayName,
+        collaborators: newBatchCollaboratorIds,
       })
       if (res.success && res.batchId) {
+        if (res.message) alert(res.message)
         const params = new URLSearchParams(searchParams)
         params.set('batch', res.batchId)
         navigate(`/forms/entry?${params.toString()}`)
@@ -2739,7 +2771,15 @@ export default function DataEntry() {
     } finally {
       setCreatingBatch(false)
     }
-  }, [batchTitle, batchDesc, formConfig, searchParams, navigate, displayName])
+  }, [
+    batchTitle,
+    batchDesc,
+    formConfig,
+    searchParams,
+    navigate,
+    displayName,
+    newBatchCollaboratorIds,
+  ])
 
   // ─── No form specified ─────────────────────────────────────────────────
   if (!formId && !pdfParam) {
@@ -2798,6 +2838,38 @@ export default function DataEntry() {
               onChange={e => setBatchDesc(e.target.value)}
             />
           </div>
+          <div className="form-group">
+            <label id="batch-collab-label">Collaborators</label>
+            <p className="de-collab-picker-hint">
+              Everyone who will work on this batch. Each can be verified at the keyboard during
+              entry, and the roster is printed on the record. You are added automatically.
+            </p>
+            {rosterOptions.length === 0 ? (
+              <p className="de-collab-picker-empty">
+                No accounts on the roster yet. Add people under User administration first.
+              </p>
+            ) : (
+              <div className="de-collab-picker" role="group" aria-labelledby="batch-collab-label">
+                {rosterOptions.map((u) => (
+                  <label key={u.dbUserId} className="de-collab-picker-item">
+                    <input
+                      type="checkbox"
+                      checked={newBatchCollaboratorIds.includes(u.dbUserId)}
+                      onChange={(e) =>
+                        setNewBatchCollaboratorIds((prev) =>
+                          e.target.checked
+                            ? [...prev, u.dbUserId]
+                            : prev.filter((x) => x !== u.dbUserId),
+                        )
+                      }
+                    />
+                    <span className="de-collab-picker-name">{u.displayName}</span>
+                    <span className="de-collab-picker-user">{u.username}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
           <button className="btn btn-primary" disabled={creatingBatch || !batchTitle.trim()} onClick={handleCreateBatch}>
             {creatingBatch ? 'Creating...' : 'Create and Start'}
           </button>
@@ -2826,6 +2898,16 @@ export default function DataEntry() {
             </button>
           ) : (
             <>
+              {batchId && (
+                <button
+                  type="button"
+                  className={`btn btn-live-collab${activeRecorder ? ' is-active' : ''}`}
+                  onClick={() => setLiveCollabOpen(true)}
+                  title="Choose and verify who is entering data"
+                >
+                  {activeRecorder ? `Live Collab · ${activeRecorder.displayName}` : 'Live Collab'}
+                </button>
+              )}
               <button className="btn btn-save" disabled={saving} onClick={handleSave}>
                 {saving ? 'Saving...' : 'Save Data'}
               </button>
@@ -2871,10 +2953,37 @@ export default function DataEntry() {
         </div>
       )}
 
-      {firstCollabField && !collaboratorSetupComplete && batchId && !isCompleted && (
+      {batchId && !isCompleted && !canWrite && (
+        <div className="de-collab-banner de-collab-banner--blocked" role="status">
+          <strong>View only:</strong> you are not a collaborator on this batch record, so you can
+          read it but not enter or change data.
+        </div>
+      )}
+
+      {batchId && !isCompleted && canWrite && collaborators.length === 0 && (
+        <div className="de-collab-banner de-collab-banner--blocked" role="status">
+          <strong>No collaborators:</strong> add at least one person in Live Collab before
+          recording data.
+        </div>
+      )}
+
+      {batchId && !isCompleted && canWrite && recordingBlocked && collaborators.length > 0 && (
         <div className="de-collab-banner" role="status">
-          <strong>Collaborator setup required:</strong> complete &ldquo;{firstCollabField.label || 'Collaborator Entry'}&rdquo;
-          (primary analyst + secondary reviewer) before you can submit other fields.
+          <strong>Nobody verified:</strong> open{' '}
+          <button type="button" className="de-collab-banner-link" onClick={() => setLiveCollabOpen(true)}>
+            Live Collab
+          </button>{' '}
+          and confirm who is at the keyboard. Entries are recorded against that person.
+        </div>
+      )}
+
+      {batchId && !isCompleted && activeRecorder && (
+        <div className="de-collab-banner de-collab-banner--ok" role="status">
+          <strong>Recording as {activeRecorder.displayName}</strong> &mdash;{' '}
+          {formatRemaining(presenceRemainingMs(activeRecorder, nowTick))}.{' '}
+          <button type="button" className="de-collab-banner-link" onClick={() => setLiveCollabOpen(true)}>
+            Change
+          </button>
         </div>
       )}
 
@@ -2886,13 +2995,10 @@ export default function DataEntry() {
             {formConfig.description && <p>{formConfig.description}</p>}
             <p><strong>PDF:</strong> {formConfig.pdfFile}</p>
             <p><strong>Fields:</strong> {formConfig.fields?.length ?? 0}</p>
-            {collaboratorPolicy && (
+            {collaborators.length > 0 && (
               <p className="de-collab-summary">
-                <strong>Collaborators:</strong> Primary {collaboratorPolicy.primaryName}; Reviewer{' '}
-                {collaboratorPolicy.secondaryName}
-                {collaboratorPolicy.reviewerIsDesignatedRecorder
-                  ? ' (reviewer records all entry)'
-                  : ' (recorder chosen per field on Submit)'}
+                <strong>Collaborators:</strong>{' '}
+                {collaborators.map((c) => c.displayName || c.username).join(', ')}
               </p>
             )}
             {formConfig.isCombined && (
@@ -2994,8 +3100,8 @@ export default function DataEntry() {
                         onChange={handleFieldChange}
                         onLockField={handleLockField}
                         readOnly={isCompleted}
-                        activeUsers={activeUsers}
-                        collaboratorSetupComplete={collaboratorSetupComplete}
+                        collaborators={collaborators}
+                        recordingBlocked={recordingBlocked || !canWrite}
                         onFieldPanelToggle={openFieldPanel}
                         fieldPanelActive={fieldInfoPanelId === field.id}
                       />
@@ -3054,8 +3160,8 @@ export default function DataEntry() {
           onStartCorrection={handleStartCorrection}
           onClose={() => setFieldInfoPanelId(null)}
           correctionRef={correctionRefMap[fieldInfoPanelField.id]}
-          activeUsers={activeUsers}
-          collaboratorSetupComplete={collaboratorSetupComplete}
+          collaborators={collaborators}
+          recordingBlocked={recordingBlocked || !canWrite}
           formatTs={formatTs}
           overlayScale={scale}
           editingCorrectionId={editingCorrectionId}
@@ -3067,39 +3173,45 @@ export default function DataEntry() {
         />
       )}
 
-      {recorderModalFieldId && collaboratorPolicy && (
-        <div
-          className="de-modal-overlay"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="recorder-modal-title"
-        >
-          <div
-            className="de-modal"
-            onClick={(e) => e.stopPropagation()}
-            onKeyDown={(e) => e.stopPropagation()}
-          >
-            <h3 id="recorder-modal-title">Who is recording this entry?</h3>
-            <p className="de-modal-desc">Select who is entering data for this field.</p>
-            <div className="de-modal-actions col">
+      {correctionModal && (
+        <div className="de-modal-overlay" role="dialog" aria-modal="true">
+          <div className="de-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Confirm this correction</h3>
+            {activeRecorder ? (
+              <p className="de-modal-desc">
+                This correction will be recorded against{' '}
+                <strong>{activeRecorder.displayName}</strong>, verified{' '}
+                {formatTs(activeRecorder.verifiedAt)}. If someone else is making it, switch the
+                recorder in Live Collab first.
+              </p>
+            ) : verificationAvailable ? (
+              <p className="de-modal-desc de-modal-desc--warn">
+                Nobody is verified at the keyboard. Open Live Collab and confirm who is making this
+                correction before saving it.
+              </p>
+            ) : (
+              <p className="de-modal-desc">
+                This correction will be recorded against <strong>{displayName}</strong>. Credential
+                verification is not enabled on this deployment, so it is stored unverified.
+              </p>
+            )}
+            <div className="de-modal-actions">
               <button
                 type="button"
                 className="de-modal-btn primary"
-                onClick={() => confirmRecorderLock('primary')}
+                disabled={verificationAvailable && !activeRecorder}
+                onClick={confirmCorrectionSave}
               >
-                {collaboratorPolicy.primaryName} (Primary analyst)
-              </button>
-              <button
-                type="button"
-                className="de-modal-btn primary"
-                onClick={() => confirmRecorderLock('secondary')}
-              >
-                {collaboratorPolicy.secondaryName} (Secondary reviewer)
+                Save correction
               </button>
               <button
                 type="button"
                 className="de-modal-btn ghost"
-                onClick={() => setRecorderModalFieldId(null)}
+                onClick={() => {
+                  setCorrectionModal(null)
+                  setEditingCorrectionId(null)
+                  setCorrectionDraft(null)
+                }}
               >
                 Cancel
               </button>
@@ -3108,76 +3220,153 @@ export default function DataEntry() {
         </div>
       )}
 
-      {correctionModal && (
-        <div className="de-modal-overlay" role="dialog" aria-modal="true">
-          <div className="de-modal" onClick={(e) => e.stopPropagation()}>
-            <h3>Who is making this edit?</h3>
-            <p className="de-modal-desc">Document the person saving this correction.</p>
-            {collaboratorPolicy ? (
-              <div className="de-modal-editor-roles">
-                <label className="de-modal-radio">
-                  <input
-                    type="radio"
-                    name="de-editor"
-                    checked={editorRole === 'primary'}
-                    onChange={() => setEditorRole('primary')}
-                  />
-                  {collaboratorPolicy.primaryName} (Primary)
-                </label>
-                <label className="de-modal-radio">
-                  <input
-                    type="radio"
-                    name="de-editor"
-                    checked={editorRole === 'secondary'}
-                    onChange={() => setEditorRole('secondary')}
-                  />
-                  {collaboratorPolicy.secondaryName} (Reviewer)
-                </label>
-                <label className="de-modal-radio">
-                  <input
-                    type="radio"
-                    name="de-editor"
-                    checked={editorRole === 'other'}
-                    onChange={() => setEditorRole('other')}
-                  />
-                  Other
-                </label>
-                {editorRole === 'other' && (
-                  <input
-                    type="text"
-                    className="de-modal-input"
-                    placeholder="Name"
-                    value={editorOther}
-                    onChange={(e) => setEditorOther(e.target.value)}
-                  />
-                )}
-              </div>
-            ) : (
-              <input
-                type="text"
-                className="de-modal-input"
-                placeholder="Your name"
-                value={editorOther}
-                onChange={(e) => setEditorOther(e.target.value)}
-              />
+      {liveCollabOpen && (
+        <div
+          className="de-modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="live-collab-title"
+          onClick={() => {
+            setLiveCollabOpen(false)
+            setVerifyTarget(null)
+            setVerifyPassword('')
+            setVerifyError(null)
+          }}
+        >
+          <div className="de-modal de-live-collab" onClick={(e) => e.stopPropagation()}>
+            <h3 id="live-collab-title">Live Collab</h3>
+            <p className="de-modal-desc">
+              Who is physically at this machine? Each person confirms with their own password, which
+              records that they were here. Entries are attributed to whoever is selected.
+            </p>
+
+            {!verificationAvailable && (
+              <p className="de-modal-desc de-modal-desc--warn">
+                Credential verification is switched off on this deployment, so presence cannot be
+                proved. Entries will be stored as unverified.
+              </p>
             )}
-            <div className="de-modal-actions">
-              <button type="button" className="de-modal-btn primary" onClick={confirmCorrectionSave}>
-                Save correction
-              </button>
-              <button
-                type="button"
-                className="de-modal-btn ghost"
-                onClick={() => {
-                  setCorrectionModal(null)
-                  setEditorOther('')
-                  setEditingCorrectionId(null)
-                  setCorrectionDraft(null)
-                }}
-              >
-                Cancel
-              </button>
-            </div>
+
+            {verifyTarget ? (
+              <form className="de-collab-verify" onSubmit={submitVerification}>
+                <p className="de-collab-verify-lead">
+                  <strong>{verifyTarget.displayName}</strong> &mdash; enter your password to confirm
+                  you are here. This does not change who is signed in.
+                </p>
+                <input
+                  type="text"
+                  className="de-modal-input"
+                  value={verifyTarget.username}
+                  readOnly
+                  autoComplete="username"
+                  aria-label="Username"
+                />
+                <input
+                  type="password"
+                  className="de-modal-input"
+                  placeholder="Password"
+                  value={verifyPassword}
+                  onChange={(e) => setVerifyPassword(e.target.value)}
+                  autoComplete="current-password"
+                  autoFocus
+                />
+                {verifyError && <p className="de-modal-error">{verifyError}</p>}
+                <div className="de-modal-actions">
+                  <button type="submit" className="de-modal-btn primary" disabled={verifyBusy}>
+                    {verifyBusy ? 'Verifying…' : `Verify for ${presenceMinutes} min`}
+                  </button>
+                  <button
+                    type="button"
+                    className="de-modal-btn ghost"
+                    onClick={() => {
+                      setVerifyTarget(null)
+                      setVerifyPassword('')
+                      setVerifyError(null)
+                    }}
+                  >
+                    Back
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <>
+                <div className="de-collab-section-title">On this batch</div>
+                {collaborators.length === 0 ? (
+                  <p className="de-collab-picker-empty">
+                    Nobody is on this batch record yet.
+                  </p>
+                ) : (
+                  <ul className="de-collab-list">
+                    {collaborators.map((c) => {
+                      const open = activePresence.find((p) => p.dbUserId === c.dbUserId)
+                      const selected = activeRecorderId === c.dbUserId
+                      return (
+                        <li
+                          key={c.dbUserId}
+                          className={`de-collab-row${selected ? ' is-selected' : ''}`}
+                        >
+                          <div className="de-collab-row-main">
+                            <span className="de-collab-row-name">{c.displayName || c.username}</span>
+                            <span className="de-collab-row-state">
+                              {!open
+                                ? 'Not verified'
+                                : open.source === 'session'
+                                  ? 'Signed in on this machine'
+                                  : `Verified · ${formatRemaining(presenceRemainingMs(open, nowTick))}`}
+                            </span>
+                          </div>
+                          <div className="de-collab-row-actions">
+                            {open ? (
+                              <>
+                                <button
+                                  type="button"
+                                  className="de-modal-btn primary de-collab-btn"
+                                  disabled={selected}
+                                  onClick={() => setActiveRecorderId(c.dbUserId)}
+                                >
+                                  {selected ? 'Recording' : 'Set as recorder'}
+                                </button>
+                                {open.source !== 'session' && (
+                                  <button
+                                    type="button"
+                                    className="de-modal-btn ghost de-collab-btn"
+                                    onClick={() => stepAway(open)}
+                                  >
+                                    Step away
+                                  </button>
+                                )}
+                              </>
+                            ) : (
+                              <button
+                                type="button"
+                                className="de-modal-btn primary de-collab-btn"
+                                disabled={!verificationAvailable}
+                                onClick={() => {
+                                  setVerifyTarget(c)
+                                  setVerifyPassword('')
+                                  setVerifyError(null)
+                                }}
+                              >
+                                Verify
+                              </button>
+                            )}
+                          </div>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                )}
+                <div className="de-modal-actions">
+                  <button
+                    type="button"
+                    className="de-modal-btn ghost"
+                    onClick={() => setLiveCollabOpen(false)}
+                  >
+                    Close
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -3217,45 +3406,56 @@ export default function DataEntry() {
         </div>
       )}
 
-      {completeModalOpen && collaboratorPolicy && (
+      {completeModalOpen && (
         <div className="de-modal-overlay" role="dialog" aria-modal="true">
-          <div className="de-modal" onClick={(e) => e.stopPropagation()}>
-            <h3>Secondary reviewer sign-off</h3>
+          <form className="de-modal" onClick={(e) => e.stopPropagation()} onSubmit={confirmSignOff}>
+            <h3>Sign off and complete this batch</h3>
             <p className="de-modal-desc">
-              The secondary reviewer ({collaboratorPolicy.secondaryName}) signs off on this batch record.
+              Completing a batch record is a signature. Enter your own credentials to sign. You must
+              be a collaborator on this batch. This cannot be undone.
             </p>
-            <label className="de-modal-check">
+            <label className="de-modal-label">
+              Username
               <input
-                type="checkbox"
-                checked={completeSignOffChecked}
-                onChange={(e) => setCompleteSignOffChecked(e.target.checked)}
+                type="text"
+                className="de-modal-input"
+                value={signOffUsername}
+                onChange={(e) => setSignOffUsername(e.target.value)}
+                autoComplete="username"
+                autoFocus
               />
-              I confirm that <strong>{collaboratorPolicy.secondaryName}</strong> is signing off as secondary
-              reviewer. This action cannot be undone.
             </label>
+            <label className="de-modal-label">
+              Password
+              <input
+                type="password"
+                className="de-modal-input"
+                value={signOffPassword}
+                onChange={(e) => setSignOffPassword(e.target.value)}
+                autoComplete="current-password"
+              />
+            </label>
+            {signOffError && <p className="de-modal-error">{signOffError}</p>}
             <div className="de-modal-actions">
-              <button
-                type="button"
-                className="de-modal-btn primary"
-                disabled={!completeSignOffChecked}
-                onClick={confirmSecondarySignOff}
-              >
-                Mark batch complete
+              <button type="submit" className="de-modal-btn primary" disabled={signOffBusy}>
+                {signOffBusy ? 'Signing…' : 'Sign and complete'}
               </button>
               <button
                 type="button"
                 className="de-modal-btn ghost"
                 onClick={() => {
                   setCompleteModalOpen(false)
-                  setCompleteSignOffChecked(false)
+                  setSignOffPassword('')
+                  setSignOffError(null)
                 }}
               >
                 Cancel
               </button>
             </div>
-          </div>
+          </form>
         </div>
       )}
+
     </div>
   )
 }

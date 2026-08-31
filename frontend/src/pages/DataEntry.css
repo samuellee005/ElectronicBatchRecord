@@ -3198,3 +3198,249 @@ button.de-signature-correction-link {
     width: 100%;
   }
 }
+
+/* ─── Collaboration: roster, Live Collab, attribution ─────────────────────── */
+
+.de-collab-banner--ok {
+  background: #eef7ee;
+  border-color: #9ccc9c;
+  color: #205c20;
+}
+
+.de-collab-banner--blocked {
+  background: #fdeeee;
+  border-color: #e2a1a1;
+  color: #7a2020;
+}
+
+.de-collab-banner-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* Collaborator field: a printed roster, not an input. */
+.overlay-collab-roster {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  max-height: 100%;
+  overflow-y: auto;
+  font-size: 0.8rem;
+}
+
+.overlay-collab-names {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+
+.overlay-collab-names li {
+  color: #222;
+  font-weight: 600;
+}
+
+.overlay-collab-roster--compact .overlay-collab-names {
+  gap: 2px 8px;
+  justify-content: center;
+}
+
+.overlay-collab-roster--compact .overlay-collab-names li {
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.overlay-collab-empty {
+  margin: 0;
+  color: #999;
+  font-style: italic;
+}
+
+/* Collaborator picker on the batch creation panel. */
+.de-collab-picker-hint {
+  margin: 0 0 10px;
+  font-size: 0.85rem;
+  color: #666;
+  line-height: 1.45;
+}
+
+.de-collab-picker-empty {
+  margin: 0;
+  font-size: 0.88rem;
+  color: #a05a00;
+  background: #fff8e6;
+  border: 1px solid #f0d8a0;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.de-collab-picker {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #e2e2e8;
+  border-radius: 8px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.de-collab-picker-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 9px 12px;
+  border-bottom: 1px solid #f2f2f5;
+  cursor: pointer;
+}
+
+.de-collab-picker-item:last-child {
+  border-bottom: none;
+}
+
+.de-collab-picker-item:hover {
+  background: #f7f8fc;
+}
+
+.de-collab-picker-item input {
+  accent-color: #667eea;
+}
+
+.de-collab-picker-name {
+  font-weight: 600;
+  color: #222;
+}
+
+.de-collab-picker-user {
+  font-size: 0.8rem;
+  color: #888;
+}
+
+/* Live Collab */
+.btn-live-collab {
+  background: #eef1fd;
+  color: #3c46a8;
+  border: 1px solid #c8cff5;
+}
+
+.btn-live-collab.is-active {
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  color: #fff;
+  border-color: transparent;
+}
+
+.de-live-collab {
+  max-width: min(560px, 96vw);
+  width: 100%;
+}
+
+.de-collab-section-title {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #777;
+  margin-bottom: 8px;
+}
+
+.de-collab-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid #e2e2e8;
+  border-radius: 8px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.de-collab-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border-bottom: 1px solid #f2f2f5;
+}
+
+.de-collab-row:last-child {
+  border-bottom: none;
+}
+
+.de-collab-row.is-selected {
+  background: #f0f4ff;
+}
+
+.de-collab-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.de-collab-row-name {
+  font-weight: 600;
+  color: #222;
+}
+
+.de-collab-row-state {
+  font-size: 0.8rem;
+  color: #777;
+}
+
+.de-collab-row.is-selected .de-collab-row-state {
+  color: #3c46a8;
+}
+
+.de-collab-row-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.de-collab-btn {
+  padding: 6px 12px;
+  font-size: 0.82rem;
+}
+
+.de-collab-verify {
+  display: flex;
+  flex-direction: column;
+}
+
+.de-collab-verify-lead {
+  margin: 0 0 6px;
+  font-size: 0.9rem;
+  color: #444;
+  line-height: 1.45;
+}
+
+.de-modal-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #444;
+  margin-bottom: 12px;
+}
+
+.de-modal-error {
+  margin: 10px 0 0;
+  font-size: 0.88rem;
+  color: #c02020;
+}
+
+.de-modal-desc--warn {
+  color: #7a4a00;
+  background: #fff8e6;
+  border: 1px solid #f0d8a0;
+  border-radius: 8px;
+  padding: 10px 12px;
+}

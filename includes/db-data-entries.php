@@ -104,6 +104,9 @@ function ebr_db_data_entry_row_to_api(array $row): array
         'stages' => $json('stages'),
         'savedAt' => $row['saved_at'] ?? '',
         'filename' => $row['storage_filename'] ?? '',
+        'savedByUserId' => isset($row['saved_by_user_id']) && $row['saved_by_user_id'] !== null
+            ? (int) $row['saved_by_user_id'] : null,
+        'savedByUsername' => (string) ($row['saved_by_username'] ?? ''),
     ];
 }
 
@@ -115,13 +118,14 @@ function ebr_db_data_entry_insert(array $dataEntry): void
     $pdo = ebr_pg_pdo();
     $sql = <<<'SQL'
 INSERT INTO ebr_data_entries (
-    id, form_id, form_name, pdf_file, batch_id, data, stage_completion, stages, saved_at, storage_filename
+    id, form_id, form_name, pdf_file, batch_id, data, stage_completion, stages, saved_at,
+    storage_filename, saved_by_user_id, saved_by_username
 ) VALUES (
     :id, :form_id, :form_name, :pdf_file, :batch_id,
     (convert_from(decode(:data_hex, 'hex'), 'UTF8'))::jsonb,
     (convert_from(decode(:sc_hex, 'hex'), 'UTF8'))::jsonb,
     (convert_from(decode(:st_hex, 'hex'), 'UTF8'))::jsonb,
-    :saved_at, :storage_filename
+    :saved_at, :storage_filename, :saved_by_user_id, :saved_by_username
 )
 SQL;
     $st = $pdo->prepare($sql);
@@ -136,6 +140,9 @@ SQL;
         'st_hex' => ebr_db_data_json_hex_for_pg(ebr_db_data_json_enc($dataEntry['stages'] ?? [])),
         'saved_at' => ebr_db_data_saved_at_param($dataEntry['savedAt'] ?? null),
         'storage_filename' => $dataEntry['filename'] ?? null,
+        'saved_by_user_id' => ((int) ($dataEntry['savedByUserId'] ?? 0)) > 0
+            ? (int) $dataEntry['savedByUserId'] : null,
+        'saved_by_username' => trim((string) ($dataEntry['savedByUsername'] ?? '')) ?: null,
     ]);
 }
 

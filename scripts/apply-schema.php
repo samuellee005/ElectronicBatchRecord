@@ -38,6 +38,8 @@ $pdo = ebr_pg_pdo();
 if ($doReset) {
     try {
         foreach ([
+            'ebr_batch_presence',
+            'ebr_batch_collaborators',
             'ebr_data_entries',
             'ebr_batch_records',
             'ebr_forms',

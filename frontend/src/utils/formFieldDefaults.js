@@ -16,9 +16,9 @@ export const FORM_FIELD_DEFAULTS = {
   multiselect: { width: 280, height: 120, label: 'Multi select', options: ['Item 1', 'Item 2', 'Item 3'] },
   collaborator: {
     width: 320,
-    height: 140,
+    height: 100,
     label: 'Collaborators',
-    helpText: 'Designate primary analyst and secondary reviewer from Active Users.',
+    helpText: 'Everyone designated on this batch record.',
   },
   table: { width: 420, height: 240, label: 'Data table' },
   textarea: { width: 300, height: 100, label: 'Text Area', placeholder: 'Enter text' },

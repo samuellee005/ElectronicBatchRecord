@@ -16,11 +16,18 @@ function ebr_db_active_user_row_to_api(array $row): array
 {
     $role = strtolower(trim((string) ($row['role'] ?? 'user')));
 
+    $dbUserId = $row['db_user_id'] ?? null;
+    $dbUserId = ($dbUserId === null || $dbUserId === '') ? null : (int) $dbUserId;
+
     return [
         'id' => (string) ($row['id'] ?? ''),
         'displayName' => trim((string) ($row['display_name'] ?? '')),
         'active' => !empty($row['active']),
         'role' => $role === 'admin' ? 'admin' : 'user',
+        'dbUserId' => $dbUserId,
+        'username' => trim((string) ($row['username'] ?? '')),
+        // Only linked roster entries can be re-authenticated, so only they may be collaborators.
+        'linked' => $dbUserId !== null,
     ];
 }
 
@@ -30,7 +37,7 @@ function ebr_db_active_user_row_to_api(array $row): array
 function ebr_db_active_users_fetch_all(bool $activeOnly): array
 {
     $pdo = ebr_pg_pdo();
-    $sql = 'SELECT id, display_name, active, role, updated_at FROM ebr_active_users';
+    $sql = 'SELECT id, display_name, active, role, db_user_id, username, updated_at FROM ebr_active_users';
     if ($activeOnly) {
         $sql .= ' WHERE active = TRUE';
     }
@@ -55,7 +62,7 @@ function ebr_db_active_users_count(): int
 /**
  * Replace the full user list (matches save-active-users.php contract).
  *
- * @param list<array{id: string, displayName: string, active: bool, role: string}> $users
+ * @param list<array{id: string, displayName: string, active: bool, role: string, dbUserId: int|null, username: string}> $users
  */
 function ebr_db_active_users_replace_all(array $users): void
 {
@@ -64,19 +71,23 @@ function ebr_db_active_users_replace_all(array $users): void
     try {
         $pdo->exec('DELETE FROM ebr_active_users');
         $st = $pdo->prepare(
-            'INSERT INTO ebr_active_users (id, display_name, active, role, updated_at)
-             VALUES (:id, :display_name, :active, :role, NOW())'
+            'INSERT INTO ebr_active_users (id, display_name, active, role, db_user_id, username, updated_at)
+             VALUES (:id, :display_name, :active, :role, :db_user_id, :username, NOW())'
         );
         foreach ($users as $u) {
             $role = strtolower(trim((string) ($u['role'] ?? 'user')));
             if ($role !== 'admin') {
                 $role = 'user';
             }
+            $dbUserId = $u['dbUserId'] ?? null;
+            $dbUserId = ($dbUserId === null || $dbUserId === '' || (int) $dbUserId <= 0) ? null : (int) $dbUserId;
             $st->execute([
                 'id' => $u['id'],
                 'display_name' => $u['displayName'],
                 'active' => !empty($u['active']),
                 'role' => $role,
+                'db_user_id' => $dbUserId,
+                'username' => trim((string) ($u['username'] ?? '')) ?: null,
             ]);
         }
         $pdo->commit();
@@ -84,4 +95,26 @@ function ebr_db_active_users_replace_all(array $users): void
         $pdo->rollBack();
         throw $e;
     }
+}
+
+/**
+ * Roster entry for a `db_user` account, or null when that account is not on the roster.
+ * Used to validate collaborator selections — only linked, active roster entries qualify.
+ *
+ * @return array<string, mixed>|null
+ */
+function ebr_db_active_user_find_by_db_user_id(int $dbUserId): ?array
+{
+    if ($dbUserId <= 0) {
+        return null;
+    }
+    $pdo = ebr_pg_pdo();
+    $st = $pdo->prepare(
+        'SELECT id, display_name, active, role, db_user_id, username, updated_at
+         FROM ebr_active_users WHERE db_user_id = :i LIMIT 1'
+    );
+    $st->execute(['i' => $dbUserId]);
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+
+    return $row ? ebr_db_active_user_row_to_api($row) : null;
 }
