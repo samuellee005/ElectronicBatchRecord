@@ -190,3 +190,28 @@ function ebr_pg_pdo(): PDO
 
     return $pdo;
 }
+
+/**
+ * Recognise "this database has not had the schema applied" from a PDO error and return a
+ * message that says what to do about it. Returns null for any other error.
+ *
+ * 42703 = undefined column, 42P01 = undefined table. Both mean the code is newer than the
+ * database it is pointed at — a generic "failed to save" there costs real debugging time.
+ */
+function ebr_schema_out_of_date_message(Throwable $e): ?string
+{
+    $m = $e->getMessage();
+    if (!str_contains($m, '42703') && !str_contains($m, '42P01')) {
+        return null;
+    }
+
+    $what = '';
+    if (preg_match('/column "([^"]+)"/', $m, $mm)) {
+        $what = ' (missing column ' . $mm[1] . ')';
+    } elseif (preg_match('/relation "([^"]+)" does not exist/', $m, $mm)) {
+        $what = ' (missing table ' . $mm[1] . ')';
+    }
+
+    return 'The database schema is out of date' . $what . '. Apply it to '
+        . ebr_pg_target_label() . ' by running: php scripts/apply-schema.php';
+}

@@ -121,7 +121,7 @@ try {
     ebr_db_batch_insert($record);
 } catch (Throwable $e) {
     error_log('ebr create-batch-record: ' . $e->getMessage());
-    $msg = 'Failed to save batch record to database.';
+    $msg = ebr_schema_out_of_date_message($e) ?? 'Failed to save batch record to database.';
     if (str_contains($e->getMessage(), 'fk_ebr_batch_form') || str_contains($e->getMessage(), 'foreign key')) {
         $msg = 'This form is not in the database yet. Save the form in the form builder, then create the batch again.';
     }

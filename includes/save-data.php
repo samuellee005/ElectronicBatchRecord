@@ -147,8 +147,8 @@ try {
         error_log('ebr save-data [debug] trace: ' . $e->getFile() . ':' . $e->getLine());
     }
     http_response_code(500);
-    $msg = 'Failed to save data to database.';
     $em = $e->getMessage();
+    $msg = ebr_schema_out_of_date_message($e) ?? 'Failed to save data to database.';
     if (str_contains($em, '23503') || str_contains($em, 'foreign key')) {
         $msg = 'Save failed: this form or batch is not in the database (open the latest saved form from Batch Record Forms and use a valid batch).';
     } elseif (str_contains($em, '23505') || str_contains($em, 'duplicate key') || str_contains($em, 'unique')) {

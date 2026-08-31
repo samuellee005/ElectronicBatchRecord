@@ -125,7 +125,10 @@ try {
     if (ebr_debug_save_enabled()) {
         error_log('ebr update-batch-record [debug]: ' . $e->getFile() . ':' . $e->getLine() . ' ' . $e->getTraceAsString());
     }
-    $fail = ['success' => false, 'message' => 'Failed to update'];
+    $fail = [
+        'success' => false,
+        'message' => ebr_schema_out_of_date_message($e) ?? 'Failed to update',
+    ];
     if (ebr_debug_save_enabled()) {
         $fail['detail'] = $e->getMessage();
     }
