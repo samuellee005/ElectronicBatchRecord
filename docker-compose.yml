@@ -14,6 +14,10 @@ services:
       EBR_LOGIN_BYPASS_DB: "1"
       # Inter-container DNS — reaches pdf-detect over the compose network.
       EBR_PDF_DETECT_URL: "http://pdf-detect:8000"
+      # Selects database db4 (see ebr_resolve_pg_database in includes/db.php);
+      # without it the app silently falls back to `dev`, which has no ebr_* tables.
+      # docker-compose.local.yml pins EBR_PG_DATABASE, which takes precedence.
+      EBR_DEPLOYMENT: "arcturus"
     depends_on:
       - pdf-detect
     ports:
