@@ -65,8 +65,32 @@
   border: 1px solid rgba(255, 255, 255, 0.3);
 }
 
-.fb-btn-ghost:hover {
+.fb-btn-ghost:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.3);
+}
+
+.fb-btn-ghost:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Undo/redo pair — square icon buttons kept together at the left of the
+   header actions. */
+.fb-history-actions {
+  display: flex;
+  gap: 4px;
+  margin-right: 4px;
+}
+
+.fb-btn-icon {
+  padding: 8px;
+  width: 36px;
+}
+
+.fb-btn-icon svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 2;
 }
 
 .fb-btn-cancel {

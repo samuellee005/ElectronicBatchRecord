@@ -14,6 +14,8 @@ import {
   UserGroupIcon,
   TableCellsIcon,
   Bars3Icon,
+  ArrowUturnLeftIcon,
+  ArrowUturnRightIcon,
 } from '@heroicons/react/24/outline'
 import PdfViewer from '../components/PdfViewer'
 import PdfPageScrubber from '../components/PdfPageScrubber'
@@ -29,6 +31,7 @@ import { useUserPrefs } from '../context/UserPrefsContext'
 import { buildTableMergeLayout, tableCellKey } from '../utils/tableMergeLayout'
 import { DEFAULT_TABLE_COL_WIDTH, DEFAULT_TABLE_ROW_HEIGHT, tableColWidthPx, tableRowHeightPx } from '../utils/tableFieldDims'
 import { FORM_FIELD_DEFAULTS, DEFAULT_INPUT_FONT_PX } from '../utils/formFieldDefaults'
+import { useFieldHistory } from '../hooks/useFieldHistory'
 import './FormBuilder.css'
 
 const COMPONENT_TYPES = [
@@ -781,6 +784,22 @@ export default function FormBuilder() {
   const dragState = useRef({ active: false, fieldId: null, offsetX: 0, offsetY: 0 })
   const resizeState = useRef({ active: false, fieldId: null, startX: 0, startY: 0, startW: 0, startH: 0 })
 
+  // A drag or resize is one undo step, not one per mousemove.
+  const isGestureActive = useCallback(
+    () => dragState.current.active || resizeState.current.active,
+    [],
+  )
+
+  // Undo/redo over `fields`; every setFields caller is covered.
+  const { undo, redo, canUndo, canRedo, markBaseline } = useFieldHistory({
+    fields,
+    setFields,
+    selectedIds: selectedFieldIds,
+    setSelectedIds: setSelectedFieldIds,
+    isGestureActive,
+    onRestorePage: setCurrentPage,
+  })
+
   // Alignment guides (snap to other fields)
   const [guides, setGuides] = useState([])
   // Position guidelines (dragged field edges for ruler alignment)
@@ -961,6 +980,7 @@ export default function FormBuilder() {
     if (urlApplySuggestions == null) return
     if (urlApplySuggestions === '1') {
       if (savedSuggestionFields && savedSuggestionFields.length > 0) {
+        markBaseline()
         setFields(
           normalizeFieldGroupOrder(
             savedSuggestionFields.map((f) => ({ ...f, page: f.page || 1 })),
@@ -971,10 +991,11 @@ export default function FormBuilder() {
       // If suggestions haven't arrived yet, wait — this effect re-runs when
       // savedSuggestionFields updates.
     } else if (urlApplySuggestions === '0') {
+      markBaseline()
       setFields([])
       setShowSelectionModal(false)
     }
-  }, [urlApplySuggestions, savedSuggestionFields, urlFormId])
+  }, [urlApplySuggestions, savedSuggestionFields, urlFormId, markBaseline])
 
   // If formId in URL, skip modal and load directly
   useEffect(() => {
@@ -984,6 +1005,7 @@ export default function FormBuilder() {
         if (data.success && data.form?.fields) {
           setLoadedFormName(data.form.name || null)
           setSourceFormIds(data.form.sourceFormIds?.length ? data.form.sourceFormIds : [urlFormId])
+          markBaseline()
           setFields(
             normalizeFieldGroupOrder(
               data.form.fields.map((f) => ({ ...f, page: f.page || 1 })),
@@ -992,7 +1014,7 @@ export default function FormBuilder() {
         }
       })
     }
-  }, [urlFormId, pdfFile])
+  }, [urlFormId, pdfFile, markBaseline])
 
   // Pre-fill user name from server-backed prefs
   useEffect(() => {
@@ -1089,6 +1111,21 @@ export default function FormBuilder() {
         if (showSaveModal) setShowSaveModal(false)
         if (showPasteModal) setShowPasteModal(false)
       }
+      // Cmd/Ctrl+Z undo, Cmd/Ctrl+Shift+Z or Ctrl+Y redo. Skipped while
+      // typing so the browser's own undo still works inside a text box.
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z' || e.key === 'y' || e.key === 'Y')) {
+        const tag = e.target?.tagName
+        const editing =
+          tag === 'INPUT' ||
+          tag === 'TEXTAREA' ||
+          tag === 'SELECT' ||
+          e.target?.isContentEditable
+        if (editing) return
+        e.preventDefault()
+        if (e.key === 'y' || e.key === 'Y' || e.shiftKey) redo()
+        else undo()
+        return
+      }
       if (e.key === 'Delete' && selectedFieldIds.size > 0) {
         const toRemove = new Set(selectedFieldIds)
         setFields((prev) => normalizeFieldGroupOrder(prev.filter((f) => !toRemove.has(f.id))))
@@ -1124,7 +1161,7 @@ export default function FormBuilder() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [showSaveModal, showPasteModal, selectedFieldIds, fields])
+  }, [showSaveModal, showPasteModal, selectedFieldIds, fields, undo, redo])
 
   // Ctrl+scroll zoom on canvas
   const handleCanvasWheel = useCallback((e) => {
@@ -1546,6 +1583,7 @@ export default function FormBuilder() {
 
   const confirmSelection = () => {
     setShowSelectionModal(false)
+    markBaseline()
     if (selectionMode === 'new_with_suggestions') {
       if (savedSuggestionFields && savedSuggestionFields.length > 0) {
         setFields(
@@ -1565,6 +1603,7 @@ export default function FormBuilder() {
           setSourceFormIds(
             data.form.sourceFormIds?.length ? data.form.sourceFormIds : [selectionFormId],
           )
+          markBaseline()
           setFields(
             normalizeFieldGroupOrder(
               data.form.fields.map((f) => ({ ...f, page: f.page || 1 })),
@@ -1723,6 +1762,28 @@ export default function FormBuilder() {
       <div className="fb-header">
         <h1>Form Builder</h1>
         <div className="fb-header-actions">
+          <div className="fb-history-actions">
+            <button
+              type="button"
+              className="fb-btn fb-btn-ghost fb-btn-icon"
+              onClick={undo}
+              disabled={!canUndo}
+              title="Undo (Ctrl+Z)"
+              aria-label="Undo"
+            >
+              <ArrowUturnLeftIcon />
+            </button>
+            <button
+              type="button"
+              className="fb-btn fb-btn-ghost fb-btn-icon"
+              onClick={redo}
+              disabled={!canRedo}
+              title="Redo (Ctrl+Shift+Z)"
+              aria-label="Redo"
+            >
+              <ArrowUturnRightIcon />
+            </button>
+          </div>
           {selectedFieldIds.size > 1 && (
             <span className="fb-selection-count" title="Selected fields">
               {selectedFieldIds.size} selected
