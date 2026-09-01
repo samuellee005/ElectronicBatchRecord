@@ -929,6 +929,9 @@ export default function FormBuilder() {
   const [unassignedCollapsed, setUnassignedCollapsed] = useState(false)
   // Widen the stages/components sidebar for easier organizing.
   const [stagesExpanded, setStagesExpanded] = useState(false)
+  // Inline rename of a stage name in the sidebar (double-click the title).
+  const [editingStageName, setEditingStageName] = useState(null)
+  const [stageNameDraft, setStageNameDraft] = useState('')
   // Multi-select of stage pills (Ctrl/Cmd+click, Shift range, marquee) + context menu.
   const [selectedPillIds, setSelectedPillIds] = useState(() => new Set())
   const selectedPillIdsRef = useRef(selectedPillIds)
@@ -2168,6 +2171,40 @@ export default function FormBuilder() {
     })
   }, [])
 
+  // Rename a stage everywhere: every field whose stage matches oldName moves to
+  // newName. If newName already exists the two stages merge; stageOrder is
+  // unified across the resulting group so it stays one block. One undo step.
+  const renameStage = useCallback((oldName, newName) => {
+    const from = String(oldName || '').trim()
+    const to = String(newName || '').trim()
+    if (!from || !to || from === to) return
+    setFields((prev) => {
+      const renamed = prev.map((f) =>
+        stageKey(f) === from ? { ...f, stageInProcess: to } : f,
+      )
+      let so = null
+      for (const f of renamed) {
+        if (stageKey(f) === to) {
+          const n = Number(f.stageOrder)
+          if (Number.isFinite(n) && n > 0 && (so === null || n < so)) so = n
+        }
+      }
+      const unified =
+        so === null
+          ? renamed
+          : renamed.map((f) => (stageKey(f) === to ? { ...f, stageOrder: so } : f))
+      return normalizeFieldGroupOrder(unified)
+    })
+  }, [])
+
+  const commitStageRename = useCallback(
+    (oldName) => {
+      renameStage(oldName, stageNameDraft)
+      setEditingStageName(null)
+    },
+    [renameStage, stageNameDraft],
+  )
+
   // Renumber every group's fields into reading order (top→bottom, left→right)
   // from their positions on the PDF, so the Stages list and entry order follow
   // the visual layout. One undo step.
@@ -2609,7 +2646,7 @@ export default function FormBuilder() {
                           >
                             <div
                               className="fb-stage-block-header"
-                              draggable
+                              draggable={editingStageName !== stageName}
                               onDragStart={(e) => {
                                 e.stopPropagation()
                                 dragStageNameRef.current = stageName
@@ -2619,9 +2656,39 @@ export default function FormBuilder() {
                               onDragEnd={clearPanelDragRefs}
                             >
                               <Bars3Icon className="fb-stage-grip" aria-hidden />
-                              <span className="fb-stage-block-title" title="Drag to reorder stages">
-                                {stageName}
-                              </span>
+                              {editingStageName === stageName ? (
+                                <input
+                                  className="fb-stage-title-input"
+                                  value={stageNameDraft}
+                                  autoFocus
+                                  onChange={(e) => setStageNameDraft(e.target.value)}
+                                  onBlur={() => commitStageRename(stageName)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      e.preventDefault()
+                                      commitStageRename(stageName)
+                                    } else if (e.key === 'Escape') {
+                                      e.preventDefault()
+                                      setEditingStageName(null)
+                                    }
+                                  }}
+                                  onClick={(e) => e.stopPropagation()}
+                                  onMouseDown={(e) => e.stopPropagation()}
+                                  onDragStart={(e) => e.preventDefault()}
+                                />
+                              ) : (
+                                <span
+                                  className="fb-stage-block-title"
+                                  title="Double-click to rename this stage (updates every field in it)"
+                                  onDoubleClick={(e) => {
+                                    e.stopPropagation()
+                                    setEditingStageName(stageName)
+                                    setStageNameDraft(stageName)
+                                  }}
+                                >
+                                  {stageName}
+                                </span>
+                              )}
                               <span className="fb-stage-block-count">{inStage.length}</span>
                             </div>
                             <ul
@@ -2980,6 +3047,7 @@ export default function FormBuilder() {
                     field={selectedField}
                     existingStages={existingStages}
                     fields={fields}
+                    onRenameStage={renameStage}
                     onUpdate={(updates) => updateField(selectedField.id, updates)}
                   />
                 </div>
@@ -3622,7 +3690,7 @@ function stageOrderForExistingStageName(fields, stageNameTrimmed, excludeFieldId
   return null
 }
 
-function PropertiesForm({ field, existingStages, fields, onUpdate }) {
+function PropertiesForm({ field, existingStages, fields, onRenameStage, onUpdate }) {
   const [stageMode, setStageMode] = useState(
     field.stageInProcess && !existingStages.includes(field.stageInProcess) ? 'new' : 'select',
   )
@@ -3631,12 +3699,18 @@ function PropertiesForm({ field, existingStages, fields, onUpdate }) {
       ? field.stageInProcess
       : '',
   )
+  const currentStage = (field.stageInProcess || '').trim()
+  const inExistingStage = currentStage !== '' && existingStages.includes(currentStage)
+  const [renameOpen, setRenameOpen] = useState(false)
+  const [renameValue, setRenameValue] = useState(currentStage)
 
   // Reset local state when field changes
   useEffect(() => {
     const isExisting = existingStages.includes(field.stageInProcess)
     setStageMode(field.stageInProcess && !isExisting ? 'new' : 'select')
     setNewStageValue(field.stageInProcess && !isExisting ? field.stageInProcess : '')
+    setRenameOpen(false)
+    setRenameValue((field.stageInProcess || '').trim())
   }, [field.id, field.stageInProcess, existingStages])
 
   const suggestedNextOrder = useMemo(() => nextUnusedStageOrder(fields), [fields])
@@ -3720,6 +3794,62 @@ function PropertiesForm({ field, existingStages, fields, onUpdate }) {
         <small className="fb-hint">
           Fields with the same stage name are grouped together.
         </small>
+        {inExistingStage && onRenameStage && (
+          <div className="fb-stage-rename">
+            {renameOpen ? (
+              <div className="fb-stage-rename-row">
+                <input
+                  type="text"
+                  className="fb-stage-rename-input"
+                  value={renameValue}
+                  autoFocus
+                  placeholder="New stage name"
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      const v = renameValue.trim()
+                      if (v && v !== currentStage) onRenameStage(currentStage, v)
+                      setRenameOpen(false)
+                    } else if (e.key === 'Escape') {
+                      e.preventDefault()
+                      setRenameOpen(false)
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  className="fb-btn fb-btn-success fb-stage-rename-apply"
+                  onClick={() => {
+                    const v = renameValue.trim()
+                    if (v && v !== currentStage) onRenameStage(currentStage, v)
+                    setRenameOpen(false)
+                  }}
+                >
+                  Rename
+                </button>
+                <button
+                  type="button"
+                  className="fb-link-btn"
+                  onClick={() => setRenameOpen(false)}
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="fb-link-btn fb-stage-rename-open"
+                onClick={() => {
+                  setRenameValue(currentStage)
+                  setRenameOpen(true)
+                }}
+              >
+                Rename “{currentStage}” stage (updates every field in it)
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="fb-form-group">

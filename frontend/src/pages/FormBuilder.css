@@ -2122,3 +2122,42 @@
 .fb-stages-title-row {
   flex-wrap: wrap;
 }
+
+/* Sidebar inline stage-name edit */
+.fb-stage-title-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: inherit;
+  font-weight: 600;
+  padding: 1px 5px;
+  border: 1px solid #667eea;
+  border-radius: 4px;
+  background: #fff;
+  color: #1e293b;
+}
+
+/* Properties: rename current stage */
+.fb-stage-rename {
+  margin-top: 6px;
+}
+
+.fb-stage-rename-open {
+  font-size: 0.78rem;
+}
+
+.fb-stage-rename-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.fb-stage-rename-input {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+
+.fb-stage-rename-apply {
+  padding: 4px 10px;
+  font-size: 0.8rem;
+}
