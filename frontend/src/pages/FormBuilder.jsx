@@ -172,6 +172,20 @@ function getComponentTypeLabel(type) {
   return c ? c.name : (type || 'Field')
 }
 
+/** Group a field list by page number, pages ascending — used to organize a big
+ *  Unassigned list in the Stages panel. Order within a page is preserved. */
+function groupFieldsByPage(list) {
+  const byPage = new Map()
+  for (const f of list || []) {
+    const pg = Number(f.page) || 1
+    if (!byPage.has(pg)) byPage.set(pg, [])
+    byPage.get(pg).push(f)
+  }
+  return [...byPage.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([page, items]) => ({ page, items }))
+}
+
 /** Unassigned and each stage are separate groups: order 1..n in the Stages list + properties. */
 function stageKey(f) {
   return (f?.stageInProcess && String(f.stageInProcess).trim()) || ''
@@ -858,6 +872,7 @@ export default function FormBuilder() {
   const [saving, setSaving] = useState(false)
   const [componentsPanelCollapsed, setComponentsPanelCollapsed] = useState(false)
   const [propertiesPanelCollapsed, setPropertiesPanelCollapsed] = useState(false)
+  const [unassignedCollapsed, setUnassignedCollapsed] = useState(false)
   const [propertiesPanelWidth, setPropertiesPanelWidth] = useState(PROPERTIES_PANEL_DEFAULT_W)
   const [propertiesPanelResizing, setPropertiesPanelResizing] = useState(false)
   const propertiesPanelWidthRef = useRef(PROPERTIES_PANEL_DEFAULT_W)
@@ -1987,6 +2002,13 @@ export default function FormBuilder() {
 
   const existingStages = useMemo(() => buildOrderedStageNames(fields), [fields])
   const unassignedFields = useMemo(() => sortFieldsInGroupList(fields, ''), [fields])
+  // Above this many, show the Unassigned list grouped by page so a large batch
+  // record's fields are navigable instead of one long wall.
+  const groupUnassignedByPage = unassignedFields.length > 10
+  const unassignedByPage = useMemo(
+    () => (groupUnassignedByPage ? groupFieldsByPage(unassignedFields) : null),
+    [groupUnassignedByPage, unassignedFields],
+  )
 
   const dragFieldIdRef = useRef(null)
   const dragStageNameRef = useRef(null)
@@ -2013,6 +2035,61 @@ export default function FormBuilder() {
     dragFieldIdRef.current = null
     dragStageNameRef.current = null
   }, [])
+
+  // One Unassigned pill: drag handle to move/reorder, label click to jump to it
+  // on the canvas, and a page badge so its location is visible.
+  const renderUnassignedPill = useCallback(
+    (f) => (
+      <li
+        key={f.id}
+        className="fb-stage-field-item"
+        onDragOver={(e) => {
+          e.preventDefault()
+          e.dataTransfer.dropEffect = 'move'
+        }}
+        onDrop={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          const id = dragFieldIdRef.current
+          if (!id || id === f.id) {
+            clearPanelDragRefs()
+            return
+          }
+          const rect = e.currentTarget.getBoundingClientRect()
+          const before = e.clientY < rect.top + rect.height / 2
+          setFields((prev) => placeFieldInGroupOrder(prev, id, '', f.id, before))
+          clearPanelDragRefs()
+        }}
+      >
+        <span className="fb-stage-field-pill">
+          <span
+            className="fb-stage-field-pill-grip"
+            draggable
+            onDragStart={(e) => {
+              e.stopPropagation()
+              dragFieldIdRef.current = f.id
+              e.dataTransfer.effectAllowed = 'move'
+              e.dataTransfer.setData('text/plain', f.id)
+            }}
+            onDragEnd={clearPanelDragRefs}
+            title="Drag to move or reorder"
+          >
+            <Bars3Icon className="fb-stage-pill-grip-icon" aria-hidden />
+          </span>
+          <button
+            type="button"
+            className="fb-stage-field-pill-label"
+            onClick={() => focusFieldOnCanvas(f)}
+            title={`${f.label || getComponentTypeLabel(f.type)} — page ${f.page || 1}`}
+          >
+            {f.label || getComponentTypeLabel(f.type)}
+          </button>
+          <span className="fb-stage-field-pill-page">p{f.page || 1}</span>
+        </span>
+      </li>
+    ),
+    [clearPanelDragRefs, focusFieldOnCanvas],
+  )
 
   const showStagesSection = fields.length > 0
 
@@ -2137,11 +2214,21 @@ export default function FormBuilder() {
                           }
                         }}
                       >
-                        <div className="fb-stage-block-header fb-stage-block-header--static">
+                        <button
+                          type="button"
+                          className="fb-stage-block-header fb-stage-block-header--toggle"
+                          onClick={() => setUnassignedCollapsed((v) => !v)}
+                          aria-expanded={!unassignedCollapsed}
+                          title={unassignedCollapsed ? 'Show unassigned fields' : 'Hide unassigned fields'}
+                        >
+                          <ChevronDoubleRightIcon
+                            className={`fb-stage-block-chevron${unassignedCollapsed ? '' : ' fb-stage-block-chevron--open'}`}
+                            aria-hidden
+                          />
                           <span className="fb-stage-block-title">Unassigned</span>
                           <span className="fb-stage-block-count">{unassignedFields.length}</span>
-                        </div>
-                        {unassignedFields.length === 0 ? (
+                        </button>
+                        {unassignedCollapsed ? null : unassignedFields.length === 0 ? (
                           <p
                             className="fb-stage-block-empty"
                             onDragOver={(e) => {
@@ -2169,53 +2256,19 @@ export default function FormBuilder() {
                               }
                             }}
                           >
-                            {unassignedFields.map((f) => (
-                              <li
-                                key={f.id}
-                                className="fb-stage-field-item"
-                                onDragOver={(e) => {
-                                  e.preventDefault()
-                                  e.dataTransfer.dropEffect = 'move'
-                                }}
-                                onDrop={(e) => {
-                                  e.preventDefault()
-                                  e.stopPropagation()
-                                  const id = dragFieldIdRef.current
-                                  if (!id || id === f.id) {
-                                    clearPanelDragRefs()
-                                    return
-                                  }
-                                  const rect = e.currentTarget.getBoundingClientRect()
-                                  const before = e.clientY < rect.top + rect.height / 2
-                                  setFields((prev) => placeFieldInGroupOrder(prev, id, '', f.id, before))
-                                  clearPanelDragRefs()
-                                }}
-                              >
-                                <span className="fb-stage-field-pill">
-                                  <span
-                                    className="fb-stage-field-pill-grip"
-                                    draggable
-                                    onDragStart={(e) => {
-                                      e.stopPropagation()
-                                      dragFieldIdRef.current = f.id
-                                      e.dataTransfer.effectAllowed = 'move'
-                                      e.dataTransfer.setData('text/plain', f.id)
-                                    }}
-                                    onDragEnd={clearPanelDragRefs}
-                                    title="Drag to move or reorder"
+                            {groupUnassignedByPage
+                              ? unassignedByPage.flatMap((grp) => [
+                                  <li
+                                    key={`pg-${grp.page}`}
+                                    className="fb-stage-page-sep"
+                                    aria-hidden
                                   >
-                                    <Bars3Icon className="fb-stage-pill-grip-icon" aria-hidden />
-                                  </span>
-                                  <button
-                                    type="button"
-                                    className="fb-stage-field-pill-label"
-                                    onClick={() => focusFieldOnCanvas(f)}
-                                  >
-                                    {f.label || getComponentTypeLabel(f.type)}
-                                  </button>
-                                </span>
-                              </li>
-                            ))}
+                                    <span>Page {grp.page}</span>
+                                    <span className="fb-stage-page-sep-count">{grp.items.length}</span>
+                                  </li>,
+                                  ...grp.items.map(renderUnassignedPill),
+                                ])
+                              : unassignedFields.map(renderUnassignedPill)}
                           </ul>
                         )}
                       </div>
