@@ -2002,6 +2002,9 @@ export default function DataEntry() {
           setIsCompleted((res.batch.status || '') === 'completed')
           if (res.formData && typeof res.formData === 'object') {
             setFormData(res.formData)
+            lastSavedSnapshotRef.current = JSON.stringify(res.formData)
+          } else {
+            lastSavedSnapshotRef.current = JSON.stringify({})
           }
           setCollaborators(Array.isArray(res.collaborators) ? res.collaborators : [])
           setPresence(Array.isArray(res.presence) ? res.presence : [])
@@ -2160,6 +2163,12 @@ export default function DataEntry() {
   const [signOffPassword, setSignOffPassword] = useState('')
   const [signOffError, setSignOffError] = useState(null)
   const [signOffBusy, setSignOffBusy] = useState(false)
+  // Autosave: persist drafts so a refresh never loses entered data.
+  const [autoSaveStatus, setAutoSaveStatus] = useState('idle') // idle | saving | saved | error
+  const lastSavedSnapshotRef = useRef(null)
+  const autoSaveTimerRef = useRef(null)
+  const autoSaveInFlightRef = useRef(false)
+
   const [pdfPreviewOpen, setPdfPreviewOpen] = useState(false)
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState(null)
   const [pdfPreviewLoading, setPdfPreviewLoading] = useState(false)
@@ -2540,7 +2549,7 @@ export default function DataEntry() {
 
   /** Persist current entry to the server (same payload as Save). Used by Save and before Mark complete. */
   const persistFormData = useCallback(
-    async ({ silentSuccess = false, requireAllRequired = false } = {}) => {
+    async ({ silentSuccess = false, requireAllRequired = false, autosave = false, silent = false } = {}) => {
       if (!formConfig) {
         alert('Form is not loaded yet.')
         return { ok: false }
@@ -2575,6 +2584,7 @@ export default function DataEntry() {
         savedAt: new Date().toISOString(),
       }
       if (bid) body.batchId = bid
+      if (autosave) body.autosave = true
       if (isEbrApiDebug()) {
         const dk = snapshot && typeof snapshot === 'object' ? Object.keys(snapshot) : []
         console.debug('[EBR DataEntry] persist form data', {
@@ -2588,14 +2598,17 @@ export default function DataEntry() {
       try {
         const res = await saveData(body)
         if (!res.success) {
-          alert('Error saving data: ' + (res.message || 'Unknown error'))
-          return { ok: false }
+          if (!silent) alert('Error saving data: ' + (res.message || 'Unknown error'))
+          return { ok: false, res }
         }
-        if (!silentSuccess) alert('Data saved successfully!')
+        // Remember exactly what reached the server so autosave can tell when the
+        // form is dirty again.
+        lastSavedSnapshotRef.current = JSON.stringify(snapshot)
+        if (!silentSuccess && !silent) alert('Data saved successfully!')
         return { ok: true, res }
       } catch (err) {
-        alert('Error saving data: ' + err.message)
-        return { ok: false }
+        if (!silent) alert('Error saving data: ' + err.message)
+        return { ok: false, error: err }
       }
     },
     [formConfig, stages, batchId],
@@ -2610,6 +2623,54 @@ export default function DataEntry() {
       setSaving(false)
     }
   }, [formConfig, persistFormData])
+
+  // Autosave: after edits settle, quietly persist the draft so a refresh never
+  // loses data. Updates one working row per batch (see save-data autosave flag)
+  // instead of appending, and never blocks or alerts — the explicit Save button
+  // remains the way to snapshot and to surface errors.
+  const runAutoSave = useCallback(async () => {
+    if (autoSaveInFlightRef.current) return
+    autoSaveInFlightRef.current = true
+    setAutoSaveStatus('saving')
+    try {
+      const r = await persistFormData({ autosave: true, silent: true })
+      setAutoSaveStatus(r.ok ? 'saved' : 'error')
+    } catch {
+      setAutoSaveStatus('error')
+    } finally {
+      autoSaveInFlightRef.current = false
+    }
+  }, [persistFormData])
+
+  useEffect(() => {
+    // Only autosave a live, writable batch that has finished loading.
+    if (!batchId || !formConfig || batchLoading || isCompleted || canWrite === false) return
+    if (lastSavedSnapshotRef.current == null) return
+    const current = JSON.stringify(formData)
+    if (current === lastSavedSnapshotRef.current) return
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)
+    autoSaveTimerRef.current = setTimeout(() => {
+      autoSaveTimerRef.current = null
+      runAutoSave()
+    }, 2000)
+    return () => {
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)
+    }
+  }, [formData, batchId, formConfig, batchLoading, isCompleted, canWrite, runAutoSave])
+
+  // Last-ditch guard: warn if the tab is closed with a change the 2s debounce
+  // has not yet flushed.
+  useEffect(() => {
+    const onBeforeUnload = (e) => {
+      if (!batchId || isCompleted || canWrite === false) return
+      if (lastSavedSnapshotRef.current == null) return
+      if (JSON.stringify(formDataRef.current) === lastSavedSnapshotRef.current) return
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => window.removeEventListener('beforeunload', onBeforeUnload)
+  }, [batchId, isCompleted, canWrite])
 
   useEffect(() => {
     return () => {
@@ -2907,6 +2968,17 @@ export default function DataEntry() {
                 >
                   {activeRecorder ? `Live Collab · ${activeRecorder.displayName}` : 'Live Collab'}
                 </button>
+              )}
+              {batchId && !isCompleted && (
+                <span className={`de-autosave de-autosave--${autoSaveStatus}`} role="status" aria-live="polite">
+                  {autoSaveStatus === 'saving'
+                    ? 'Saving…'
+                    : autoSaveStatus === 'saved'
+                      ? 'All changes saved'
+                      : autoSaveStatus === 'error'
+                        ? 'Autosave failed — use Save Data'
+                        : ''}
+                </span>
               )}
               <button className="btn btn-save" disabled={saving} onClick={handleSave}>
                 {saving ? 'Saving...' : 'Save Data'}

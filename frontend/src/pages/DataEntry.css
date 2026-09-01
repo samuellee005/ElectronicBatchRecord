@@ -3456,3 +3456,27 @@ button.de-signature-correction-link {
   border-radius: 8px;
   padding: 10px 12px;
 }
+
+/* Autosave status pill in the header */
+.de-autosave {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.85);
+  padding: 0 6px;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.de-autosave--saving {
+  opacity: 0.85;
+}
+
+.de-autosave--saved {
+  color: rgba(210, 255, 210, 0.95);
+}
+
+.de-autosave--error {
+  color: #ffd7d7;
+  font-weight: 600;
+}

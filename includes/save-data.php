@@ -139,8 +139,18 @@ if (ebr_debug_save_enabled()) {
     );
 }
 
+// Autosave keeps one evolving working row per batch (updated in place) rather
+// than appending a snapshot on every debounced save; explicit saves still append.
+$isAutosave = !empty($data['autosave']) && $batchId !== null && $batchId !== '';
+
 try {
-    ebr_db_data_entry_insert($dataEntry);
+    $updated = false;
+    if ($isAutosave) {
+        $updated = ebr_db_data_entry_update_latest_for_batch($batchId, $dataEntry);
+    }
+    if (!$updated) {
+        ebr_db_data_entry_insert($dataEntry);
+    }
 } catch (Throwable $e) {
     error_log('ebr save-data: ' . $e->getMessage());
     if (ebr_debug_save_enabled()) {

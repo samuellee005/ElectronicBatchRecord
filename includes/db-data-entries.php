@@ -146,6 +146,48 @@ SQL;
     ]);
 }
 
+/**
+ * Update the most-recent entry for a batch in place — the target of autosave,
+ * which keeps one evolving working row instead of appending on every keystroke.
+ * Returns false when the batch has no entry yet (caller should insert instead).
+ */
+function ebr_db_data_entry_update_latest_for_batch(string $batchId, array $dataEntry): bool
+{
+    $pdo = ebr_pg_pdo();
+    $idStmt = $pdo->prepare(
+        'SELECT id FROM ebr_data_entries WHERE batch_id = :b ORDER BY saved_at DESC NULLS LAST LIMIT 1'
+    );
+    $idStmt->execute(['b' => $batchId]);
+    $rowId = $idStmt->fetchColumn();
+    if ($rowId === false) {
+        return false;
+    }
+
+    $sql = <<<'SQL'
+UPDATE ebr_data_entries SET
+    data = (convert_from(decode(:data_hex, 'hex'), 'UTF8'))::jsonb,
+    stage_completion = (convert_from(decode(:sc_hex, 'hex'), 'UTF8'))::jsonb,
+    stages = (convert_from(decode(:st_hex, 'hex'), 'UTF8'))::jsonb,
+    saved_at = :saved_at,
+    saved_by_user_id = :saved_by_user_id,
+    saved_by_username = :saved_by_username
+WHERE id = :id
+SQL;
+    $st = $pdo->prepare($sql);
+    $st->execute([
+        'id' => $rowId,
+        'data_hex' => ebr_db_data_json_hex_for_pg(ebr_db_data_json_enc($dataEntry['data'] ?? [])),
+        'sc_hex' => ebr_db_data_json_hex_for_pg(ebr_db_data_json_enc($dataEntry['stageCompletion'] ?? [])),
+        'st_hex' => ebr_db_data_json_hex_for_pg(ebr_db_data_json_enc($dataEntry['stages'] ?? [])),
+        'saved_at' => ebr_db_data_saved_at_param($dataEntry['savedAt'] ?? null),
+        'saved_by_user_id' => ((int) ($dataEntry['savedByUserId'] ?? 0)) > 0
+            ? (int) $dataEntry['savedByUserId'] : null,
+        'saved_by_username' => trim((string) ($dataEntry['savedByUsername'] ?? '')) ?: null,
+    ]);
+
+    return true;
+}
+
 function ebr_db_data_entry_fetch_by_id(string $entryId): ?array
 {
     $pdo = ebr_pg_pdo();
