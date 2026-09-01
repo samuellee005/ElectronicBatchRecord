@@ -2317,40 +2317,88 @@ export default function FormBuilder() {
     if (e.target.closest('.fb-stage-field-pill, .fb-stage-block-header, button, a, input, select')) return
     const container = stagesScrollRef.current
     if (!container) return
-    const startX = e.clientX
-    const startY = e.clientY
+    const rect0 = container.getBoundingClientRect()
+    // Anchor the box in the scroll CONTENT (add scroll offset), so scrolling the
+    // list mid-drag keeps the same fields boxed instead of sliding them out.
+    const anchorX = e.clientX - rect0.left + container.scrollLeft
+    const anchorY = e.clientY - rect0.top + container.scrollTop
     const additive = e.ctrlKey || e.metaKey || e.shiftKey
     const base = additive ? new Set(selectedPillIdsRef.current) : new Set()
     let moved = false
+    let lastX = e.clientX
+    let lastY = e.clientY
+    let rafId = null
 
-    const onMove = (me) => {
-      const dx = me.clientX - startX
-      const dy = me.clientY - startY
-      if (!moved && Math.abs(dx) < 4 && Math.abs(dy) < 4) return
+    const apply = () => {
+      const rect = container.getBoundingClientRect()
+      const curX = lastX - rect.left + container.scrollLeft
+      const curY = lastY - rect.top + container.scrollTop
+      const left = Math.min(anchorX, curX)
+      const top = Math.min(anchorY, curY)
+      const right = Math.max(anchorX, curX)
+      const bottom = Math.max(anchorY, curY)
+      if (!moved && right - left < 4 && bottom - top < 4) return
       moved = true
-      const left = Math.min(startX, me.clientX)
-      const top = Math.min(startY, me.clientY)
-      const width = Math.abs(dx)
-      const height = Math.abs(dy)
-      setMarquee({ left, top, width, height })
-      const boxR = left + width
-      const boxB = top + height
+      // Render (viewport coords), clamped to the visible scroll area.
+      const vTop = Math.max(rect.top, rect.top + top - container.scrollTop)
+      const vBottom = Math.min(rect.bottom, rect.top + bottom - container.scrollTop)
+      const vLeft = Math.max(rect.left, rect.left + left - container.scrollLeft)
+      const vRight = Math.min(rect.right, rect.left + right - container.scrollLeft)
+      setMarquee({
+        left: vLeft,
+        top: vTop,
+        width: Math.max(0, vRight - vLeft),
+        height: Math.max(0, vBottom - vTop),
+      })
+      // Hit-test every pill in the same content coordinates.
       const next = new Set(base)
       container.querySelectorAll('[data-pill-id]').forEach((el) => {
         const r = el.getBoundingClientRect()
-        const hit = !(r.right < left || r.left > boxR || r.bottom < top || r.top > boxB)
+        const pl = r.left - rect.left + container.scrollLeft
+        const pt = r.top - rect.top + container.scrollTop
+        const pr = pl + r.width
+        const pb = pt + r.height
+        const hit = !(pr < left || pl > right || pb < top || pt > bottom)
         if (hit) next.add(el.getAttribute('data-pill-id'))
       })
       setSelectedPillIds(next)
     }
+
+    const EDGE = 26
+    const tick = () => {
+      const rect = container.getBoundingClientRect()
+      let dy = 0
+      if (lastY < rect.top + EDGE) dy = -Math.max(5, (rect.top + EDGE - lastY) / 2)
+      else if (lastY > rect.bottom - EDGE) dy = Math.max(5, (lastY - (rect.bottom - EDGE)) / 2)
+      if (dy !== 0) {
+        const before = container.scrollTop
+        container.scrollTop = Math.max(
+          0,
+          Math.min(container.scrollHeight - container.clientHeight, container.scrollTop + dy),
+        )
+        if (container.scrollTop !== before) apply()
+      }
+      rafId = requestAnimationFrame(tick)
+    }
+
+    const onMove = (me) => {
+      lastX = me.clientX
+      lastY = me.clientY
+      apply()
+    }
+    const onScroll = () => apply()
     const onUp = () => {
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
+      container.removeEventListener('scroll', onScroll)
+      if (rafId != null) cancelAnimationFrame(rafId)
       setMarquee(null)
       if (!moved && !additive) setSelectedPillIds(new Set())
     }
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
+    container.addEventListener('scroll', onScroll)
+    rafId = requestAnimationFrame(tick)
   }, [])
 
   // Close the pill context menu on Escape (and clear the selection); Escape with
