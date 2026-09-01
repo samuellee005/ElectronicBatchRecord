@@ -2198,81 +2198,6 @@ export default function FormBuilder() {
                   <section className="fb-stages-section" aria-label="Form stages">
                     <h2 className="fb-components-section-title">Stages</h2>
                     <div className="fb-stages-section-scroll">
-                      <div
-                        className="fb-stage-block"
-                        data-stage=""
-                        onDragOver={(e) => {
-                          e.preventDefault()
-                          e.dataTransfer.dropEffect = 'move'
-                        }}
-                        onDrop={(e) => {
-                          e.preventDefault()
-                          const id = dragFieldIdRef.current
-                          if (id) {
-                            moveFieldToStageById(id, '')
-                            clearPanelDragRefs()
-                          }
-                        }}
-                      >
-                        <button
-                          type="button"
-                          className="fb-stage-block-header fb-stage-block-header--toggle"
-                          onClick={() => setUnassignedCollapsed((v) => !v)}
-                          aria-expanded={!unassignedCollapsed}
-                          title={unassignedCollapsed ? 'Show unassigned fields' : 'Hide unassigned fields'}
-                        >
-                          <ChevronDoubleRightIcon
-                            className={`fb-stage-block-chevron${unassignedCollapsed ? '' : ' fb-stage-block-chevron--open'}`}
-                            aria-hidden
-                          />
-                          <span className="fb-stage-block-title">Unassigned</span>
-                          <span className="fb-stage-block-count">{unassignedFields.length}</span>
-                        </button>
-                        {unassignedCollapsed ? null : unassignedFields.length === 0 ? (
-                          <p
-                            className="fb-stage-block-empty"
-                            onDragOver={(e) => {
-                              e.preventDefault()
-                              e.dataTransfer.dropEffect = 'move'
-                            }}
-                          >
-                            Drop a field here to clear its stage.
-                          </p>
-                        ) : (
-                          <ul
-                            className="fb-stage-field-list"
-                            onDragOver={(e) => {
-                              e.preventDefault()
-                              e.dataTransfer.dropEffect = 'move'
-                            }}
-                            onDrop={(e) => {
-                              if (e.target !== e.currentTarget) return
-                              e.preventDefault()
-                              e.stopPropagation()
-                              const id = dragFieldIdRef.current
-                              if (id) {
-                                setFields((prev) => placeFieldInGroupOrder(prev, id, '', null, true))
-                                clearPanelDragRefs()
-                              }
-                            }}
-                          >
-                            {groupUnassignedByPage
-                              ? unassignedByPage.flatMap((grp) => [
-                                  <li
-                                    key={`pg-${grp.page}`}
-                                    className="fb-stage-page-sep"
-                                    aria-hidden
-                                  >
-                                    <span>Page {grp.page}</span>
-                                    <span className="fb-stage-page-sep-count">{grp.items.length}</span>
-                                  </li>,
-                                  ...grp.items.map(renderUnassignedPill),
-                                ])
-                              : unassignedFields.map(renderUnassignedPill)}
-                          </ul>
-                        )}
-                      </div>
-
                       {existingStages.map((stageName) => {
                         const inStage = sortFieldsInGroupList(fields, stageName)
                         return (
@@ -2388,6 +2313,81 @@ export default function FormBuilder() {
                           </div>
                         )
                       })}
+
+                      <div
+                        className="fb-stage-block"
+                        data-stage=""
+                        onDragOver={(e) => {
+                          e.preventDefault()
+                          e.dataTransfer.dropEffect = 'move'
+                        }}
+                        onDrop={(e) => {
+                          e.preventDefault()
+                          const id = dragFieldIdRef.current
+                          if (id) {
+                            moveFieldToStageById(id, '')
+                            clearPanelDragRefs()
+                          }
+                        }}
+                      >
+                        <button
+                          type="button"
+                          className="fb-stage-block-header fb-stage-block-header--toggle"
+                          onClick={() => setUnassignedCollapsed((v) => !v)}
+                          aria-expanded={!unassignedCollapsed}
+                          title={unassignedCollapsed ? 'Show unassigned fields' : 'Hide unassigned fields'}
+                        >
+                          <ChevronDoubleRightIcon
+                            className={`fb-stage-block-chevron${unassignedCollapsed ? '' : ' fb-stage-block-chevron--open'}`}
+                            aria-hidden
+                          />
+                          <span className="fb-stage-block-title">Unassigned</span>
+                          <span className="fb-stage-block-count">{unassignedFields.length}</span>
+                        </button>
+                        {unassignedCollapsed ? null : unassignedFields.length === 0 ? (
+                          <p
+                            className="fb-stage-block-empty"
+                            onDragOver={(e) => {
+                              e.preventDefault()
+                              e.dataTransfer.dropEffect = 'move'
+                            }}
+                          >
+                            Drop a field here to clear its stage.
+                          </p>
+                        ) : (
+                          <ul
+                            className="fb-stage-field-list"
+                            onDragOver={(e) => {
+                              e.preventDefault()
+                              e.dataTransfer.dropEffect = 'move'
+                            }}
+                            onDrop={(e) => {
+                              if (e.target !== e.currentTarget) return
+                              e.preventDefault()
+                              e.stopPropagation()
+                              const id = dragFieldIdRef.current
+                              if (id) {
+                                setFields((prev) => placeFieldInGroupOrder(prev, id, '', null, true))
+                                clearPanelDragRefs()
+                              }
+                            }}
+                          >
+                            {groupUnassignedByPage
+                              ? unassignedByPage.flatMap((grp) => [
+                                  <li
+                                    key={`pg-${grp.page}`}
+                                    className="fb-stage-page-sep"
+                                    aria-hidden
+                                  >
+                                    <span>Page {grp.page}</span>
+                                    <span className="fb-stage-page-sep-count">{grp.items.length}</span>
+                                  </li>,
+                                  ...grp.items.map(renderUnassignedPill),
+                                ])
+                              : unassignedFields.map(renderUnassignedPill)}
+                          </ul>
+                        )}
+                      </div>
 
                     </div>
                   </section>
