@@ -243,6 +243,43 @@ function isSignatureImageSrc(value) {
 }
 
 /**
+ * Open an image src in a new tab. Browsers block top-level navigation to a
+ * data: URL, so a saved signature could not be retrieved this way — convert it
+ * to a blob: URL (which is allowed) and fall back to a download if the popup is
+ * blocked. http(s)/app URLs open directly.
+ */
+function openImageSrcInNewTab(src) {
+  if (!src) return
+  if (!/^data:/i.test(src)) {
+    window.open(src, '_blank', 'noopener,noreferrer')
+    return
+  }
+  try {
+    const comma = src.indexOf(',')
+    const meta = src.slice(0, comma)
+    const b64 = src.slice(comma + 1)
+    const mime = (meta.match(/data:([^;]+)/) || [])[1] || 'image/png'
+    const bin = atob(b64)
+    const bytes = new Uint8Array(bin.length)
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+    const url = URL.createObjectURL(new Blob([bytes], { type: mime }))
+    const w = window.open(url, '_blank')
+    if (!w) {
+      // Popup blocked — download it instead so the image is still retrievable.
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `signature.${mime.includes('jpeg') ? 'jpg' : 'png'}`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 60000)
+  } catch {
+    window.open(src, '_blank', 'noopener,noreferrer')
+  }
+}
+
+/**
  * Corrections UI: never put data:/blob: in <a href> — print/PDF often dumps the full URI as text.
  * Use a <button> (no href) for those; a normal <a> for http(s) and app paths.
  * Print: hide interactive controls and show the actual signature image (before/after), not labels or base64 text.
@@ -260,7 +297,7 @@ function SignatureCorrectionLink({ value, children }) {
   const openInNewTab = (e) => {
     e.stopPropagation()
     e.preventDefault()
-    window.open(src, '_blank', 'noopener,noreferrer')
+    openImageSrcInNewTab(src)
   }
   const interactive = opaque ? (
     <button type="button" className="de-signature-correction-link" onClick={openInNewTab}>
