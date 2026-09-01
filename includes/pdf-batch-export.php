@@ -308,6 +308,24 @@ function ebr_format_pdf_correction_snippet($v, $field = null) {
     return $s;
 }
 
+/**
+ * Draw a small framed signature thumbnail in the corrections panel and return the
+ * height consumed, or 0 when the value is not a usable image.
+ */
+function ebr_pdf_panel_signature_thumb($pdf, $dataUri, $x, $y, $w, $h) {
+    if (!is_string($dataUri) || strpos($dataUri, 'data:image') !== 0) {
+        return 0.0;
+    }
+    $pdf->SetDrawColor(210, 210, 214);
+    $pdf->SetLineWidth(0.3);
+    $pdf->Rect($x, $y, $w, $h);
+    $ok = ebr_pdf_place_signature_from_data_uri($pdf, $dataUri, $x + 1, $y + 1, $w - 2, $h - 2);
+    $pdf->SetDrawColor(0, 0, 0);
+    $pdf->SetLineWidth(0.35);
+
+    return $ok ? $h : 0.0;
+}
+
 function ebr_pdf_place_signature_from_data_uri($pdf, $dataUri, $x, $y, $fw, $fh) {
     if (!is_string($dataUri) || strpos($dataUri, 'data:image') !== 0) {
         return false;
@@ -733,10 +751,18 @@ function ebr_pdf_draw_corrections_side_panel($pdf, array $items, $tplW, $pageW, 
         $eff = ebr_get_effective_value($ent);
         $label = $field['label'] ?? ($field['id'] ?? 'Field');
         $tableField = ebr_is_table_field($field);
-        $currentStr = $tableField ? '' : ebr_format_pdf_field_value($field, $eff);
-        $longCurrent = !$tableField && strlen($currentStr) > 45;
-        $baseCard = $tableField ? 22.0 : 26.0;
-        $estH = min($panelBottom - $yCardTop - 2, max(38.0, $baseCard + $nCor * 12.0 + ($longCurrent ? 10.0 : 0.0)));
+        $isSigField = ($field['type'] ?? '') === 'signature';
+        $currentStr = ($tableField || $isSigField) ? '' : ebr_format_pdf_field_value($field, $eff);
+        $longCurrent = !$tableField && !$isSigField && strlen($currentStr) > 45;
+        $sigThumbH = 22.0;
+        if ($isSigField) {
+            // label row + "Current" thumb + one from->to thumb row per correction
+            $baseCard = 22.0 + $sigThumbH + 4.0;
+            $estH = min($panelBottom - $yCardTop - 2, max(48.0, $baseCard + $nCor * ($sigThumbH + 12.0)));
+        } else {
+            $baseCard = $tableField ? 22.0 : 26.0;
+            $estH = min($panelBottom - $yCardTop - 2, max(38.0, $baseCard + $nCor * 12.0 + ($longCurrent ? 10.0 : 0.0)));
+        }
 
         $cardR = min(5.0, $iw / 2, $estH / 2);
         $pdf->SetFillColor(248, 249, 250);
@@ -757,7 +783,21 @@ function ebr_pdf_draw_corrections_side_panel($pdf, array $items, $tplW, $pageW, 
         $pdf->SetFont('Helvetica', 'B', 8);
         $pdf->Cell($innerW - $badgeW, 9, ' ' . $label, 0, 1, 'L');
 
-        if (!$tableField) {
+        if ($isSigField) {
+            $pdf->SetX($innerLeft);
+            $pdf->SetFont('Helvetica', 'B', 7);
+            $pdf->SetTextColor(85, 85, 85);
+            $pdf->MultiCell($innerW, 7, 'Current:', 0, 'L');
+            $ty = $pdf->GetY();
+            $drawn = ebr_pdf_panel_signature_thumb($pdf, is_string($eff) ? $eff : '', $innerLeft, $ty, min($innerW, 110.0), $sigThumbH);
+            if ($drawn <= 0) {
+                $pdf->SetX($innerLeft);
+                $pdf->SetFont('Helvetica', 'I', 7);
+                $pdf->MultiCell($innerW, 7, '(no signature)', 0, 'L');
+            } else {
+                $pdf->SetY($ty + $sigThumbH + 2);
+            }
+        } elseif (!$tableField) {
             $pdf->SetX($innerLeft);
             $pdf->SetFont('Helvetica', '', 7);
             $pdf->SetTextColor(85, 85, 85);
@@ -768,6 +808,35 @@ function ebr_pdf_draw_corrections_side_panel($pdf, array $items, $tplW, $pageW, 
             if ($pdf->GetY() > $yCardTop + $estH - 4) {
                 break;
             }
+            // `by` is a bare name on legacy entries and an attribution object under
+            // Live Collab; format either into a name so it never prints as "Array".
+            $by = ebr_format_pdf_recorded_by($c['by'] ?? '');
+            $at = ebr_pdf_format_correction_ts($c['at'] ?? '');
+            $meta = ($by !== '' || $at !== '')
+                ? ' (' . $by . ($at !== '' ? ($by !== '' ? ', ' : '') . $at : '') . ')'
+                : '';
+
+            if ($isSigField) {
+                // Show the actual before/after signatures, not a base64 dump.
+                $ty = $pdf->GetY();
+                $half = ($innerW - 8) / 2;
+                $fromOk = ebr_pdf_panel_signature_thumb($pdf, is_string($c['from'] ?? null) ? $c['from'] : '', $innerLeft + 3, $ty, $half, $sigThumbH);
+                $toOk = ebr_pdf_panel_signature_thumb($pdf, is_string($c['to'] ?? null) ? $c['to'] : '', $innerLeft + 3 + $half + 5, $ty, $half, $sigThumbH);
+                $pdf->SetFont('Helvetica', '', 6);
+                $pdf->SetTextColor(120, 120, 120);
+                $pdf->SetXY($innerLeft + 3, $ty + $sigThumbH);
+                $pdf->Cell($half, 6, $fromOk > 0 ? 'Previous' : '(no previous)', 0, 0, 'C');
+                $pdf->SetXY($innerLeft + 3 + $half + 5, $ty + $sigThumbH);
+                $pdf->Cell($half, 6, $toOk > 0 ? 'Updated' : '(no image)', 0, 1, 'C');
+                if ($meta !== '') {
+                    $pdf->SetX($innerLeft + 3);
+                    $pdf->SetFont('Helvetica', 'I', 6);
+                    $pdf->MultiCell($innerW - 3, 6, trim($meta, ' ()'), 0, 'L');
+                }
+                $pdf->SetTextColor(85, 85, 85);
+                continue;
+            }
+
             if ($tableField) {
                 $deltaKeys = ebr_table_correction_changed_keys($field, $c['from'] ?? null, $c['to'] ?? null);
                 $from = ebr_format_pdf_table_correction_side($field, $c['from'] ?? null, $deltaKeys);
@@ -776,12 +845,7 @@ function ebr_pdf_draw_corrections_side_panel($pdf, array $items, $tplW, $pageW, 
                 $from = ebr_format_pdf_correction_snippet($c['from'] ?? '', $field);
                 $to = ebr_format_pdf_correction_snippet($c['to'] ?? '', $field);
             }
-            $by = $c['by'] ?? '';
-            $at = ebr_pdf_format_correction_ts($c['at'] ?? '');
-            $line = $from . ' -> ' . $to;
-            if ($by !== '' || $at !== '') {
-                $line .= ' (' . $by . ($at !== '' ? ', ' . $at : '') . ')';
-            }
+            $line = $from . ' -> ' . $to . $meta;
             $pdf->SetX($innerLeft + 3);
             $pdf->SetTextColor(85, 85, 85);
             $pdf->MultiCell($innerW - 3, 7, '- ' . $line, 0, 'L');
