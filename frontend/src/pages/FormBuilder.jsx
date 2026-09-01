@@ -17,6 +17,8 @@ import {
   Bars3Icon,
   ArrowUturnLeftIcon,
   ArrowUturnRightIcon,
+  ArrowsPointingOutIcon,
+  ArrowsPointingInIcon,
   ArrowDownOnSquareIcon,
 } from '@heroicons/react/24/outline'
 import PdfViewer from '../components/PdfViewer'
@@ -873,6 +875,8 @@ export default function FormBuilder() {
   const [componentsPanelCollapsed, setComponentsPanelCollapsed] = useState(false)
   const [propertiesPanelCollapsed, setPropertiesPanelCollapsed] = useState(false)
   const [unassignedCollapsed, setUnassignedCollapsed] = useState(false)
+  // Widen the stages/components sidebar for easier organizing.
+  const [stagesExpanded, setStagesExpanded] = useState(false)
   // Multi-select of stage pills (Ctrl/Cmd+click, Shift range, marquee) + context menu.
   const [selectedPillIds, setSelectedPillIds] = useState(() => new Set())
   const selectedPillIdsRef = useRef(selectedPillIds)
@@ -2332,14 +2336,34 @@ export default function FormBuilder() {
 
       <div className="fb-main">
         {/* Components Panel - collapsible; vertical toggle on right edge */}
-        <div className={`fb-components-panel ${componentsPanelCollapsed ? 'fb-components-panel-collapsed' : ''}`}>
+        <div
+          className={`fb-components-panel ${componentsPanelCollapsed ? 'fb-components-panel-collapsed' : ''}${
+            stagesExpanded && !componentsPanelCollapsed ? ' fb-components-panel--expanded' : ''
+          }`}
+        >
           {!componentsPanelCollapsed && (
             <div className="fb-components-panel-content">
               <div className="fb-components-panel-inner">
                 {showStagesSection && (
                   <section className="fb-stages-section" aria-label="Form stages">
                     <div className="fb-stages-section-head">
-                      <h2 className="fb-components-section-title">Stages</h2>
+                      <div className="fb-stages-title-row">
+                        <h2 className="fb-components-section-title">Stages</h2>
+                        <button
+                          type="button"
+                          className="fb-stages-expand-btn"
+                          onClick={() => setStagesExpanded((v) => !v)}
+                          title={stagesExpanded ? 'Collapse the panel' : 'Expand the panel for more room to organize'}
+                          aria-pressed={stagesExpanded}
+                        >
+                          {stagesExpanded ? (
+                            <ArrowsPointingInIcon className="fb-stages-expand-icon" />
+                          ) : (
+                            <ArrowsPointingOutIcon className="fb-stages-expand-icon" />
+                          )}
+                          <span>{stagesExpanded ? 'Collapse' : 'Expand'}</span>
+                        </button>
+                      </div>
                       {selectedPillIds.size > 0 && (
                         <div className="fb-stage-select-bar">
                           <span className="fb-stage-select-count">{selectedPillIds.size} selected</span>

@@ -2047,3 +2047,54 @@
   background: #e4e6eb;
   margin: 3px 4px;
 }
+
+/* ── Expandable stages/components sidebar ────────────────────────────── */
+.fb-stages-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.fb-stages-expand-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid #c7d0f5;
+  background: #eef1fb;
+  color: #3f4bb0;
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.fb-stages-expand-btn:hover {
+  background: #e3e8fb;
+}
+
+.fb-stages-expand-icon {
+  width: 14px;
+  height: 14px;
+}
+
+/* Expanded panel: wider, and the field/palette grids flow into more columns */
+.fb-components-panel--expanded {
+  width: 620px;
+  min-width: 620px;
+}
+
+.fb-components-panel--expanded .fb-stage-field-list {
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+}
+
+.fb-components-panel--expanded .fb-palette-list {
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+}
+
+/* With more width, let the stages area take even more of the panel height */
+.fb-components-panel--expanded .fb-stages-section {
+  flex: 5 1 0;
+}
