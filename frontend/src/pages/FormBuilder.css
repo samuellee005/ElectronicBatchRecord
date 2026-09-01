@@ -2098,3 +2098,27 @@
 .fb-components-panel--expanded .fb-stages-section {
   flex: 5 1 0;
 }
+
+.fb-stages-autoorder-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid #b9e0c2;
+  background: #eafaef;
+  color: #1e7a44;
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.fb-stages-autoorder-btn:hover {
+  background: #dbf5e4;
+}
+
+/* Keep the title row from wrapping the two action buttons awkwardly */
+.fb-stages-title-row {
+  flex-wrap: wrap;
+}

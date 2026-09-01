@@ -19,6 +19,7 @@ import {
   ArrowUturnRightIcon,
   ArrowsPointingOutIcon,
   ArrowsPointingInIcon,
+  NumberedListIcon,
   ArrowDownOnSquareIcon,
 } from '@heroicons/react/24/outline'
 import PdfViewer from '../components/PdfViewer'
@@ -186,6 +187,56 @@ function groupFieldsByPage(list) {
   return [...byPage.entries()]
     .sort((a, b) => a[0] - b[0])
     .map(([page, items]) => ({ page, items }))
+}
+
+/**
+ * Reading order for a set of fields: page ascending, then row by row from the
+ * top, and left-to-right within each row. Fields whose vertical centres are
+ * close (within ~60% of a field height) count as the same row, so a row is not
+ * split just because two boxes sit a pixel apart.
+ */
+function readingOrderSort(list) {
+  const byPage = new Map()
+  for (const f of list || []) {
+    const p = Number(f.page) || 1
+    if (!byPage.has(p)) byPage.set(p, [])
+    byPage.get(p).push(f)
+  }
+  const out = []
+  for (const p of [...byPage.keys()].sort((a, b) => a - b)) {
+    const items = byPage.get(p).slice().sort((a, b) => (Number(a.y) || 0) - (Number(b.y) || 0))
+    const rows = []
+    for (const f of items) {
+      const h = Number(f.height) || 0
+      const cy = (Number(f.y) || 0) + h / 2
+      let row = null
+      for (const r of rows) {
+        const tol = Math.max(8, Math.min(r.h, h) * 0.6)
+        if (Math.abs(cy - r.cy) <= tol) {
+          row = r
+          break
+        }
+      }
+      if (!row) {
+        row = { cy, h, n: 0, items: [] }
+        rows.push(row)
+      }
+      row.items.push(f)
+      row.cy = (row.cy * row.n + cy) / (row.n + 1)
+      row.n += 1
+      row.h = Math.max(row.h, h)
+    }
+    rows.sort((a, b) => a.cy - b.cy)
+    for (const r of rows) {
+      r.items.sort((a, b) => {
+        const dx = (Number(a.x) || 0) - (Number(b.x) || 0)
+        if (dx !== 0) return dx
+        return String(a.id).localeCompare(String(b.id))
+      })
+      out.push(...r.items)
+    }
+  }
+  return out
 }
 
 /** Unassigned and each stage are separate groups: order 1..n in the Stages list + properties. */
@@ -2117,6 +2168,34 @@ export default function FormBuilder() {
     })
   }, [])
 
+  // Renumber every group's fields into reading order (top→bottom, left→right)
+  // from their positions on the PDF, so the Stages list and entry order follow
+  // the visual layout. One undo step.
+  const autoOrderByLayout = useCallback(() => {
+    setFields((prev) => {
+      const byKey = new Map()
+      for (const f of prev) {
+        const k = stageKey(f)
+        if (!byKey.has(k)) byKey.set(k, [])
+        byKey.get(k).push(f)
+      }
+      const orderById = new Map()
+      for (const arr of byKey.values()) {
+        readingOrderSort(arr).forEach((f, i) => orderById.set(f.id, i + 1))
+      }
+      let changed = false
+      const next = prev.map((f) => {
+        const o = orderById.get(f.id)
+        if (o != null && f.orderInGroup !== o) {
+          changed = true
+          return { ...f, orderInGroup: o }
+        }
+        return f
+      })
+      return changed ? next : prev
+    })
+  }, [])
+
   const handlePillClick = useCallback(
     (e, f) => {
       if (e.metaKey || e.ctrlKey) {
@@ -2398,6 +2477,15 @@ export default function FormBuilder() {
                     <div className="fb-stages-section-head">
                       <div className="fb-stages-title-row">
                         <h2 className="fb-components-section-title">Stages</h2>
+                        <button
+                          type="button"
+                          className="fb-stages-autoorder-btn"
+                          onClick={autoOrderByLayout}
+                          title="Number every field in reading order — top to bottom, then left to right — from its position on the PDF"
+                        >
+                          <NumberedListIcon className="fb-stages-expand-icon" />
+                          <span>Auto-order</span>
+                        </button>
                         <button
                           type="button"
                           className="fb-stages-expand-btn"
