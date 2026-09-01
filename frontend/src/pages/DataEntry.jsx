@@ -774,7 +774,7 @@ function CorrectionsPanel({ correctionList, formatTs, noOuterWrapper }) {
                           displayFieldValue(field, c.to)
                         )}
                       </span>
-                      <span className="de-correction-meta">({c.by}, {formatTs(c.at)})</span>
+                      <span className="de-correction-meta">({attributionName(c.by) || '—'}, {formatTs(c.at)})</span>
                     </li>
                   )
                 })}
@@ -1375,7 +1375,7 @@ function FieldAuditInfoPopover({ entry, formatTs, correctionRef }) {
                 {corrs.map((c, i) => (
                   <li key={i}>
                     <span className="overlay-audit-info-val">{formatTs(c.at)}</span>
-                    <span className="overlay-audit-info-by"> — {c.by || '—'}</span>
+                    <span className="overlay-audit-info-by"> — {attributionName(c.by) || '—'}</span>
                   </li>
                 ))}
               </ul>
