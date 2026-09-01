@@ -9,7 +9,10 @@ if (preg_match('#^/uploads/[^/]+\.pdf$#i', $uri)) {
 if ($uri !== '/' && file_exists(__DIR__ . $uri) && !is_dir(__DIR__ . $uri)) {
     return false;
 }
-if (preg_match('#^/(includes|uploads|data|forms)/#', $uri)) {
+// SPA routes live under /forms/* (entry, builder, audit, build) and must fall
+// through to index.html. Real files there are already served by the file_exists
+// check above; only genuine API/asset prefixes 404 when missing.
+if (preg_match('#^/(includes|uploads|data)/#', $uri)) {
     return false;
 }
 $distFile = __DIR__ . '/frontend/dist' . $uri;
