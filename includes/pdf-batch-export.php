@@ -577,38 +577,122 @@ function ebr_pdf_draw_table_field_in_box($pdf, array $field, $x, $y, $fw, $fh, $
  *
  * @param float $recReservePt Space reserved at bottom of box for "Rec:" line (points)
  */
+/** Word-wrap $text to lines no wider than $maxW at the current font, hard-breaking
+ *  any single word longer than the line. Returns the list of lines (for sizing). */
+function ebr_pdf_wrap_lines($pdf, $text, $maxW) {
+    $lines = [];
+    foreach (preg_split('/\r\n|\r|\n/', (string) $text) as $para) {
+        if (trim($para) === '') {
+            $lines[] = '';
+            continue;
+        }
+        $cur = '';
+        foreach (preg_split('/\s+/', trim($para)) as $word) {
+            if ($word === '') {
+                continue;
+            }
+            $try = $cur === '' ? $word : $cur . ' ' . $word;
+            if ($pdf->GetStringWidth($try) <= $maxW) {
+                $cur = $try;
+                continue;
+            }
+            if ($cur !== '') {
+                $lines[] = $cur;
+                $cur = '';
+            }
+            if ($pdf->GetStringWidth($word) > $maxW) {
+                // Hard-break a word too long for the line.
+                $chunk = '';
+                $len = function_exists('mb_strlen') ? mb_strlen($word) : strlen($word);
+                for ($i = 0; $i < $len; $i++) {
+                    $ch = function_exists('mb_substr') ? mb_substr($word, $i, 1) : substr($word, $i, 1);
+                    if ($pdf->GetStringWidth($chunk . $ch) <= $maxW || $chunk === '') {
+                        $chunk .= $ch;
+                    } else {
+                        $lines[] = $chunk;
+                        $chunk = $ch;
+                    }
+                }
+                $cur = $chunk;
+            } else {
+                $cur = $word;
+            }
+        }
+        if ($cur !== '') {
+            $lines[] = $cur;
+        }
+    }
+
+    return $lines ?: [''];
+}
+
+/**
+ * Draw a field value inside its box, auto-fitting to the box.
+ *
+ * Starts from the field's own "Input font size" (the px set in the builder,
+ * converted to points at DESIGN_SCALE so screen and print match), then shrinks
+ * the font — and finally wraps to multiple lines — until the value fits the box
+ * width and height. This makes the box sized in the builder authoritative for
+ * print, so values in a small blank no longer overflow.
+ */
 function ebr_pdf_draw_field_value_in_box($pdf, $field, $x, $y, $fw, $fh, $val, $recReservePt = 0) {
     $type = $field['type'] ?? 'text';
+    $val = (string) $val;
     $fhUse = max(4.0, (float) $fh - (float) $recReservePt);
-    $pdf->SetFont('Helvetica', '', 8);
-    $fs = 8;
-    $lineH = $fs * 1.15;
 
     if ($type === 'checkbox') {
+        $pdf->SetFont('Helvetica', '', 8);
+        $lineH = 8 * 1.15;
         $pdf->SetXY($x, $y + ($fhUse - $lineH) / 2);
         $pdf->Cell($fw, $lineH, $val, 0, 0, 'C');
         return;
     }
-
-    $useMultiline = ($type === 'textarea')
-        || (($type === 'radio' || $type === 'multiselect') && strlen($val) > 52)
-        || strlen($val) > 52;
-
-    if ($useMultiline) {
-        $fs = 8;
-        $pdf->SetFont('Helvetica', '', $fs);
-        $lineH = $fs * 1.12;
-        $pdf->SetXY($x, $y + 1);
-        $pdf->MultiCell($fw, $lineH, $val, 0, 'C');
+    if ($val === '') {
         return;
     }
 
-    $ty = $y + $fhUse - $lineH;
-    if ($ty < $y) {
-        $ty = $y;
+    // Start size: the field's Input font size (px) in points, or the historic 8pt.
+    $designScale = 1.5;
+    $reqPx = isset($field['inputFontSize']) ? (float) $field['inputFontSize'] : 0.0;
+    $startPt = $reqPx > 0 ? $reqPx / $designScale : 8.0;
+    $startPt = max(4.5, min(24.0, $startPt));
+    $minPt = 4.5;
+    $padX = 2.0;
+    $availW = max(1.0, (float) $fw - $padX);
+    $availH = max(1.0, $fhUse - 1.0);
+
+    // 1) Largest size (<= start) that fits on ONE line, both width and height.
+    //    Bottom-aligned so the value sits on an underline like a written blank.
+    for ($fs = $startPt; $fs >= $minPt; $fs -= 0.5) {
+        $pdf->SetFont('Helvetica', '', $fs);
+        $lineH = $fs * 1.15;
+        if ($pdf->GetStringWidth($val) <= $availW && $lineH <= $availH) {
+            $ty = $y + $fhUse - $lineH;
+            if ($ty < $y) {
+                $ty = $y;
+            }
+            $pdf->SetXY($x + $padX / 2, $ty);
+            $pdf->Cell($availW, $lineH, $val, 0, 0, 'C');
+            return;
+        }
     }
-    $pdf->SetXY($x, $ty);
-    $pdf->Cell($fw, $lineH, $val, 0, 0, 'C');
+
+    // 2) Wrap: largest size whose wrapped block fits the height (min size otherwise).
+    for ($fs = $startPt; $fs >= $minPt; $fs -= 0.5) {
+        $pdf->SetFont('Helvetica', '', $fs);
+        $lineH = $fs * 1.12;
+        $lines = ebr_pdf_wrap_lines($pdf, $val, $availW);
+        $blockH = count($lines) * $lineH;
+        if ($blockH <= $availH || $fs <= $minPt) {
+            $ty = $y + max(0.0, ($fhUse - $blockH) / 2);
+            if ($ty < $y + 1) {
+                $ty = $y + 1;
+            }
+            $pdf->SetXY($x + $padX / 2, $ty);
+            $pdf->MultiCell($availW, $lineH, $val, 0, 'C');
+            return;
+        }
+    }
 }
 
 /**
