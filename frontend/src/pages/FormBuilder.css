@@ -1919,3 +1919,131 @@
   padding: 0 4px;
   line-height: 1.5;
 }
+
+/* ── Multi-select in the Stages panel ────────────────────────────────── */
+.fb-stages-section-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.fb-stage-select-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  margin-bottom: 6px;
+  background: #eef1fb;
+  border: 1px solid #c7d0f5;
+  border-radius: 6px;
+  font-size: 0.72rem;
+}
+
+.fb-stage-select-count {
+  font-weight: 600;
+  color: #3f4bb0;
+  margin-right: auto;
+}
+
+.fb-stage-select-move,
+.fb-stage-select-clear {
+  border: 1px solid #b9c2ec;
+  background: #fff;
+  color: #3f4bb0;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+
+.fb-stage-select-move:hover,
+.fb-stage-select-clear:hover {
+  background: #e3e8fb;
+}
+
+/* Selected pill highlight */
+.fb-stage-field-pill.is-selected {
+  border-color: #667eea;
+  background: #eef1fb;
+  box-shadow: 0 0 0 1px #667eea;
+}
+
+.fb-stage-field-item.is-selected .fb-stage-field-pill-label {
+  color: #3f4bb0;
+  font-weight: 600;
+}
+
+/* Rubber-band marquee */
+.fb-marquee {
+  position: fixed;
+  z-index: 60;
+  border: 1px solid #667eea;
+  background: rgba(102, 126, 234, 0.12);
+  pointer-events: none;
+  border-radius: 2px;
+}
+
+/* Right-click move menu */
+.fb-pill-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+}
+
+.fb-pill-menu {
+  position: fixed;
+  z-index: 71;
+  min-width: 170px;
+  max-width: 200px;
+  background: #fff;
+  border: 1px solid #d5d9e2;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  padding: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.fb-pill-menu-title {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #8a93a3;
+  padding: 4px 8px 5px;
+}
+
+.fb-pill-menu-scroll {
+  max-height: 180px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.fb-pill-menu-item {
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: #1e293b;
+  font-size: 0.82rem;
+  padding: 6px 9px;
+  border-radius: 5px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fb-pill-menu-item:hover {
+  background: #eef1fb;
+  color: #3f4bb0;
+}
+
+.fb-pill-menu-sep {
+  height: 1px;
+  background: #e4e6eb;
+  margin: 3px 4px;
+}

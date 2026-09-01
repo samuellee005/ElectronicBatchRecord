@@ -873,6 +873,15 @@ export default function FormBuilder() {
   const [componentsPanelCollapsed, setComponentsPanelCollapsed] = useState(false)
   const [propertiesPanelCollapsed, setPropertiesPanelCollapsed] = useState(false)
   const [unassignedCollapsed, setUnassignedCollapsed] = useState(false)
+  // Multi-select of stage pills (Ctrl/Cmd+click, Shift range, marquee) + context menu.
+  const [selectedPillIds, setSelectedPillIds] = useState(() => new Set())
+  const selectedPillIdsRef = useRef(selectedPillIds)
+  selectedPillIdsRef.current = selectedPillIds
+  const lastClickedPillRef = useRef(null)
+  const draggedPillIdsRef = useRef([])
+  const [pillMenu, setPillMenu] = useState(null)
+  const [marquee, setMarquee] = useState(null)
+  const stagesScrollRef = useRef(null)
   const [propertiesPanelWidth, setPropertiesPanelWidth] = useState(PROPERTIES_PANEL_DEFAULT_W)
   const [propertiesPanelResizing, setPropertiesPanelResizing] = useState(false)
   const propertiesPanelWidthRef = useRef(PROPERTIES_PANEL_DEFAULT_W)
@@ -2013,12 +2022,6 @@ export default function FormBuilder() {
   const dragFieldIdRef = useRef(null)
   const dragStageNameRef = useRef(null)
 
-  const moveFieldToStageById = useCallback((fieldId, targetStageName) => {
-    setFields((prev) =>
-      placeFieldInGroupOrder(prev, fieldId, String(targetStageName || '').trim(), null, true),
-    )
-  }, [])
-
   const reorderStagesByName = useCallback((sourceName, targetName) => {
     if (!sourceName || !targetName || sourceName === targetName) return
     setFields((prev) => {
@@ -2034,62 +2037,201 @@ export default function FormBuilder() {
   const clearPanelDragRefs = useCallback(() => {
     dragFieldIdRef.current = null
     dragStageNameRef.current = null
+    draggedPillIdsRef.current = []
   }, [])
 
-  // One Unassigned pill: drag handle to move/reorder, label click to jump to it
-  // on the canvas, and a page badge so its location is visible.
-  const renderUnassignedPill = useCallback(
-    (f) => (
-      <li
-        key={f.id}
-        className="fb-stage-field-item"
-        onDragOver={(e) => {
-          e.preventDefault()
-          e.dataTransfer.dropEffect = 'move'
-        }}
-        onDrop={(e) => {
-          e.preventDefault()
-          e.stopPropagation()
-          const id = dragFieldIdRef.current
-          if (!id || id === f.id) {
-            clearPanelDragRefs()
-            return
-          }
-          const rect = e.currentTarget.getBoundingClientRect()
-          const before = e.clientY < rect.top + rect.height / 2
-          setFields((prev) => placeFieldInGroupOrder(prev, id, '', f.id, before))
-          clearPanelDragRefs()
-        }}
-      >
-        <span className="fb-stage-field-pill">
-          <span
-            className="fb-stage-field-pill-grip"
-            draggable
-            onDragStart={(e) => {
-              e.stopPropagation()
-              dragFieldIdRef.current = f.id
-              e.dataTransfer.effectAllowed = 'move'
-              e.dataTransfer.setData('text/plain', f.id)
-            }}
-            onDragEnd={clearPanelDragRefs}
-            title="Drag to move or reorder"
-          >
-            <Bars3Icon className="fb-stage-pill-grip-icon" aria-hidden />
-          </span>
-          <button
-            type="button"
-            className="fb-stage-field-pill-label"
-            onClick={() => focusFieldOnCanvas(f)}
-            title={`${f.label || getComponentTypeLabel(f.type)} — page ${f.page || 1}`}
-          >
-            {f.label || getComponentTypeLabel(f.type)}
-          </button>
-          <span className="fb-stage-field-pill-page">p{f.page || 1}</span>
-        </span>
-      </li>
-    ),
-    [clearPanelDragRefs, focusFieldOnCanvas],
+  // ── Stage-pill selection, movement, context menu, marquee ──────────────────
+
+  // Visible top-to-bottom order (each stage's fields, then Unassigned) for Shift-range.
+  const visiblePillOrder = useMemo(() => {
+    const ids = []
+    for (const st of existingStages) {
+      for (const f of sortFieldsInGroupList(fields, st)) ids.push(f.id)
+    }
+    for (const f of unassignedFields) ids.push(f.id)
+    return ids
+  }, [existingStages, fields, unassignedFields])
+  const visiblePillOrderRef = useRef(visiblePillOrder)
+  visiblePillOrderRef.current = visiblePillOrder
+
+  const moveFieldsToStage = useCallback((ids, stageName) => {
+    const target = String(stageName || '').trim()
+    if (!ids || ids.length === 0) return
+    setFields((prev) => {
+      let next = prev
+      for (const id of ids) next = placeFieldInGroupOrder(next, id, target, null, true)
+      return next
+    })
+  }, [])
+
+  const handlePillClick = useCallback(
+    (e, f) => {
+      if (e.metaKey || e.ctrlKey) {
+        e.preventDefault()
+        e.stopPropagation()
+        setSelectedPillIds((prev) => {
+          const n = new Set(prev)
+          if (n.has(f.id)) n.delete(f.id)
+          else n.add(f.id)
+          return n
+        })
+        lastClickedPillRef.current = f.id
+        return
+      }
+      if (e.shiftKey && lastClickedPillRef.current) {
+        e.preventDefault()
+        e.stopPropagation()
+        const order = visiblePillOrderRef.current
+        const a = order.indexOf(lastClickedPillRef.current)
+        const b = order.indexOf(f.id)
+        if (a >= 0 && b >= 0) {
+          const lo = Math.min(a, b)
+          const hi = Math.max(a, b)
+          setSelectedPillIds(new Set(order.slice(lo, hi + 1)))
+        }
+        return
+      }
+      // Plain click: clear any selection and jump to the field on the canvas.
+      setSelectedPillIds(new Set())
+      lastClickedPillRef.current = f.id
+      focusFieldOnCanvas(f)
+    },
+    [focusFieldOnCanvas],
   )
+
+  const handlePillContextMenu = useCallback((e, f) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const cur = selectedPillIdsRef.current
+    const ids = cur.has(f.id) && cur.size > 0 ? [...cur] : [f.id]
+    if (!cur.has(f.id)) {
+      setSelectedPillIds(new Set([f.id]))
+      lastClickedPillRef.current = f.id
+    }
+    setPillMenu({ x: e.clientX, y: e.clientY, ids })
+  }, [])
+
+  // One selectable pill, used for both Unassigned and each stage. `stageName` is
+  // the group the pill currently lives in ('' for Unassigned).
+  const renderStagePill = useCallback(
+    (f, stageName) => {
+      const selected = selectedPillIds.has(f.id)
+      return (
+        <li
+          key={f.id}
+          data-pill-id={f.id}
+          className={`fb-stage-field-item${selected ? ' is-selected' : ''}`}
+          onDragOver={(e) => {
+            e.preventDefault()
+            e.dataTransfer.dropEffect = 'move'
+          }}
+          onDrop={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            const ids = draggedPillIdsRef.current
+            if (!ids || ids.length === 0) {
+              clearPanelDragRefs()
+              return
+            }
+            if (ids.length === 1 && ids[0] !== f.id) {
+              const rect = e.currentTarget.getBoundingClientRect()
+              const before = e.clientY < rect.top + rect.height / 2
+              setFields((prev) => placeFieldInGroupOrder(prev, ids[0], stageName, f.id, before))
+            } else if (ids.length > 1) {
+              moveFieldsToStage(ids.filter((id) => id !== f.id), stageName)
+            }
+            clearPanelDragRefs()
+          }}
+        >
+          <span className={`fb-stage-field-pill${selected ? ' is-selected' : ''}`}>
+            <span
+              className="fb-stage-field-pill-grip"
+              draggable
+              onDragStart={(e) => {
+                e.stopPropagation()
+                const cur = selectedPillIdsRef.current
+                const ids = cur.has(f.id) && cur.size > 1 ? [...cur] : [f.id]
+                draggedPillIdsRef.current = ids
+                dragFieldIdRef.current = f.id
+                e.dataTransfer.effectAllowed = 'move'
+                e.dataTransfer.setData('text/plain', f.id)
+              }}
+              onDragEnd={clearPanelDragRefs}
+              title="Drag to move or reorder"
+            >
+              <Bars3Icon className="fb-stage-pill-grip-icon" aria-hidden />
+            </span>
+            <button
+              type="button"
+              className="fb-stage-field-pill-label"
+              onClick={(e) => handlePillClick(e, f)}
+              onContextMenu={(e) => handlePillContextMenu(e, f)}
+              title={`${f.label || getComponentTypeLabel(f.type)} — page ${f.page || 1} (Ctrl/Shift-click to multi-select, right-click to move)`}
+            >
+              {f.label || getComponentTypeLabel(f.type)}
+            </button>
+            <span className="fb-stage-field-pill-page">p{f.page || 1}</span>
+          </span>
+        </li>
+      )
+    },
+    [selectedPillIds, handlePillClick, handlePillContextMenu, clearPanelDragRefs, moveFieldsToStage],
+  )
+
+  // Marquee (rubber-band) select over the stages panel background. Starts only on
+  // empty space so pill drags still work; Ctrl/Shift adds to the current selection.
+  const handleMarqueeStart = useCallback((e) => {
+    if (e.button !== 0) return
+    if (e.target.closest('.fb-stage-field-pill, .fb-stage-block-header, button, a, input, select')) return
+    const container = stagesScrollRef.current
+    if (!container) return
+    const startX = e.clientX
+    const startY = e.clientY
+    const additive = e.ctrlKey || e.metaKey || e.shiftKey
+    const base = additive ? new Set(selectedPillIdsRef.current) : new Set()
+    let moved = false
+
+    const onMove = (me) => {
+      const dx = me.clientX - startX
+      const dy = me.clientY - startY
+      if (!moved && Math.abs(dx) < 4 && Math.abs(dy) < 4) return
+      moved = true
+      const left = Math.min(startX, me.clientX)
+      const top = Math.min(startY, me.clientY)
+      const width = Math.abs(dx)
+      const height = Math.abs(dy)
+      setMarquee({ left, top, width, height })
+      const boxR = left + width
+      const boxB = top + height
+      const next = new Set(base)
+      container.querySelectorAll('[data-pill-id]').forEach((el) => {
+        const r = el.getBoundingClientRect()
+        const hit = !(r.right < left || r.left > boxR || r.bottom < top || r.top > boxB)
+        if (hit) next.add(el.getAttribute('data-pill-id'))
+      })
+      setSelectedPillIds(next)
+    }
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      setMarquee(null)
+      if (!moved && !additive) setSelectedPillIds(new Set())
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }, [])
+
+  // Close the pill context menu on Escape (and clear the selection); Escape with
+  // no menu open just clears the selection.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return
+      if (pillMenu) setPillMenu(null)
+      else if (selectedPillIdsRef.current.size) setSelectedPillIds(new Set())
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [pillMenu])
 
   const showStagesSection = fields.length > 0
 
@@ -2196,8 +2338,40 @@ export default function FormBuilder() {
               <div className="fb-components-panel-inner">
                 {showStagesSection && (
                   <section className="fb-stages-section" aria-label="Form stages">
-                    <h2 className="fb-components-section-title">Stages</h2>
-                    <div className="fb-stages-section-scroll">
+                    <div className="fb-stages-section-head">
+                      <h2 className="fb-components-section-title">Stages</h2>
+                      {selectedPillIds.size > 0 && (
+                        <div className="fb-stage-select-bar">
+                          <span className="fb-stage-select-count">{selectedPillIds.size} selected</span>
+                          <button
+                            type="button"
+                            className="fb-stage-select-move"
+                            onClick={(e) =>
+                              setPillMenu({
+                                x: e.clientX,
+                                y: e.clientY,
+                                ids: [...selectedPillIdsRef.current],
+                              })
+                            }
+                          >
+                            Move to…
+                          </button>
+                          <button
+                            type="button"
+                            className="fb-stage-select-clear"
+                            onClick={() => setSelectedPillIds(new Set())}
+                            title="Clear selection"
+                          >
+                            Clear
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    <div
+                      className="fb-stages-section-scroll"
+                      ref={stagesScrollRef}
+                      onMouseDown={handleMarqueeStart}
+                    >
                       {existingStages.map((stageName) => {
                         const inStage = sortFieldsInGroupList(fields, stageName)
                         return (
@@ -2211,9 +2385,9 @@ export default function FormBuilder() {
                             }}
                             onDrop={(e) => {
                               e.preventDefault()
-                              const id = dragFieldIdRef.current
-                              if (id) {
-                                moveFieldToStageById(id, stageName)
+                              const ids = draggedPillIdsRef.current
+                              if (ids && ids.length) {
+                                moveFieldsToStage(ids, stageName)
                                 clearPanelDragRefs()
                                 return
                               }
@@ -2251,64 +2425,14 @@ export default function FormBuilder() {
                                 if (e.target !== e.currentTarget) return
                                 e.preventDefault()
                                 e.stopPropagation()
-                                const id = dragFieldIdRef.current
-                                if (id) {
-                                  setFields((prev) =>
-                                    placeFieldInGroupOrder(prev, id, stageName, null, true),
-                                  )
+                                const ids = draggedPillIdsRef.current
+                                if (ids && ids.length) {
+                                  moveFieldsToStage(ids, stageName)
                                   clearPanelDragRefs()
                                 }
                               }}
                             >
-                              {inStage.map((f) => (
-                                <li
-                                  key={f.id}
-                                  className="fb-stage-field-item"
-                                  onDragOver={(e) => {
-                                    e.preventDefault()
-                                    e.dataTransfer.dropEffect = 'move'
-                                  }}
-                                  onDrop={(e) => {
-                                    e.preventDefault()
-                                    e.stopPropagation()
-                                    const id = dragFieldIdRef.current
-                                    if (!id || id === f.id) {
-                                      clearPanelDragRefs()
-                                      return
-                                    }
-                                    const rect = e.currentTarget.getBoundingClientRect()
-                                    const before = e.clientY < rect.top + rect.height / 2
-                                    setFields((prev) =>
-                                      placeFieldInGroupOrder(prev, id, stageName, f.id, before),
-                                    )
-                                    clearPanelDragRefs()
-                                  }}
-                                >
-                                  <span className="fb-stage-field-pill">
-                                    <span
-                                      className="fb-stage-field-pill-grip"
-                                      draggable
-                                      onDragStart={(e) => {
-                                        e.stopPropagation()
-                                        dragFieldIdRef.current = f.id
-                                        e.dataTransfer.effectAllowed = 'move'
-                                        e.dataTransfer.setData('text/plain', f.id)
-                                      }}
-                                      onDragEnd={clearPanelDragRefs}
-                                      title="Drag to move or reorder"
-                                    >
-                                      <Bars3Icon className="fb-stage-pill-grip-icon" aria-hidden />
-                                    </span>
-                                    <button
-                                      type="button"
-                                      className="fb-stage-field-pill-label"
-                                      onClick={() => focusFieldOnCanvas(f)}
-                                    >
-                                      {f.label || getComponentTypeLabel(f.type)}
-                                    </button>
-                                  </span>
-                                </li>
-                              ))}
+                              {inStage.map((f) => renderStagePill(f, stageName))}
                             </ul>
                           </div>
                         )
@@ -2323,9 +2447,9 @@ export default function FormBuilder() {
                         }}
                         onDrop={(e) => {
                           e.preventDefault()
-                          const id = dragFieldIdRef.current
-                          if (id) {
-                            moveFieldToStageById(id, '')
+                          const ids = draggedPillIdsRef.current
+                          if (ids && ids.length) {
+                            moveFieldsToStage(ids, '')
                             clearPanelDragRefs()
                           }
                         }}
@@ -2365,9 +2489,9 @@ export default function FormBuilder() {
                               if (e.target !== e.currentTarget) return
                               e.preventDefault()
                               e.stopPropagation()
-                              const id = dragFieldIdRef.current
-                              if (id) {
-                                setFields((prev) => placeFieldInGroupOrder(prev, id, '', null, true))
+                              const ids = draggedPillIdsRef.current
+                              if (ids && ids.length) {
+                                moveFieldsToStage(ids, '')
                                 clearPanelDragRefs()
                               }
                             }}
@@ -2382,9 +2506,9 @@ export default function FormBuilder() {
                                     <span>Page {grp.page}</span>
                                     <span className="fb-stage-page-sep-count">{grp.items.length}</span>
                                   </li>,
-                                  ...grp.items.map(renderUnassignedPill),
+                                  ...grp.items.map((f) => renderStagePill(f, '')),
                                 ])
-                              : unassignedFields.map(renderUnassignedPill)}
+                              : unassignedFields.map((f) => renderStagePill(f, ''))}
                           </ul>
                         )}
                       </div>
@@ -3146,6 +3270,78 @@ export default function FormBuilder() {
             </div>
           </div>
         </div>
+      )}
+
+      {marquee && (
+        <div
+          className="fb-marquee"
+          style={{ left: marquee.left, top: marquee.top, width: marquee.width, height: marquee.height }}
+          aria-hidden
+        />
+      )}
+
+      {pillMenu && (
+        <>
+          <div
+            className="fb-pill-menu-backdrop"
+            onMouseDown={() => setPillMenu(null)}
+            onContextMenu={(e) => {
+              e.preventDefault()
+              setPillMenu(null)
+            }}
+          />
+          <div
+            className="fb-pill-menu"
+            style={{ left: Math.min(pillMenu.x, window.innerWidth - 200), top: Math.min(pillMenu.y, window.innerHeight - 260) }}
+            role="menu"
+          >
+            <div className="fb-pill-menu-title">
+              Move {pillMenu.ids.length} field{pillMenu.ids.length === 1 ? '' : 's'} to
+            </div>
+            <div className="fb-pill-menu-scroll">
+              {existingStages.map((st) => (
+                <button
+                  key={st}
+                  type="button"
+                  className="fb-pill-menu-item"
+                  onClick={() => {
+                    moveFieldsToStage(pillMenu.ids, st)
+                    setSelectedPillIds(new Set())
+                    setPillMenu(null)
+                  }}
+                >
+                  {st}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              className="fb-pill-menu-item"
+              onClick={() => {
+                const name = window.prompt('New stage name:')
+                if (name && name.trim()) {
+                  moveFieldsToStage(pillMenu.ids, name.trim())
+                  setSelectedPillIds(new Set())
+                }
+                setPillMenu(null)
+              }}
+            >
+              + New stage…
+            </button>
+            <div className="fb-pill-menu-sep" />
+            <button
+              type="button"
+              className="fb-pill-menu-item"
+              onClick={() => {
+                moveFieldsToStage(pillMenu.ids, '')
+                setSelectedPillIds(new Set())
+                setPillMenu(null)
+              }}
+            >
+              Unassigned
+            </button>
+          </div>
+        </>
       )}
     </div>
   )
