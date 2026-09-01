@@ -80,7 +80,71 @@ function ebr_db_pdf_template_exists(string $filename): bool
 }
 
 /**
- * Write template bytes to a temp file for Ghostscript / FPDI (caller must unlink).
+ * Locate the Ghostscript binary, or null when it is not installed.
+ */
+function ebr_gs_binary(): ?string
+{
+    static $cached = false;
+    static $path = null;
+    if ($cached) {
+        return $path;
+    }
+    $cached = true;
+    foreach (['gs', '/usr/bin/gs', '/usr/local/bin/gs', '/bin/gs'] as $candidate) {
+        $out = [];
+        $rc = 1;
+        @exec(escapeshellarg($candidate) . ' --version 2>/dev/null', $out, $rc);
+        if ($rc === 0) {
+            $path = $candidate;
+            break;
+        }
+    }
+
+    return $path;
+}
+
+/**
+ * Normalise a PDF to version 1.4 with Ghostscript so FPDI's bundled free parser
+ * can import it. Many real-world templates use PDF 1.5+ object/xref streams that
+ * the free parser cannot read at all ("compression technique … not supported"),
+ * or that it imports into a broken form XObject whose text renders as garbled
+ * symbols. Re-writing through Ghostscript resolves both while preserving the
+ * text and embedded fonts (pdfwrite does not rasterize).
+ *
+ * Best-effort: returns the flattened path on success, or null so the caller can
+ * fall back to the original bytes (e.g. gs missing, or an already-simple PDF).
+ */
+function ebr_pdf_flatten_for_fpdi(string $srcPath): ?string
+{
+    $gs = ebr_gs_binary();
+    if ($gs === null || !is_readable($srcPath)) {
+        return null;
+    }
+    $out = tempnam(sys_get_temp_dir(), 'ebrgspdf');
+    if ($out === false) {
+        return null;
+    }
+    $cmd = escapeshellarg($gs)
+        . ' -q -dNOPAUSE -dBATCH -dSAFER'
+        . ' -sDEVICE=pdfwrite -dCompatibilityLevel=1.4'
+        . ' -dPDFSETTINGS=/prepress -dAutoRotatePages=/None'
+        . ' -sOutputFile=' . escapeshellarg($out)
+        . ' ' . escapeshellarg($srcPath) . ' 2>/dev/null';
+    $lines = [];
+    $rc = 1;
+    @exec($cmd, $lines, $rc);
+    if ($rc !== 0 || !is_file($out) || filesize($out) < 100) {
+        @unlink($out);
+
+        return null;
+    }
+
+    return $out;
+}
+
+/**
+ * Write template bytes to a temp file, normalised for FPDI via Ghostscript when
+ * available. Caller must unlink the returned path.
  */
 function ebr_db_pdf_template_materialize_to_temp(string $filename): ?string
 {
@@ -102,6 +166,15 @@ function ebr_db_pdf_template_materialize_to_temp(string $filename): ?string
         @unlink($tmp);
 
         return null;
+    }
+
+    // Normalise for FPDI (PDF 1.4). Falls back to the raw bytes when Ghostscript
+    // is unavailable or the conversion fails.
+    $flat = ebr_pdf_flatten_for_fpdi($tmp);
+    if ($flat !== null) {
+        @unlink($tmp);
+
+        return $flat;
     }
 
     return $tmp;
