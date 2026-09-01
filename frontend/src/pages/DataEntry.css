@@ -1137,6 +1137,32 @@ button.de-signature-correction-link {
   box-shadow: inset 0 0 0 1px rgba(102, 126, 234, 0.38);
 }
 
+/* Hide the field placeholder while the input is at rest: on templates where two
+   fields overlap, an empty field's "Enter text" hint bled through a filled
+   neighbour. The frame already marks where to type; the hint returns on focus. */
+.overlay-field-input-container--compact input::placeholder,
+.overlay-field-input-container--compact textarea::placeholder {
+  color: transparent;
+  opacity: 0;
+}
+
+.overlay-field-input-container--compact input:focus::placeholder,
+.overlay-field-input-container--compact textarea:focus::placeholder {
+  color: rgba(120, 120, 130, 0.55);
+  opacity: 1;
+}
+
+/* Stack a field with a value above overlapping empty ones (base z-index is 2)
+   so its content is never mixed with a neighbour's frame or hint; the focused
+   field wins over everything. */
+.overlay-field.overlay-field--compact.overlay-field--compact-empty {
+  z-index: 1;
+}
+
+.overlay-field.overlay-field--compact:focus-within {
+  z-index: 3;
+}
+
 .overlay-field.overlay-field--compact .overlay-field-input-container--compact:focus-within {
   box-shadow: inset 0 0 0 1px rgba(102, 126, 234, 0.52);
   background: transparent;
