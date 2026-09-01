@@ -819,6 +819,7 @@ export default function FormBuilder() {
   // Clipboard for copy/paste across pages. Stash both the captured
   // snapshot of fields and the count so the paste button stays in sync.
   const clipboardFieldsRef = useRef([])
+  const pasteInPlaceRef = useRef(null)
   const [clipboardCount, setClipboardCount] = useState(0)
   const [showPasteModal, setShowPasteModal] = useState(false)
   // Import fields from another saved form (any template).
@@ -1270,6 +1271,19 @@ export default function FormBuilder() {
         }, 1800)
         e.preventDefault()
       }
+      // Cmd/Ctrl + V pastes the copied fields onto the current page, nudged
+      // slightly so a paste never lands exactly on top of its source.
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'v' || e.key === 'V')) {
+        const tag = e.target?.tagName
+        const editing =
+          tag === 'INPUT' ||
+          tag === 'TEXTAREA' ||
+          e.target?.isContentEditable
+        if (editing) return
+        if (clipboardFieldsRef.current.length === 0) return
+        e.preventDefault()
+        pasteInPlaceRef.current?.()
+      }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
@@ -1416,6 +1430,41 @@ export default function FormBuilder() {
     },
     [currentPage, mintFieldId],
   )
+
+  // Ctrl+V: clone the copied fields onto the current page with a small offset
+  // so the paste is visible next to (not on top of) the source, clamped to the
+  // canvas, and select the new fields.
+  const PASTE_OFFSET = 16
+  const pasteFieldsInPlace = useCallback(() => {
+    const snapshot = clipboardFieldsRef.current
+    if (!snapshot.length) return
+    const maxDesignX =
+      canvasSize.width > 0 ? (canvasSize.width * DESIGN_SCALE) / scale : Infinity
+    const maxDesignY =
+      canvasSize.height > 0 ? (canvasSize.height * DESIGN_SCALE) / scale : Infinity
+    const clones = snapshot.map((f) => {
+      const clone = JSON.parse(JSON.stringify(f))
+      clone.id = mintFieldId()
+      clone.page = currentPage
+      const w = Number(clone.width) || 0
+      const h = Number(clone.height) || 0
+      clone.x = Math.max(0, Math.min((Number(clone.x) || 0) + PASTE_OFFSET, maxDesignX - w))
+      clone.y = Math.max(0, Math.min((Number(clone.y) || 0) + PASTE_OFFSET, maxDesignY - h))
+      return clone
+    })
+    setFields((prev) => {
+      const maxO = prev
+        .filter((f) => !f.stageInProcess?.trim())
+        .reduce((m, f) => Math.max(m, Number(f.orderInGroup) || 0), 0)
+      const stamped = clones.map((c, i) => ({ ...c, orderInGroup: maxO + 1 + i }))
+      return normalizeFieldGroupOrder([...prev, ...stamped])
+    })
+    setSelectedFieldIds(new Set(clones.map((c) => c.id)))
+    // Cascade: the next Ctrl+V offsets from this paste, not the original, so
+    // repeated pastes step down the page instead of stacking on one spot.
+    clipboardFieldsRef.current = clones.map((c) => JSON.parse(JSON.stringify(c)))
+  }, [canvasSize, scale, currentPage, mintFieldId])
+  pasteInPlaceRef.current = pasteFieldsInPlace
 
   // -- Import fields from another saved form --
 
