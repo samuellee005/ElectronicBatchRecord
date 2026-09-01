@@ -2023,11 +2023,13 @@ button.de-signature-correction-link {
   min-height: 0;
   background: transparent;
   overflow: hidden;
+  position: relative;
 }
 
 .overlay-field--compact .sig-canvas-wrap {
   flex: 1;
   min-height: 0;
+  height: 100%;
   background: transparent;
   border: 1px dashed rgba(102, 126, 234, 0.35);
 }
@@ -2039,9 +2041,15 @@ button.de-signature-correction-link {
 }
 
 /* Base .sig-canvas-wrap uses min-height: 40px — that can overflow tiny PDF boxes */
+/* The Clear button is overlaid in the top-right corner rather than stacked below
+   the canvas: on a fixed-height PDF field a control row stole vertical space and
+   shrank the signable area. Floating it keeps the canvas the full designated box. */
 .overlay-field--compact .sig-controls {
-  margin-top: 0;
-  flex-shrink: 0;
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  margin: 0;
+  z-index: 3;
 }
 
 .overlay-field textarea {
@@ -2173,8 +2181,12 @@ button.de-signature-correction-link {
 }
 
 .overlay-field--compact .sig-clear-btn {
-  background: rgba(255, 255, 255, 0.35);
-  border: 1px solid rgba(0, 0, 0, 0.12);
+  padding: 0 5px;
+  font-size: 0.6rem;
+  line-height: 1.5;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
 }
 
 /* checkbox */
