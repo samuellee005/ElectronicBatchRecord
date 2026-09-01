@@ -3,6 +3,7 @@ import { useSearchParams, Link } from 'react-router-dom'
 import {
   ChevronDoubleLeftIcon,
   ChevronDoubleRightIcon,
+  PencilIcon,
   PencilSquareIcon,
   CalendarIcon,
   HashtagIcon,
@@ -43,6 +44,7 @@ const COMPONENT_TYPES = [
   { type: 'dropdown', Icon: ChevronUpDownIcon, name: 'Dropdown' },
   { type: 'checkbox', Icon: CheckIcon, name: 'Checkbox' },
   { type: 'time', Icon: ClockIcon, name: 'Time' },
+  { type: 'signature', Icon: PencilIcon, name: 'Signature' },
   { type: 'radio', Icon: StopCircleIcon, name: 'Radio Group' },
   { type: 'multiselect', Icon: Squares2X2Icon, name: 'Multi Select' },
   { type: 'collaborator', Icon: UserGroupIcon, name: 'Collaborator' },
