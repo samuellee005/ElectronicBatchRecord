@@ -64,6 +64,10 @@ const RULER_LABEL_INTERVAL = 100
 const RULER_SIZE = 24
 // Scale at which field coordinates are stored; overlay positions scale with zoom
 const DESIGN_SCALE = 1.5
+// Minimum field box (design units). Small enough for tight cells/blanks, but
+// not so small the box becomes hard to click.
+const MIN_FIELD_W = 24
+const MIN_FIELD_H = 12
 
 const PROPERTIES_PANEL_DEFAULT_W = 320
 const PROPERTIES_PANEL_MIN_W = 260
@@ -1894,8 +1898,8 @@ export default function FormBuilder() {
 
         const deltaX = e.clientX - resizeState.current.startX
         const deltaY = e.clientY - resizeState.current.startY
-        const newDesignWidth = Math.max(100, resizeState.current.startW + deltaX / scaleFactor)
-        const newDesignHeight = Math.max(30, resizeState.current.startH + deltaY / scaleFactor)
+        const newDesignWidth = Math.max(MIN_FIELD_W, resizeState.current.startW + deltaX / scaleFactor)
+        const newDesignHeight = Math.max(MIN_FIELD_H, resizeState.current.startH + deltaY / scaleFactor)
         const maxDesignWidth = (canvasSize.width * DESIGN_SCALE) / scale - field.x
         const maxDesignHeight = (canvasSize.height * DESIGN_SCALE) / scale - field.y
 
@@ -3907,7 +3911,7 @@ function PropertiesForm({ field, existingStages, fields, onRenameStage, onUpdate
           <input
             type="number"
             value={Math.round(field.width)}
-            onChange={(e) => onUpdate({ width: Math.max(100, parseInt(e.target.value, 10) || 100) })}
+            onChange={(e) => onUpdate({ width: Math.max(MIN_FIELD_W, parseInt(e.target.value, 10) || MIN_FIELD_W) })}
           />
         </div>
         <div>
@@ -3915,7 +3919,7 @@ function PropertiesForm({ field, existingStages, fields, onRenameStage, onUpdate
           <input
             type="number"
             value={Math.round(field.height)}
-            onChange={(e) => onUpdate({ height: Math.max(30, parseInt(e.target.value, 10) || 30) })}
+            onChange={(e) => onUpdate({ height: Math.max(MIN_FIELD_H, parseInt(e.target.value, 10) || MIN_FIELD_H) })}
           />
         </div>
       </div>
