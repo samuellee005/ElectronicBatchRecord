@@ -3506,3 +3506,68 @@ button.de-signature-correction-link {
   color: #ffd7d7;
   font-weight: 600;
 }
+
+/* Date field "Today" shortcut */
+.overlay-date-row {
+  display: flex;
+  align-items: stretch;
+  gap: 3px;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.overlay-date-row > input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.overlay-date-today {
+  flex: 0 0 auto;
+  align-self: center;
+  padding: 1px 6px;
+  font-size: 0.68rem;
+  line-height: 1.4;
+  border: 1px solid rgba(102, 126, 234, 0.5);
+  border-radius: 4px;
+  background: rgba(102, 126, 234, 0.12);
+  color: #3f4bb0;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.overlay-date-today:hover:not(:disabled) {
+  background: rgba(102, 126, 234, 0.22);
+}
+
+.overlay-date-today:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.de-field-panel-date-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.de-field-panel-date-row > .de-field-panel-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.de-field-panel-today {
+  flex: 0 0 auto;
+  padding: 5px 10px;
+  font-size: 0.8rem;
+  border: 1px solid rgba(102, 126, 234, 0.5);
+  border-radius: 5px;
+  background: rgba(102, 126, 234, 0.12);
+  color: #3f4bb0;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.de-field-panel-today:hover {
+  background: rgba(102, 126, 234, 0.22);
+}

@@ -98,6 +98,14 @@ function isRequired(field) {
   return v === true || v === 'true' || v === 1
 }
 
+/** Local (not UTC) YYYY-MM-DD for the date field's "Today" shortcut. */
+function todayDateString() {
+  const d = new Date()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${d.getFullYear()}-${m}-${day}`
+}
+
 function parseMultiselectValue(v) {
   if (Array.isArray(v)) return v.filter(x => x != null && String(x).trim() !== '')
   if (typeof v === 'string' && v.trim()) {
@@ -1065,12 +1073,22 @@ function FieldDetailPanel({
         break
       case 'date':
         valueEditor = (
-          <input
-            type="date"
-            className="de-field-panel-input"
-            value={editSourceValue ?? ''}
-            onChange={(e) => setFieldValue(e.target.value)}
-          />
+          <div className="de-field-panel-date-row">
+            <input
+              type="date"
+              className="de-field-panel-input"
+              value={editSourceValue ?? ''}
+              onChange={(e) => setFieldValue(e.target.value)}
+            />
+            <button
+              type="button"
+              className="de-field-panel-today"
+              title="Fill today's date"
+              onClick={() => setFieldValue(todayDateString())}
+            >
+              Today
+            </button>
+          </div>
         )
         break
       case 'time': {
@@ -1722,12 +1740,24 @@ function OverlayField({
       break
     case 'date':
       input = (
-        <input
-          type="date"
-          value={value ?? ''}
-          disabled={stageLocked}
-          onChange={e => onChange(field.id, e.target.value)}
-        />
+        <div className="overlay-date-row">
+          <input
+            type="date"
+            value={value ?? ''}
+            disabled={stageLocked}
+            onChange={e => onChange(field.id, e.target.value)}
+          />
+          <button
+            type="button"
+            className="overlay-date-today"
+            disabled={stageLocked}
+            title="Fill today's date"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={(e) => { e.stopPropagation(); onChange(field.id, todayDateString()) }}
+          >
+            Today
+          </button>
+        </div>
       )
       break
     case 'number':
