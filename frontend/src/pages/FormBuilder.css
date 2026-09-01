@@ -2161,3 +2161,31 @@
   padding: 4px 10px;
   font-size: 0.8rem;
 }
+
+/* Duplicate-label indicators */
+.fb-stage-field-pill-dup {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-left: 4px;
+  font-size: 0.62rem;
+  font-weight: 800;
+  color: #fff;
+  background: #d97706;
+  border-radius: 50%;
+  line-height: 1;
+}
+
+.fb-dup-label-warn {
+  display: block;
+  margin-top: 4px;
+  padding: 5px 8px;
+  font-size: 0.72rem;
+  color: #92400e;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: 5px;
+}

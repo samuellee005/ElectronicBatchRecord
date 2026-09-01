@@ -2122,6 +2122,27 @@ export default function FormBuilder() {
 
   const existingStages = useMemo(() => buildOrderedStageNames(fields), [fields])
   const unassignedFields = useMemo(() => sortFieldsInGroupList(fields, ''), [fields])
+
+  // Field ids whose data label is shared by another field in the same group —
+  // flagged in the builder so a duplicate is a deliberate choice (repeats get a
+  // separate "(2)" column in Data Search rather than being merged).
+  const duplicateLabelIds = useMemo(() => {
+    const groups = new Map()
+    for (const f of fields) {
+      const label = String(f.label || '').trim().toLowerCase()
+      if (!label) continue
+      const key = stageKey(f) + '\u0000' + label
+      if (!groups.has(key)) groups.set(key, [])
+      groups.get(key).push(f.id)
+    }
+    const dup = new Set()
+    for (const ids of groups.values()) {
+      if (ids.length > 1) ids.forEach((id) => dup.add(id))
+    }
+    return dup
+  }, [fields])
+  const duplicateLabelIdsRef = useRef(duplicateLabelIds)
+  duplicateLabelIdsRef.current = duplicateLabelIds
   // Above this many, show the Unassigned list grouped by page so a large batch
   // record's fields are navigable instead of one long wall.
   const groupUnassignedByPage = unassignedFields.length > 10
@@ -2343,6 +2364,14 @@ export default function FormBuilder() {
             >
               {f.label || getComponentTypeLabel(f.type)}
             </button>
+            {duplicateLabelIdsRef.current.has(f.id) && (
+              <span
+                className="fb-stage-field-pill-dup"
+                title="Another field in this stage has the same label. They stay separate (a distinct '(2)' column in Data Search), but consider renaming for clarity."
+              >
+                !
+              </span>
+            )}
             <span className="fb-stage-field-pill-page">p{f.page || 1}</span>
           </span>
         </li>
@@ -3718,6 +3747,17 @@ function PropertiesForm({ field, existingStages, fields, onRenameStage, onUpdate
   }, [field.id, field.stageInProcess, existingStages])
 
   const suggestedNextOrder = useMemo(() => nextUnusedStageOrder(fields), [fields])
+  const hasDuplicateLabel = useMemo(() => {
+    const lbl = String(field.label || '').trim().toLowerCase()
+    if (!lbl) return false
+    const grp = (field.stageInProcess || '').trim()
+    return fields.some(
+      (f) =>
+        f.id !== field.id &&
+        (f.stageInProcess || '').trim() === grp &&
+        String(f.label || '').trim().toLowerCase() === lbl,
+    )
+  }, [field.id, field.label, field.stageInProcess, fields])
 
   return (
     <div className="fb-properties-form">
@@ -3728,6 +3768,13 @@ function PropertiesForm({ field, existingStages, fields, onRenameStage, onUpdate
           value={field.label}
           onChange={(e) => onUpdate({ label: e.target.value })}
         />
+        {hasDuplicateLabel && (
+          <small className="fb-dup-label-warn">
+            Another field in this {(field.stageInProcess || '').trim() ? 'stage' : 'group'} has this
+            label. They stay separate — Data Search lists them as “{field.label}” and “{field.label} (2)”
+            — but a distinct label is clearer.
+          </small>
+        )}
       </div>
 
       <div className="fb-form-group">

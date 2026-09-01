@@ -164,11 +164,24 @@ foreach ($batchRows as $batch) {
 
     $fieldValues = [];
     if ($form && !empty($form['fields']) && is_array($form['fields'])) {
+        // Fields that share a label within one form used to merge into a single
+        // column ("a | b"), hiding which value came from which field. Instead,
+        // give repeats a distinct column: the 2nd "Weight" becomes "Weight (2)",
+        // etc. The suffix follows field order, which is stable per form, so a
+        // given field maps to the same column across every batch of that form.
+        $labelSeen = [];
         foreach ($form['fields'] as $f) {
             $fid = $f['id'] ?? '';
             $label = trim((string) ($f['label'] ?? $fid));
             if ($label === '') {
                 $label = $fid;
+            }
+            if (isset($labelSeen[$label])) {
+                $labelSeen[$label]++;
+                $col = $label . ' (' . $labelSeen[$label] . ')';
+            } else {
+                $labelSeen[$label] = 1;
+                $col = $label;
             }
             $raw = $formData[$fid] ?? null;
             $val = searchDataFormatFieldValue($f, searchDataGetEffectiveValue($raw));
@@ -178,12 +191,8 @@ foreach ($batchRows as $batch) {
                     $val .= ' [rec: ' . $rec . ']';
                 }
             }
-            if (isset($fieldValues[$label])) {
-                $fieldValues[$label] .= ' | ' . $val;
-            } else {
-                $fieldValues[$label] = $val;
-            }
-            $columnSet[$label] = true;
+            $fieldValues[$col] = $val;
+            $columnSet[$col] = true;
         }
     }
 
