@@ -36,11 +36,30 @@ function ebr_db_user_verify_password(string $plain, ?string $stored): bool
     if (str_starts_with($stored, '$2') || str_starts_with($stored, '$argon')) {
         return password_verify($plain, $stored);
     }
-    // 40-char hex (SHA-1) — the format used by the enterprise directory
+    // 40-char hex (SHA-1) — the format used by the enterprise directory.
+    // db4 mixes a global application salt (pepper) into the digest, kept in
+    // the owning app's config rather than the row. Provide it via
+    // EBR_PASSWORD_PEPPER; both prepend and append forms are tried since the
+    // ordering is app-specific.
     if (strlen($stored) === 40 && ctype_xdigit($stored)) {
         $h = strtolower($stored);
+        if (hash_equals($h, sha1($plain)) || hash_equals($h, sha1(strtolower($plain)))) {
+            return true;
+        }
+        $pepper = getenv('EBR_PASSWORD_PEPPER');
+        if ($pepper !== false && $pepper !== '') {
+            // Enterprise directory scheme (the app that owns db_user):
+            //   sha1(salt . sha1(salt . trim(password)))
+            // The salt is a shared secret, supplied via EBR_PASSWORD_PEPPER
+            // rather than committed here.
+            $trimmed = trim($plain);
+            $enterprise = sha1($pepper . sha1($pepper . $trimmed));
+            if (hash_equals($h, $enterprise)) {
+                return true;
+            }
+        }
 
-        return hash_equals($h, sha1($plain)) || hash_equals($h, sha1(strtolower($plain)));
+        return false;
     }
     // 32-char hex (common legacy MD5)
     if (strlen($stored) === 32 && ctype_xdigit($stored)) {
