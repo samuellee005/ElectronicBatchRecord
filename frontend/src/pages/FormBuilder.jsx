@@ -905,6 +905,13 @@ export default function FormBuilder() {
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 })
   const [sourceFormIds, setSourceFormIds] = useState([])
   const [loadedFormName, setLoadedFormName] = useState(urlName || null)
+  // Local draft auto-save: keep the in-progress layout in the browser so a
+  // refresh or accidental close does not lose unsaved building work. This is a
+  // recovery draft only — Save Form is still what commits a versioned form.
+  const [draftPrompt, setDraftPrompt] = useState(null)
+  const [draftStatus, setDraftStatus] = useState('idle')
+  const draftTimerRef = useRef(null)
+  const draftCheckedRef = useRef(false)
 
   // Modal states
   const [showSelectionModal, setShowSelectionModal] = useState(true)
@@ -969,6 +976,83 @@ export default function FormBuilder() {
     isGestureActive,
     onRestorePage: setCurrentPage,
   })
+
+  // Draft is keyed by the form being edited, or by the PDF for a brand-new form.
+  const draftKey = useMemo(() => {
+    if (!pdfFile) return null
+    return urlFormId ? `ebr-fb-draft:form:${urlFormId}` : `ebr-fb-draft:pdf:${pdfFile}`
+  }, [pdfFile, urlFormId])
+
+  // Look once for a saved draft when the builder opens; offer to restore it.
+  useEffect(() => {
+    if (!draftKey || draftCheckedRef.current) return
+    draftCheckedRef.current = true
+    try {
+      const raw = window.localStorage.getItem(draftKey)
+      if (!raw) return
+      const parsed = JSON.parse(raw)
+      if (parsed && Array.isArray(parsed.fields) && parsed.fields.length > 0) {
+        setDraftPrompt(parsed)
+      }
+    } catch {
+      /* corrupt/absent draft — ignore */
+    }
+  }, [draftKey])
+
+  // Debounced write of the current layout to localStorage. Held off until the
+  // restore choice is made, so it can't overwrite the draft before the user sees it.
+  useEffect(() => {
+    if (!draftKey || draftPrompt) return
+    if (fields.length === 0) return
+    if (draftTimerRef.current) clearTimeout(draftTimerRef.current)
+    draftTimerRef.current = setTimeout(() => {
+      draftTimerRef.current = null
+      try {
+        window.localStorage.setItem(
+          draftKey,
+          JSON.stringify({ fields, name: loadedFormName || null, savedAt: new Date().toISOString() }),
+        )
+        setDraftStatus('saved')
+      } catch {
+        /* storage full / blocked — best effort */
+      }
+    }, 1500)
+    return () => {
+      if (draftTimerRef.current) clearTimeout(draftTimerRef.current)
+    }
+  }, [fields, draftKey, draftPrompt, loadedFormName])
+
+  const clearDraft = useCallback(() => {
+    if (draftTimerRef.current) {
+      clearTimeout(draftTimerRef.current)
+      draftTimerRef.current = null
+    }
+    if (draftKey) {
+      try {
+        window.localStorage.removeItem(draftKey)
+      } catch {
+        /* ignore */
+      }
+    }
+    setDraftStatus('idle')
+  }, [draftKey])
+
+  const restoreDraft = useCallback(() => {
+    if (!draftPrompt) return
+    markBaseline()
+    setFields(
+      normalizeFieldGroupOrder(draftPrompt.fields.map((f) => ({ ...f, page: f.page || 1 }))),
+    )
+    if (draftPrompt.name) setLoadedFormName(draftPrompt.name)
+    setShowSelectionModal(false)
+    setDraftPrompt(null)
+  }, [draftPrompt, markBaseline])
+
+  const discardDraft = useCallback(() => {
+    // Continue from the current state; the stored draft is replaced as you work.
+    setDraftPrompt(null)
+    clearDraft()
+  }, [clearDraft])
 
   // Alignment guides (snap to other fields)
   const [guides, setGuides] = useState([])
@@ -2108,6 +2192,7 @@ export default function FormBuilder() {
         alert(saveSelectedFormId ? 'Form updated successfully!' : 'Form saved successfully!')
         setLoadedFormName(finalName)
         setShowSaveModal(false)
+        clearDraft()
       } else {
         alert('Error saving form: ' + (result.message || 'Unknown error'))
       }
@@ -2566,6 +2651,11 @@ export default function FormBuilder() {
               Paste {clipboardCount} field{clipboardCount === 1 ? '' : 's'}…
             </button>
           )}
+          {draftStatus === 'saved' && fields.length > 0 && (
+            <span className="fb-draft-status" title="Your work is auto-saved in this browser until you Save Form">
+              Draft saved
+            </span>
+          )}
           <button className="fb-btn fb-btn-success" onClick={openSaveModal}>
             Save Form
           </button>
@@ -2577,6 +2667,22 @@ export default function FormBuilder() {
       {copyToastVisible && (
         <div className="fb-copy-toast" role="status" aria-live="polite">
           Copied {clipboardCount} field{clipboardCount === 1 ? '' : 's'}
+        </div>
+      )}
+
+      {draftPrompt && (
+        <div className="fb-draft-banner" role="alert">
+          <span className="fb-draft-banner-text">
+            Unsaved draft found for this form
+            {draftPrompt.savedAt ? ` (${new Date(draftPrompt.savedAt).toLocaleString()})` : ''} —
+            {' '}{draftPrompt.fields.length} field{draftPrompt.fields.length === 1 ? '' : 's'}.
+          </span>
+          <button type="button" className="fb-btn fb-btn-success fb-draft-banner-btn" onClick={restoreDraft}>
+            Restore draft
+          </button>
+          <button type="button" className="fb-btn fb-btn-ghost fb-draft-banner-btn" onClick={discardDraft}>
+            Discard
+          </button>
         </div>
       )}
 

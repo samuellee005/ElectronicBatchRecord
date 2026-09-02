@@ -2189,3 +2189,36 @@
   border: 1px solid #fed7aa;
   border-radius: 5px;
 }
+
+/* Form-builder local draft auto-save */
+.fb-draft-status {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.85);
+  padding: 0 4px;
+  white-space: nowrap;
+}
+
+.fb-draft-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 8px 16px 0;
+  padding: 8px 12px;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+  color: #92400e;
+  font-size: 0.85rem;
+}
+
+.fb-draft-banner-text {
+  margin-right: auto;
+}
+
+.fb-draft-banner-btn {
+  padding: 4px 12px;
+  font-size: 0.8rem;
+}
