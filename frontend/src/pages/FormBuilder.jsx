@@ -872,6 +872,9 @@ export default function FormBuilder() {
   // work — derive `selectedFieldId` below as the lone selected id when
   // exactly one is in the set, else null.
   const [selectedFieldIds, setSelectedFieldIds] = useState(() => new Set())
+  const selectedFieldIdsRef = useRef(selectedFieldIds)
+  selectedFieldIdsRef.current = selectedFieldIds
+  const [canvasMarquee, setCanvasMarquee] = useState(null)
   // Clipboard for copy/paste across pages. Stash both the captured
   // snapshot of fields and the count so the paste button stays in sync.
   const clipboardFieldsRef = useRef([])
@@ -1978,30 +1981,52 @@ export default function FormBuilder() {
         const rect = overlay.getBoundingClientRect()
         const field = fields.find((f) => f.id === dragState.current.fieldId)
         if (!field) return
+        dragState.current.moved = true
 
+        const canvasDesignW = (canvasSize.width * DESIGN_SCALE) / scale
+        const canvasDesignH = (canvasSize.height * DESIGN_SCALE) / scale
+        const group = dragState.current.group && dragState.current.group.length
+          ? dragState.current.group
+          : [{ id: field.id, startX: dragState.current.primaryStartX, startY: dragState.current.primaryStartY, width: field.width, height: field.height }]
+
+        // Where the primary field wants to go (with alignment snapping for a lone field).
         let pixelX = e.clientX - rect.left - dragState.current.offsetX
         let pixelY = e.clientY - rect.top - dragState.current.offsetY
-        const fieldWidthPx = field.width * scaleFactor
-        const fieldHeightPx = field.height * scaleFactor
+        if (group.length === 1) {
+          const snapped = snapToAlignment(pixelX, pixelY, field.id, field.width * scaleFactor, field.height * scaleFactor, scaleFactor)
+          pixelX = snapped.x
+          pixelY = snapped.y
+        }
+        const primaryX = (pixelX * DESIGN_SCALE) / scale
+        const primaryY = (pixelY * DESIGN_SCALE) / scale
 
-        const snapped = snapToAlignment(pixelX, pixelY, field.id, fieldWidthPx, fieldHeightPx, scaleFactor)
-        pixelX = snapped.x
-        pixelY = snapped.y
+        // Rigid delta for the whole group, clamped so no member leaves the page.
+        let dx = primaryX - dragState.current.primaryStartX
+        let dy = primaryY - dragState.current.primaryStartY
+        let minDx = -Infinity, maxDx = Infinity, minDy = -Infinity, maxDy = Infinity
+        for (const m of group) {
+          minDx = Math.max(minDx, -m.startX)
+          maxDx = Math.min(maxDx, canvasDesignW - m.width - m.startX)
+          minDy = Math.max(minDy, -m.startY)
+          maxDy = Math.min(maxDy, canvasDesignH - m.height - m.startY)
+        }
+        dx = Math.max(minDx, Math.min(dx, maxDx))
+        dy = Math.max(minDy, Math.min(dy, maxDy))
 
-        const designX = (pixelX * DESIGN_SCALE) / scale
-        const designY = (pixelY * DESIGN_SCALE) / scale
-        const maxDesignX = (canvasSize.width * DESIGN_SCALE) / scale - field.width
-        const maxDesignY = (canvasSize.height * DESIGN_SCALE) / scale - field.height
-        const clampedX = Math.max(0, Math.min(designX, maxDesignX))
-        const clampedY = Math.max(0, Math.min(designY, maxDesignY))
+        const moves = new Map(group.map((m) => [m.id, { x: m.startX + dx, y: m.startY + dy }]))
+        setFields((prev) => prev.map((f) => (moves.has(f.id) ? { ...f, ...moves.get(f.id) } : f)))
 
-        updateField(field.id, { x: clampedX, y: clampedY })
-        setPositionGuides({
-          left: clampedX * scaleFactor,
-          top: clampedY * scaleFactor,
-          right: (clampedX + field.width) * scaleFactor,
-          bottom: (clampedY + field.height) * scaleFactor,
-        })
+        if (group.length === 1) {
+          const pos = moves.get(field.id)
+          setPositionGuides({
+            left: pos.x * scaleFactor,
+            top: pos.y * scaleFactor,
+            right: (pos.x + field.width) * scaleFactor,
+            bottom: (pos.y + field.height) * scaleFactor,
+          })
+        } else {
+          setPositionGuides(null)
+        }
       }
 
       if (resizeState.current.active) {
@@ -2029,6 +2054,10 @@ export default function FormBuilder() {
     }
 
     const handleMouseUp = () => {
+      if (dragState.current.active && !dragState.current.moved && dragState.current.collapseId) {
+        // Clicked a member of a multi-selection without dragging → select just it.
+        selectSingle(dragState.current.collapseId)
+      }
       dragState.current.active = false
       resizeState.current.active = false
       setGuides([])
@@ -2041,7 +2070,7 @@ export default function FormBuilder() {
       document.removeEventListener('mousemove', handleMouseMove)
       document.removeEventListener('mouseup', handleMouseUp)
     }
-  }, [fields, canvasSize, snapToAlignment, snapResizeDimensions, updateField, scale])
+  }, [fields, canvasSize, snapToAlignment, snapResizeDimensions, updateField, scale, selectSingle])
 
   // -- Drop from components panel --
 
@@ -2084,15 +2113,43 @@ export default function FormBuilder() {
     const fieldEl = e.currentTarget
     const fieldRect = fieldEl.getBoundingClientRect()
 
+    const modifier = e.shiftKey || e.metaKey || e.ctrlKey
+    const cur = selectedFieldIdsRef.current
+    const inMulti = !modifier && cur.has(field.id) && cur.size > 1
+
+    // Which fields move: the whole current selection when dragging one of several
+    // selected fields, otherwise just this field.
+    let groupIds
+    let collapseId = null
+    if (modifier) {
+      handleFieldSelect(field.id, e) // toggle in/out of the selection
+      groupIds = [field.id]
+    } else if (inMulti) {
+      groupIds = [...cur] // keep the multi-selection and drag it together
+      collapseId = field.id // a click without dragging collapses to just this one
+    } else {
+      selectSingle(field.id)
+      groupIds = [field.id]
+    }
+
+    const byId = new Map(fields.map((f) => [f.id, f]))
+    const group = groupIds
+      .map((id) => byId.get(id))
+      .filter(Boolean)
+      .map((f) => ({ id: f.id, startX: f.x, startY: f.y, width: f.width, height: f.height }))
+    const primary = byId.get(field.id)
+
     dragState.current = {
       active: true,
       fieldId: field.id,
       offsetX: e.clientX - fieldRect.left,
       offsetY: e.clientY - fieldRect.top,
+      group,
+      primaryStartX: primary ? primary.x : 0,
+      primaryStartY: primary ? primary.y : 0,
+      moved: false,
+      collapseId,
     }
-    // Shift/Cmd/Ctrl + click toggles in the multi-select set; plain
-    // click replaces the selection with this field.
-    handleFieldSelect(field.id, e)
   }
 
   const handleResizeMouseDown = (e, field) => {
@@ -2108,12 +2165,78 @@ export default function FormBuilder() {
     }
   }
 
-  // Click overlay background to deselect
-  const handleOverlayClick = (e) => {
-    if (e.target === overlayRef.current) {
-      selectSingle(null)
+  // Drag on the empty canvas to rubber-band-select fields; auto-scrolls near the
+  // edges, and Ctrl/Shift adds to the current selection.
+  const handleCanvasMarqueeStart = useCallback((e) => {
+    if (e.button !== 0) return
+    if (e.target !== overlayRef.current) return // only start on empty canvas
+    const container = canvasScrollRef.current
+    const overlay = overlayRef.current
+    if (!container || !overlay) return
+    const rect0 = container.getBoundingClientRect()
+    const anchorX = e.clientX - rect0.left + container.scrollLeft
+    const anchorY = e.clientY - rect0.top + container.scrollTop
+    const additive = e.ctrlKey || e.metaKey || e.shiftKey
+    const base = additive ? new Set(selectedFieldIdsRef.current) : new Set()
+    let moved = false
+    let lastX = e.clientX
+    let lastY = e.clientY
+    let rafId = null
+
+    const apply = () => {
+      const rect = container.getBoundingClientRect()
+      const curX = lastX - rect.left + container.scrollLeft
+      const curY = lastY - rect.top + container.scrollTop
+      const left = Math.min(anchorX, curX)
+      const top = Math.min(anchorY, curY)
+      const right = Math.max(anchorX, curX)
+      const bottom = Math.max(anchorY, curY)
+      if (!moved && right - left < 4 && bottom - top < 4) return
+      moved = true
+      const vTop = Math.max(rect.top, rect.top + top - container.scrollTop)
+      const vBottom = Math.min(rect.bottom, rect.top + bottom - container.scrollTop)
+      const vLeft = Math.max(rect.left, rect.left + left - container.scrollLeft)
+      const vRight = Math.min(rect.right, rect.left + right - container.scrollLeft)
+      setCanvasMarquee({ left: vLeft, top: vTop, width: Math.max(0, vRight - vLeft), height: Math.max(0, vBottom - vTop) })
+      const next = new Set(base)
+      overlay.querySelectorAll('[data-fb-field-id]').forEach((el) => {
+        const r = el.getBoundingClientRect()
+        const pl = r.left - rect.left + container.scrollLeft
+        const pt = r.top - rect.top + container.scrollTop
+        if (!(pl + r.width < left || pl > right || pt + r.height < top || pt > bottom)) {
+          next.add(el.getAttribute('data-fb-field-id'))
+        }
+      })
+      setSelectedFieldIds(next)
     }
-  }
+    const EDGE = 28
+    const tick = () => {
+      const rect = container.getBoundingClientRect()
+      let dy = 0
+      if (lastY < rect.top + EDGE) dy = -Math.max(6, (rect.top + EDGE - lastY) / 2)
+      else if (lastY > rect.bottom - EDGE) dy = Math.max(6, (lastY - (rect.bottom - EDGE)) / 2)
+      if (dy !== 0) {
+        const before = container.scrollTop
+        container.scrollTop = Math.max(0, Math.min(container.scrollHeight - container.clientHeight, container.scrollTop + dy))
+        if (container.scrollTop !== before) apply()
+      }
+      rafId = requestAnimationFrame(tick)
+    }
+    const onMove = (me) => { lastX = me.clientX; lastY = me.clientY; apply() }
+    const onScroll = () => apply()
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      container.removeEventListener('scroll', onScroll)
+      if (rafId != null) cancelAnimationFrame(rafId)
+      setCanvasMarquee(null)
+      if (!moved && !additive) setSelectedFieldIds(new Set())
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    container.addEventListener('scroll', onScroll)
+    rafId = requestAnimationFrame(tick)
+  }, [])
 
   // -- Form Selection Modal Logic --
 
@@ -3125,7 +3248,7 @@ export default function FormBuilder() {
               onDragEnter={handleOverlayDragEnter}
               onDragOver={handleOverlayDragOver}
               onDrop={handleOverlayDrop}
-              onClick={handleOverlayClick}
+              onMouseDown={handleCanvasMarqueeStart}
             >
               {/* Alignment guides (snap to other fields) */}
               {guides.map((g, i) =>
@@ -3806,6 +3929,14 @@ export default function FormBuilder() {
         <div
           className="fb-marquee"
           style={{ left: marquee.left, top: marquee.top, width: marquee.width, height: marquee.height }}
+          aria-hidden
+        />
+      )}
+
+      {canvasMarquee && (
+        <div
+          className="fb-marquee"
+          style={{ left: canvasMarquee.left, top: canvasMarquee.top, width: canvasMarquee.width, height: canvasMarquee.height }}
           aria-hidden
         />
       )}
