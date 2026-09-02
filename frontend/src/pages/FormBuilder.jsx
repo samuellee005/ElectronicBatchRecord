@@ -1851,7 +1851,9 @@ export default function FormBuilder() {
     let snappedY = pixelY
     const newGuides = []
 
-    const currentPageFields = fields.filter((f) => f.page === currentPage && f.id !== fieldId)
+    const isExcluded =
+      fieldId instanceof Set ? (id) => fieldId.has(id) : (id) => id === fieldId
+    const currentPageFields = fields.filter((f) => f.page === currentPage && !isExcluded(f.id))
     for (const f of currentPageFields) {
       const fx = f.x * scaleFactor
       const fy = f.y * scaleFactor
@@ -1999,10 +2001,35 @@ export default function FormBuilder() {
         }
         const primaryX = (pixelX * DESIGN_SCALE) / scale
         const primaryY = (pixelY * DESIGN_SCALE) / scale
-
-        // Rigid delta for the whole group, clamped so no member leaves the page.
         let dx = primaryX - dragState.current.primaryStartX
         let dy = primaryY - dragState.current.primaryStartY
+
+        // Group bounding box (design units) at the start.
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+        for (const m of group) {
+          minX = Math.min(minX, m.startX)
+          minY = Math.min(minY, m.startY)
+          maxX = Math.max(maxX, m.startX + m.width)
+          maxY = Math.max(maxY, m.startY + m.height)
+        }
+
+        // For a multi-field drag, snap the whole group's bounding box against the
+        // other fields, so the alignment guide lines still appear.
+        if (group.length > 1) {
+          const groupIds = new Set(group.map((m) => m.id))
+          const snapped = snapToAlignment(
+            (minX + dx) * scaleFactor,
+            (minY + dy) * scaleFactor,
+            groupIds,
+            (maxX - minX) * scaleFactor,
+            (maxY - minY) * scaleFactor,
+            scaleFactor,
+          )
+          dx = snapped.x / scaleFactor - minX
+          dy = snapped.y / scaleFactor - minY
+        }
+
+        // Clamp the rigid delta so no member leaves the page.
         let minDx = -Infinity, maxDx = Infinity, minDy = -Infinity, maxDy = Infinity
         for (const m of group) {
           minDx = Math.max(minDx, -m.startX)
@@ -2016,6 +2043,7 @@ export default function FormBuilder() {
         const moves = new Map(group.map((m) => [m.id, { x: m.startX + dx, y: m.startY + dy }]))
         setFields((prev) => prev.map((f) => (moves.has(f.id) ? { ...f, ...moves.get(f.id) } : f)))
 
+        // Position guides: the lone field, or the group's bounding box.
         if (group.length === 1) {
           const pos = moves.get(field.id)
           setPositionGuides({
@@ -2025,7 +2053,12 @@ export default function FormBuilder() {
             bottom: (pos.y + field.height) * scaleFactor,
           })
         } else {
-          setPositionGuides(null)
+          setPositionGuides({
+            left: (minX + dx) * scaleFactor,
+            top: (minY + dy) * scaleFactor,
+            right: (maxX + dx) * scaleFactor,
+            bottom: (maxY + dy) * scaleFactor,
+          })
         }
       }
 
