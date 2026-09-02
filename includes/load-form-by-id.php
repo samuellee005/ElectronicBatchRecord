@@ -40,7 +40,9 @@ if ($foundForm) {
     $collabs = is_array($foundForm['collaborators'] ?? null) ? $foundForm['collaborators'] : [];
     $creatorUser = strtolower(trim((string) ($foundForm['createdBy'] ?? '')));
     $creatorId = (int) ($foundForm['createdByUserId'] ?? 0);
-    $isOwned = $creatorUser !== '' || !empty($collabs);
+    // Only a verified creator id or explicit collaborators make a form owned;
+    // pre-feature forms carry a name but no verified id and stay open.
+    $isOwned = $creatorId > 0 || !empty($collabs);
     $canEdit = !$isOwned;
     if ($actorUsername !== '' && $actorUsername === $creatorUser) {
         $canEdit = true;

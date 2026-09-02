@@ -64,7 +64,10 @@ if ($isUpdate) {
         $collabs = is_array($existingForm['collaborators'] ?? null) ? $existingForm['collaborators'] : [];
         $creatorUser = strtolower(trim((string) ($existingForm['createdBy'] ?? '')));
         $creatorId = (int) ($existingForm['createdByUserId'] ?? 0);
-        $isOwned = $creatorUser !== '' || !empty($collabs);
+        // Only a VERIFIED creator (authenticated at save time) or explicit
+        // collaborators make a form owned. Forms created before this feature carry
+        // a self-reported name but no verified id, and stay open to everyone.
+        $isOwned = $creatorId > 0 || !empty($collabs);
         // Unowned/legacy forms stay open; owned forms restrict to creator + collaborators.
         $allowed = !$isOwned;
         if ($actorUsername !== '' && $actorUsername === $creatorUser) {
@@ -429,9 +432,18 @@ if ($isUpdate && !$isNewVersion) {
 // Attribution + collaborators on the new row.
 $formConfig['collaborators'] = $collaboratorsToStore;
 $formConfig['updatedByUserId'] = $actorId > 0 ? $actorId : null;
-$formConfig['createdByUserId'] = ($existingForm && (int) ($existingForm['createdByUserId'] ?? 0) > 0)
-    ? (int) $existingForm['createdByUserId']
-    : ($actorId > 0 ? $actorId : null);
+$existingCreatorId = $existingForm ? (int) ($existingForm['createdByUserId'] ?? 0) : 0;
+if ($existingCreatorId > 0) {
+    // Keep the original verified creator on every later version.
+    $formConfig['createdByUserId'] = $existingCreatorId;
+} elseif (!$isUpdate || !empty($collaboratorsToStore)) {
+    // A brand-new form, or a legacy form being given collaborators, becomes owned:
+    // the person doing so is recorded as the verified creator so they keep access.
+    $formConfig['createdByUserId'] = $actorId > 0 ? $actorId : null;
+} else {
+    // A legacy form edited without collaborators stays open to everyone.
+    $formConfig['createdByUserId'] = null;
+}
 
 try {
     if ($isUpdate && !$isNewVersion) {
