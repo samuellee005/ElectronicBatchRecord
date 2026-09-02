@@ -2699,8 +2699,8 @@ export default function FormBuilder() {
                 {showStagesSection && (
                   <section className="fb-stages-section" aria-label="Form stages">
                     <div className="fb-stages-section-head">
-                      <div className="fb-stages-title-row">
-                        <h2 className="fb-components-section-title">Stages</h2>
+                      <h2 className="fb-components-section-title">Stages</h2>
+                      <div className="fb-stages-actions">
                         <button
                           type="button"
                           className="fb-stages-autoorder-btn"
@@ -3865,6 +3865,40 @@ function PropertiesForm({ field, existingStages, fields, onRenameStage, onUpdate
     )
   }, [field.id, field.label, field.stageInProcess, fields])
 
+  // Position/size inputs hold free text while editing and only clamp/commit on
+  // blur or Enter, so an intermediate value below the minimum (typing "5" on the
+  // way to "50") isn't snapped to the minimum before you finish.
+  const [posText, setPosText] = useState({
+    x: String(Math.round(field.x)),
+    y: String(Math.round(field.y)),
+    width: String(Math.round(field.width)),
+    height: String(Math.round(field.height)),
+  })
+  useEffect(() => {
+    setPosText({
+      x: String(Math.round(field.x)),
+      y: String(Math.round(field.y)),
+      width: String(Math.round(field.width)),
+      height: String(Math.round(field.height)),
+    })
+  }, [field.id, field.x, field.y, field.width, field.height])
+
+  const commitPos = (key) => {
+    const parsed = parseInt(posText[key], 10)
+    let n = Number.isFinite(parsed)
+      ? parsed
+      : key === 'width'
+        ? MIN_FIELD_W
+        : key === 'height'
+          ? MIN_FIELD_H
+          : 0
+    if (key === 'width') n = Math.max(MIN_FIELD_W, n)
+    else if (key === 'height') n = Math.max(MIN_FIELD_H, n)
+    else n = Math.max(0, n)
+    onUpdate({ [key]: n })
+    setPosText((p) => ({ ...p, [key]: String(n) }))
+  }
+
   return (
     <div className="fb-properties-form">
       <div className="fb-form-group">
@@ -4044,16 +4078,20 @@ function PropertiesForm({ field, existingStages, fields, onRenameStage, onUpdate
           <label>X:</label>
           <input
             type="number"
-            value={Math.round(field.x)}
-            onChange={(e) => onUpdate({ x: parseInt(e.target.value, 10) || 0 })}
+            value={posText.x}
+            onChange={(e) => setPosText((p) => ({ ...p, x: e.target.value }))}
+            onBlur={() => commitPos('x')}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commitPos('x'); e.currentTarget.blur() } }}
           />
         </div>
         <div>
           <label>Y:</label>
           <input
             type="number"
-            value={Math.round(field.y)}
-            onChange={(e) => onUpdate({ y: parseInt(e.target.value, 10) || 0 })}
+            value={posText.y}
+            onChange={(e) => setPosText((p) => ({ ...p, y: e.target.value }))}
+            onBlur={() => commitPos('y')}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commitPos('y'); e.currentTarget.blur() } }}
           />
         </div>
       </div>
@@ -4063,17 +4101,23 @@ function PropertiesForm({ field, existingStages, fields, onRenameStage, onUpdate
           <label>Width:</label>
           <input
             type="number"
-            value={Math.round(field.width)}
-            onChange={(e) => onUpdate({ width: Math.max(MIN_FIELD_W, parseInt(e.target.value, 10) || MIN_FIELD_W) })}
+            value={posText.width}
+            onChange={(e) => setPosText((p) => ({ ...p, width: e.target.value }))}
+            onBlur={() => commitPos('width')}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commitPos('width'); e.currentTarget.blur() } }}
           />
+          <small className="fb-hint">Min {MIN_FIELD_W}</small>
         </div>
         <div>
           <label>Height:</label>
           <input
             type="number"
-            value={Math.round(field.height)}
-            onChange={(e) => onUpdate({ height: Math.max(MIN_FIELD_H, parseInt(e.target.value, 10) || MIN_FIELD_H) })}
+            value={posText.height}
+            onChange={(e) => setPosText((p) => ({ ...p, height: e.target.value }))}
+            onBlur={() => commitPos('height')}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commitPos('height'); e.currentTarget.blur() } }}
           />
+          <small className="fb-hint">Min {MIN_FIELD_H}</small>
         </div>
       </div>
 

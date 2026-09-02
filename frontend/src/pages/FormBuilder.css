@@ -2049,11 +2049,16 @@
 }
 
 /* ── Expandable stages/components sidebar ────────────────────────────── */
-.fb-stages-title-row {
+.fb-stages-actions {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
+  margin: 6px 0 12px;   /* padding between the action buttons and the stages list */
+}
+
+.fb-stages-actions > button {
+  flex: 1 1 auto;       /* share the row evenly so both fit on one line */
+  justify-content: center;
 }
 
 .fb-stages-expand-btn {
@@ -2119,9 +2124,7 @@
 }
 
 /* Keep the title row from wrapping the two action buttons awkwardly */
-.fb-stages-title-row {
-  flex-wrap: wrap;
-}
+/* (stages title row replaced by .fb-stages-actions) */
 
 /* Sidebar inline stage-name edit */
 .fb-stage-title-input {
