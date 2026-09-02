@@ -44,6 +44,16 @@ CREATE INDEX IF NOT EXISTS idx_ebr_forms_name_pdf ON ebr_forms (name, pdf_file);
 CREATE INDEX IF NOT EXISTS idx_ebr_forms_is_latest ON ebr_forms (is_latest) WHERE is_latest = TRUE;
 
 ---STATEMENT---
+-- Form collaborators (who may edit) and authenticated change attribution.
+ALTER TABLE ebr_forms ADD COLUMN IF NOT EXISTS collaborators JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+---STATEMENT---
+ALTER TABLE ebr_forms ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER;
+
+---STATEMENT---
+ALTER TABLE ebr_forms ADD COLUMN IF NOT EXISTS updated_by_user_id INTEGER;
+
+---STATEMENT---
 CREATE TABLE IF NOT EXISTS ebr_batch_records (
     id TEXT PRIMARY KEY,
     form_id TEXT NOT NULL,

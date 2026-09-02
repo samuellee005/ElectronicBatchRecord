@@ -4,6 +4,7 @@
  */
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/require-login.php';
+require_once __DIR__ . '/session.php';
 require_once __DIR__ . '/db-forms.php';
 
 header('Content-Type: application/json');
@@ -26,10 +27,19 @@ if (empty($formData['name']) || empty($formData['pdfFile'])) {
     exit;
 }
 
-if (empty($formData['userName'])) {
+$sessionUser = ebr_current_user();
+if (empty($actorName) && $sessionUser === null) {
     echo json_encode(['success' => false, 'message' => 'User name is required for audit trail']);
     exit;
 }
+// Reliable attribution: prefer the authenticated user over any typed name.
+$actorName = $sessionUser && ($sessionUser['display_name'] !== '' || $sessionUser['username'] !== '')
+    ? ($sessionUser['display_name'] !== '' ? $sessionUser['display_name'] : $sessionUser['username'])
+    : trim((string) ($actorName ?? ''));
+$actorId = $sessionUser ? (int) $sessionUser['id'] : 0;
+$actorUsername = $sessionUser
+    ? strtolower((string) $sessionUser['username'])
+    : strtolower(trim((string) ($actorName ?? '')));
 
 function versionToDecimal($v)
 {
@@ -41,6 +51,95 @@ $storageFilename = null;
 $formConfig = null;
 $isNewVersion = isset($formData['createNewVersion']) && $formData['createNewVersion'] === true;
 $oldFormConfig = null;
+$existingForm = null;
+
+// Edit permission + save conflict for an existing form.
+if ($isUpdate) {
+    try {
+        $existingForm = ebr_db_forms_fetch_by_id((string) $formData['formId']);
+    } catch (Throwable $e) {
+        $existingForm = null;
+    }
+    if ($existingForm) {
+        $collabs = is_array($existingForm['collaborators'] ?? null) ? $existingForm['collaborators'] : [];
+        $creatorUser = strtolower(trim((string) ($existingForm['createdBy'] ?? '')));
+        $creatorId = (int) ($existingForm['createdByUserId'] ?? 0);
+        $isOwned = $creatorUser !== '' || !empty($collabs);
+        // Unowned/legacy forms stay open; owned forms restrict to creator + collaborators.
+        $allowed = !$isOwned;
+        if ($actorUsername !== '' && $actorUsername === $creatorUser) {
+            $allowed = true;
+        }
+        if ($actorId > 0 && $actorId === $creatorId) {
+            $allowed = true;
+        }
+        foreach ($collabs as $c) {
+            if (!is_array($c)) {
+                continue;
+            }
+            $cu = strtolower(trim((string) ($c['username'] ?? '')));
+            $cid = (int) ($c['dbUserId'] ?? 0);
+            if (($actorUsername !== '' && $actorUsername === $cu) || ($actorId > 0 && $actorId === $cid)) {
+                $allowed = true;
+                break;
+            }
+        }
+        if (!$allowed) {
+            http_response_code(403);
+            echo json_encode([
+                'success' => false,
+                'code' => 'not_a_collaborator',
+                'message' => 'You are not a collaborator on this form, so you cannot edit it.',
+            ]);
+            exit;
+        }
+        // Conflict: the version being edited is no longer the latest (someone saved since it was opened).
+        if (!$isNewVersion && empty($existingForm['isLatest']) && empty($formData['force'])) {
+            // Name whoever created the newer version.
+            $latestBy = 'another user';
+            try {
+                foreach (ebr_db_forms_all_api() as $ef) {
+                    if (!empty($ef['isLatest'])
+                        && ($ef['name'] ?? '') === ($existingForm['name'] ?? '')
+                        && ($ef['pdfFile'] ?? '') === ($existingForm['pdfFile'] ?? '')) {
+                        $latestBy = $ef['updatedBy'] ?: $latestBy;
+                        break;
+                    }
+                }
+            } catch (Throwable $e) {
+                // fall back to the generic name
+            }
+            http_response_code(409);
+            echo json_encode([
+                'success' => false,
+                'code' => 'conflict',
+                'message' => 'This form was changed by ' . $latestBy
+                    . ' since you opened it. Reload to get their changes, or save as a new version.',
+                'latestUpdatedBy' => $latestBy,
+            ]);
+            exit;
+        }
+    }
+}
+
+// Collaborators to store: an explicit list from the payload, else carry forward.
+$collaboratorsToStore = [];
+if (isset($formData['collaborators']) && is_array($formData['collaborators'])) {
+    foreach ($formData['collaborators'] as $c) {
+        if (!is_array($c)) {
+            continue;
+        }
+        $u = trim((string) ($c['username'] ?? ''));
+        $dn = trim((string) ($c['displayName'] ?? ''));
+        $cid = (int) ($c['dbUserId'] ?? 0);
+        if ($u === '' && $dn === '' && $cid <= 0) {
+            continue;
+        }
+        $collaboratorsToStore[] = ['dbUserId' => $cid, 'username' => $u, 'displayName' => $dn];
+    }
+} elseif ($existingForm && is_array($existingForm['collaborators'] ?? null)) {
+    $collaboratorsToStore = $existingForm['collaborators'];
+}
 
 function compareFields($oldFields, $newFields, $userName)
 {
@@ -197,11 +296,11 @@ if ($isUpdate && !$isNewVersion) {
             'type' => 'pdf_changed',
             'oldPdf' => $formConfig['pdfFile'],
             'newPdf' => $formData['pdfFile'],
-            'user' => $formData['userName'],
+            'user' => $actorName,
             'timestamp' => date('c'),
             'versionChange' => $oldVersion . ' → ' . number_format($newVersion, 1),
         ];
-        $auditTrail = array_merge($auditTrail, generateInitialAuditTrail($formData['fields'] ?? [], $formData['userName']));
+        $auditTrail = array_merge($auditTrail, generateInitialAuditTrail($formData['fields'] ?? [], $actorName));
 
         $formConfig = [
             'id' => uniqid('form_'),
@@ -216,8 +315,8 @@ if ($isUpdate && !$isNewVersion) {
             'createdAt' => $oldFormConfig['createdAt'] ?? date('c'),
             'updatedAt' => date('c'),
             'auditTrail' => $auditTrail,
-            'createdBy' => $oldFormConfig['createdBy'] ?? $formData['userName'],
-            'updatedBy' => $formData['userName'],
+            'createdBy' => $oldFormConfig['createdBy'] ?? $actorName,
+            'updatedBy' => $actorName,
         ];
 
         $oldFormConfig['isLatest'] = false;
@@ -238,7 +337,7 @@ if ($isUpdate && !$isNewVersion) {
 
         $oldFields = $oldFormConfig['fields'] ?? [];
         $newFields = $formData['fields'] ?? [];
-        $fieldChanges = compareFields($oldFields, $newFields, $formData['userName']);
+        $fieldChanges = compareFields($oldFields, $newFields, $actorName);
 
         $auditTrail = $formConfig['auditTrail'] ?? [];
         $auditTrail = array_merge($auditTrail, $fieldChanges);
@@ -246,7 +345,7 @@ if ($isUpdate && !$isNewVersion) {
             'type' => 'version_updated',
             'oldVersion' => number_format($oldVersion, 1),
             'newVersion' => number_format($newVersion, 1),
-            'user' => $formData['userName'],
+            'user' => $actorName,
             'timestamp' => date('c'),
             'reason' => 'Field modifications',
         ];
@@ -264,8 +363,8 @@ if ($isUpdate && !$isNewVersion) {
             'createdAt' => $oldFormConfig['createdAt'] ?? date('c'),
             'updatedAt' => date('c'),
             'auditTrail' => $auditTrail,
-            'createdBy' => $oldFormConfig['createdBy'] ?? $formData['userName'],
-            'updatedBy' => $formData['userName'],
+            'createdBy' => $oldFormConfig['createdBy'] ?? $actorName,
+            'updatedBy' => $actorName,
         ];
 
         $oldFormConfig['isLatest'] = false;
@@ -301,7 +400,7 @@ if ($isUpdate && !$isNewVersion) {
 
     $storageFilename = $sanitizedName . '_v' . number_format($version, 1) . '_' . time() . '.json';
 
-    $auditTrail = generateInitialAuditTrail($formData['fields'] ?? [], $formData['userName']);
+    $auditTrail = generateInitialAuditTrail($formData['fields'] ?? [], $actorName);
 
     $formConfig = [
         'id' => uniqid('form_'),
@@ -316,8 +415,8 @@ if ($isUpdate && !$isNewVersion) {
         'createdAt' => $formData['createdAt'] ?? date('c'),
         'updatedAt' => date('c'),
         'auditTrail' => $auditTrail,
-        'createdBy' => $formData['userName'],
-        'updatedBy' => $formData['userName'],
+        'createdBy' => $actorName,
+        'updatedBy' => $actorName,
     ];
 
     if ($isNewVersion && !empty($formData['formId'])) {
@@ -326,6 +425,13 @@ if ($isUpdate && !$isNewVersion) {
         ebr_db_forms_mark_not_latest_same_name_pdf($formData['name'], $formData['pdfFile'], $formConfig['id']);
     }
 }
+
+// Attribution + collaborators on the new row.
+$formConfig['collaborators'] = $collaboratorsToStore;
+$formConfig['updatedByUserId'] = $actorId > 0 ? $actorId : null;
+$formConfig['createdByUserId'] = ($existingForm && (int) ($existingForm['createdByUserId'] ?? 0) > 0)
+    ? (int) $existingForm['createdByUserId']
+    : ($actorId > 0 ? $actorId : null);
 
 try {
     if ($isUpdate && !$isNewVersion) {
@@ -353,4 +459,6 @@ echo json_encode([
     'isUpdate' => $isUpdate,
     'isNewVersion' => $isNewVersion,
     'version' => versionToDecimal($formConfig['version']),
+    'collaborators' => $collaboratorsToStore,
+    'savedBy' => $actorName,
 ]);

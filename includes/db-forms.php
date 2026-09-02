@@ -96,6 +96,9 @@ function ebr_db_form_row_to_api(array $row): array
         'updatedAt' => $row['updated_at'] ?? '',
         'createdBy' => $row['created_by'],
         'updatedBy' => $row['updated_by'],
+        'createdByUserId' => isset($row['created_by_user_id']) ? (int) $row['created_by_user_id'] : null,
+        'updatedByUserId' => isset($row['updated_by_user_id']) ? (int) $row['updated_by_user_id'] : null,
+        'collaborators' => $json('collaborators'),
         'storageFilename' => $row['storage_filename'] ?? null,
     ];
 }
@@ -138,11 +141,13 @@ function ebr_db_forms_insert_api(array $form, ?string $storageFilename): void
 INSERT INTO ebr_forms (
     id, name, description, pdf_file, fields, version, is_latest,
     source_form_ids, is_combined, audit_trail,
-    created_at, updated_at, created_by, updated_by, storage_filename
+    created_at, updated_at, created_by, updated_by, storage_filename,
+    collaborators, created_by_user_id, updated_by_user_id
 ) VALUES (
     :id, :name, :description, :pdf_file, CAST(:fields AS jsonb), :version, :is_latest,
     CAST(:source_form_ids AS jsonb), :is_combined, CAST(:audit_trail AS jsonb),
-    :created_at, :updated_at, :created_by, :updated_by, :storage_filename
+    :created_at, :updated_at, :created_by, :updated_by, :storage_filename,
+    CAST(:collaborators AS jsonb), :created_by_user_id, :updated_by_user_id
 )
 SQL;
     $st = $pdo->prepare($sql);
@@ -162,6 +167,9 @@ SQL;
         'created_by' => $form['createdBy'] ?? null,
         'updated_by' => $form['updatedBy'] ?? null,
         'storage_filename' => $storageFilename,
+        'collaborators' => ebr_db_forms_json_enc($form['collaborators'] ?? []),
+        'created_by_user_id' => ((int) ($form['createdByUserId'] ?? 0)) > 0 ? (int) $form['createdByUserId'] : null,
+        'updated_by_user_id' => ((int) ($form['updatedByUserId'] ?? 0)) > 0 ? (int) $form['updatedByUserId'] : null,
     ]);
 }
 
@@ -188,7 +196,10 @@ UPDATE ebr_forms SET
     updated_at = :updated_at,
     created_by = :created_by,
     updated_by = :updated_by,
-    storage_filename = :storage_filename
+    storage_filename = :storage_filename,
+    collaborators = CAST(:collaborators AS jsonb),
+    created_by_user_id = :created_by_user_id,
+    updated_by_user_id = :updated_by_user_id
 WHERE id = :id
 SQL;
     $st = $pdo->prepare($sql);
@@ -208,6 +219,9 @@ SQL;
         'created_by' => $form['createdBy'] ?? null,
         'updated_by' => $form['updatedBy'] ?? null,
         'storage_filename' => $storageFilename,
+        'collaborators' => ebr_db_forms_json_enc($form['collaborators'] ?? []),
+        'created_by_user_id' => ((int) ($form['createdByUserId'] ?? 0)) > 0 ? (int) $form['createdByUserId'] : null,
+        'updated_by_user_id' => ((int) ($form['updatedByUserId'] ?? 0)) > 0 ? (int) $form['updatedByUserId'] : null,
     ]);
 }
 

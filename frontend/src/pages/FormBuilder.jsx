@@ -31,6 +31,7 @@ import {
   loadFormById,
   saveForm,
   loadTemplateSuggestions,
+  listDbUsers,
 } from '../api/client'
 import { useUserPrefs } from '../context/UserPrefsContext'
 import { pageDesignSize } from '../utils/pdfDesignCoords'
@@ -912,6 +913,11 @@ export default function FormBuilder() {
   const [draftStatus, setDraftStatus] = useState('idle')
   const draftTimerRef = useRef(null)
   const draftCheckedRef = useRef(false)
+  // Form collaborators (who may edit) + whether the current user is allowed to.
+  const [canEditForm, setCanEditForm] = useState(true)
+  const [formCollaborators, setFormCollaborators] = useState([])
+  const [collabSearch, setCollabSearch] = useState('')
+  const [collabResults, setCollabResults] = useState([])
 
   // Modal states
   const [showSelectionModal, setShowSelectionModal] = useState(true)
@@ -1053,6 +1059,26 @@ export default function FormBuilder() {
     setDraftPrompt(null)
     clearDraft()
   }, [clearDraft])
+
+  // Debounced user search for the collaborator picker in the save modal.
+  useEffect(() => {
+    if (!showSaveModal) return undefined
+    const q = collabSearch.trim()
+    if (q.length < 2) {
+      setCollabResults([])
+      return undefined
+    }
+    const t = setTimeout(() => {
+      listDbUsers(q)
+        .then((data) => {
+          const chosen = new Set(formCollaborators.map((c) => c.dbUserId))
+          const users = Array.isArray(data?.users) ? data.users : []
+          setCollabResults(users.filter((u) => !chosen.has(u.dbUserId)).slice(0, 8))
+        })
+        .catch(() => setCollabResults([]))
+    }, 250)
+    return () => clearTimeout(t)
+  }, [collabSearch, showSaveModal, formCollaborators])
 
   // Alignment guides (snap to other fields)
   const [guides, setGuides] = useState([])
@@ -1259,6 +1285,8 @@ export default function FormBuilder() {
         if (data.success && data.form?.fields) {
           setLoadedFormName(data.form.name || null)
           setSourceFormIds(data.form.sourceFormIds?.length ? data.form.sourceFormIds : [urlFormId])
+          setCanEditForm(data.canEdit !== false)
+          setFormCollaborators(Array.isArray(data.form.collaborators) ? data.form.collaborators : [])
           markBaseline()
           setFields(
             normalizeFieldGroupOrder(
@@ -2111,6 +2139,8 @@ export default function FormBuilder() {
           setSourceFormIds(
             data.form.sourceFormIds?.length ? data.form.sourceFormIds : [selectionFormId],
           )
+          setCanEditForm(data.canEdit !== false)
+          setFormCollaborators(Array.isArray(data.form.collaborators) ? data.form.collaborators : [])
           markBaseline()
           setFields(
             normalizeFieldGroupOrder(
@@ -2183,16 +2213,30 @@ export default function FormBuilder() {
         formId: saveSelectedFormId || null,
         createNewVersion: saveCreateNewVersion && saveSelectedFormId ? true : false,
         userName: saveUserName.trim(),
+        collaborators: formCollaborators,
         sourceFormIds: sourceFormIds.length > 0 ? sourceFormIds : undefined,
         isCombined: sourceFormIds.length > 1,
         createdAt: new Date().toISOString(),
       }
-      const result = await saveForm(body)
+      let result = await saveForm(body)
+      // Someone else saved a newer version since this one was opened.
+      if (!result.success && result.code === 'conflict') {
+        const choice = window.confirm(
+          (result.message || 'This form was changed since you opened it.') +
+            '\n\nOK = save anyway as a new version (keeps both). Cancel = stop so you can reload.',
+        )
+        if (!choice) {
+          return
+        }
+        result = await saveForm({ ...body, createNewVersion: true, force: true })
+      }
       if (result.success) {
         alert(saveSelectedFormId ? 'Form updated successfully!' : 'Form saved successfully!')
         setLoadedFormName(finalName)
         setShowSaveModal(false)
         clearDraft()
+      } else if (result.code === 'not_a_collaborator') {
+        alert(result.message || 'You are not a collaborator on this form.')
       } else {
         alert('Error saving form: ' + (result.message || 'Unknown error'))
       }
@@ -2656,7 +2700,12 @@ export default function FormBuilder() {
               Draft saved
             </span>
           )}
-          <button className="fb-btn fb-btn-success" onClick={openSaveModal}>
+          <button
+            className="fb-btn fb-btn-success"
+            onClick={openSaveModal}
+            disabled={!canEditForm}
+            title={canEditForm ? 'Save this form' : 'You are not a collaborator on this form (view only)'}
+          >
             Save Form
           </button>
           <Link to="/templates" className="fb-btn fb-btn-ghost">
@@ -2667,6 +2716,12 @@ export default function FormBuilder() {
       {copyToastVisible && (
         <div className="fb-copy-toast" role="status" aria-live="polite">
           Copied {clipboardCount} field{clipboardCount === 1 ? '' : 's'}
+        </div>
+      )}
+
+      {!canEditForm && (
+        <div className="fb-readonly-banner" role="status">
+          You are viewing this form read-only — only its creator and collaborators can edit it.
         </div>
       )}
 
@@ -3618,6 +3673,65 @@ export default function FormBuilder() {
                 onChange={(e) => setSaveDescription(e.target.value)}
                 placeholder="Enter description"
               />
+            </div>
+
+            <div className="fb-form-group">
+              <label>Collaborators (who may edit this form):</label>
+              {formCollaborators.length > 0 ? (
+                <div className="fb-collab-chips">
+                  {formCollaborators.map((c) => (
+                    <span key={c.dbUserId || c.username} className="fb-collab-chip">
+                      {c.displayName || c.username}
+                      <button
+                        type="button"
+                        className="fb-collab-chip-x"
+                        title="Remove"
+                        onClick={() =>
+                          setFormCollaborators((prev) =>
+                            prev.filter((x) => (x.dbUserId || x.username) !== (c.dbUserId || c.username)),
+                          )
+                        }
+                      >
+                        &times;
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="fb-hint">
+                  No collaborators yet — only you (the creator) can edit. Add people to let them edit too.
+                </p>
+              )}
+              <input
+                type="text"
+                value={collabSearch}
+                onChange={(e) => setCollabSearch(e.target.value)}
+                placeholder="Search users by name or username to add…"
+              />
+              {collabResults.length > 0 && (
+                <ul className="fb-collab-results">
+                  {collabResults.map((u) => (
+                    <li key={u.dbUserId}>
+                      <button
+                        type="button"
+                        className="fb-collab-result-btn"
+                        onClick={() => {
+                          setFormCollaborators((prev) =>
+                            prev.some((x) => x.dbUserId === u.dbUserId)
+                              ? prev
+                              : [...prev, { dbUserId: u.dbUserId, username: u.username, displayName: u.displayName }],
+                          )
+                          setCollabSearch('')
+                          setCollabResults([])
+                        }}
+                      >
+                        {u.displayName || u.username}
+                        <span className="fb-collab-result-meta">{u.email || u.username}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
 
             <div className="fb-form-group">
