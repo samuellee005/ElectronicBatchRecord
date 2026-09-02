@@ -34,6 +34,7 @@ import {
   listDbUsers,
 } from '../api/client'
 import { useUserPrefs } from '../context/UserPrefsContext'
+import { useAuth } from '../context/AuthContext'
 import { pageDesignSize } from '../utils/pdfDesignCoords'
 import { buildTableMergeLayout, tableCellKey } from '../utils/tableMergeLayout'
 import { DEFAULT_TABLE_COL_WIDTH, DEFAULT_TABLE_ROW_HEIGHT, tableColWidthPx, tableRowHeightPx } from '../utils/tableFieldDims'
@@ -851,6 +852,7 @@ function formatDate(dateString) {
 
 export default function FormBuilder() {
   const { prefs, updatePrefs } = useUserPrefs()
+  const { user: authUser } = useAuth()
   const [searchParams] = useSearchParams()
   const pdfFile = searchParams.get('file')
   const urlFormId = searchParams.get('formId')
@@ -1301,11 +1303,13 @@ export default function FormBuilder() {
     }
   }, [urlFormId, pdfFile, markBaseline])
 
-  // Pre-fill user name from server-backed prefs
+  // Pre-fill the audit name: the signed-in account takes precedence, so a form
+  // is attributed to the user saving it without them typing anything.
   useEffect(() => {
-    const name = prefs.ebrUserDisplayName
+    const fromAuth = authUser ? (authUser.displayName || authUser.username || '') : ''
+    const name = fromAuth || prefs.ebrUserDisplayName
     if (name) setSaveUserName(String(name))
-  }, [prefs.ebrUserDisplayName])
+  }, [authUser, prefs.ebrUserDisplayName])
 
   const handlePageRendered = useCallback(({ page, width, height, totalPages: n }) => {
     setCurrentPage(page)
@@ -2355,10 +2359,10 @@ export default function FormBuilder() {
   const handleConfirmSave = async () => {
     const finalName = saveFormNameMode === 'new' ? saveFormNameNew.trim() : saveFormName.trim()
     if (!finalName) { alert('Please select or enter a form name'); return }
-    if (!saveUserName.trim()) { alert('Please enter your name for the audit trail'); return }
+    if (!authUser && !saveUserName.trim()) { alert('Please enter your name for the audit trail'); return }
 
     setSaving(true)
-    updatePrefs({ ebrUserDisplayName: saveUserName.trim() })
+    if (!authUser && saveUserName.trim()) updatePrefs({ ebrUserDisplayName: saveUserName.trim() })
 
     try {
       const body = {
@@ -3891,16 +3895,19 @@ export default function FormBuilder() {
             </div>
 
             <div className="fb-form-group">
-              <label>Your Name (required for audit trail):</label>
+              <label>{authUser ? 'Recorded as (your account):' : 'Your Name (required for audit trail):'}</label>
               <input
                 type="text"
-                value={saveUserName}
+                value={authUser ? (authUser.displayName || authUser.username || '') : saveUserName}
                 onChange={(e) => setSaveUserName(e.target.value)}
                 placeholder="Enter your name"
-                required
+                disabled={!!authUser}
+                required={!authUser}
               />
               <small className="fb-hint">
-                This will be recorded in the audit trail for tracking changes
+                {authUser
+                  ? 'Changes are recorded against your signed-in account.'
+                  : 'This will be recorded in the audit trail for tracking changes'}
               </small>
             </div>
 

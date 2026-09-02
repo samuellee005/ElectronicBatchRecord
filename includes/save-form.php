@@ -28,18 +28,20 @@ if (empty($formData['name']) || empty($formData['pdfFile'])) {
 }
 
 $sessionUser = ebr_current_user();
-if (empty($actorName) && $sessionUser === null) {
-    echo json_encode(['success' => false, 'message' => 'User name is required for audit trail']);
-    exit;
-}
-// Reliable attribution: prefer the authenticated user over any typed name.
+// Reliable attribution: prefer the authenticated user; fall back to a typed name
+// only when there is no session (e.g. login not required on this deployment).
+$typedName = trim((string) ($formData['userName'] ?? ''));
 $actorName = $sessionUser && ($sessionUser['display_name'] !== '' || $sessionUser['username'] !== '')
     ? ($sessionUser['display_name'] !== '' ? $sessionUser['display_name'] : $sessionUser['username'])
-    : trim((string) ($actorName ?? ''));
+    : $typedName;
 $actorId = $sessionUser ? (int) $sessionUser['id'] : 0;
 $actorUsername = $sessionUser
     ? strtolower((string) $sessionUser['username'])
-    : strtolower(trim((string) ($actorName ?? '')));
+    : strtolower($typedName);
+if ($actorName === '') {
+    echo json_encode(['success' => false, 'message' => 'User name is required for audit trail']);
+    exit;
+}
 
 function versionToDecimal($v)
 {
