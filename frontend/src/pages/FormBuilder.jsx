@@ -19,8 +19,8 @@ import {
   ArrowUturnRightIcon,
   ArrowsPointingOutIcon,
   ArrowsPointingInIcon,
-  NumberedListIcon,
   ArrowDownOnSquareIcon,
+  TagIcon,
 } from '@heroicons/react/24/outline'
 import PdfViewer from '../components/PdfViewer'
 import PdfPageScrubber from '../components/PdfPageScrubber'
@@ -125,6 +125,68 @@ function uniqueName(name, taken) {
     const candidate = `${base}_${n}`
     if (!taken.has(candidate)) return candidate
   }
+}
+
+/**
+ * Drop a trailing " #<n>" index (as added by Auto-name) so the base label can
+ * be recomputed. Tolerant of an optional space after the hash ("Date #1",
+ * "Date # 2"); never strips a label down to nothing.
+ */
+function baseLabelWithoutIndex(label) {
+  const s = String(label ?? '').trim()
+  const stripped = s.replace(/\s*#\s*\d+$/, '').trim()
+  return stripped || s
+}
+
+/**
+ * Compute the Auto-name result for `fields`: each stage's fields ordered by PDF
+ * reading order (top→bottom, left→right), and fields that share a base label
+ * within a stage given "Base #n" labels plus matching "base_n" slugs. Returns
+ * the new array (or the original ref if nothing changed) and the count of
+ * fields whose label/name actually changed (reorder-only fields don't count).
+ */
+function planAutoName(fields) {
+  const byKey = new Map()
+  for (const f of fields) {
+    const k = stageKey(f)
+    if (!byKey.has(k)) byKey.set(k, [])
+    byKey.get(k).push(f)
+  }
+  const orderById = new Map()
+  const patch = new Map()
+  for (const arr of byKey.values()) {
+    const ordered = readingOrderSort(arr)
+    ordered.forEach((f, i) => orderById.set(f.id, i + 1))
+    const groups = new Map()
+    for (const f of ordered) {
+      const base = baseLabelWithoutIndex(f.label)
+      if (!base) continue
+      const gk = base.toLowerCase()
+      if (!groups.has(gk)) groups.set(gk, [])
+      groups.get(gk).push({ f, base })
+    }
+    for (const g of groups.values()) {
+      if (g.length < 2) continue
+      const baseSlug = slugifyName(g[0].base)
+      g.forEach(({ f, base }, i) => {
+        patch.set(f.id, { label: `${base} #${i + 1}`, name: `${baseSlug}_${i + 1}` })
+      })
+    }
+  }
+  let changed = false
+  let renamedCount = 0
+  const next = fields.map((f) => {
+    const o = orderById.get(f.id)
+    const p = patch.get(f.id)
+    const nextOrder = o != null ? o : f.orderInGroup
+    const nextLabel = p ? p.label : f.label
+    const nextName = p ? p.name : f.name
+    if (p && (f.label !== nextLabel || f.name !== nextName)) renamedCount += 1
+    if (f.orderInGroup === nextOrder && f.label === nextLabel && f.name === nextName) return f
+    changed = true
+    return { ...f, orderInGroup: nextOrder, label: nextLabel, name: nextName }
+  })
+  return { next: changed ? next : fields, renamedCount }
 }
 
 /**
@@ -905,6 +967,9 @@ export default function FormBuilder() {
   const [pasteTargetPages, setPasteTargetPages] = useState(() => new Set())
   const [copyToastVisible, setCopyToastVisible] = useState(false)
   const copyToastTimerRef = useRef(null)
+  const [autoNameToastVisible, setAutoNameToastVisible] = useState(false)
+  const [autoNameCount, setAutoNameCount] = useState(0)
+  const autoNameToastTimerRef = useRef(null)
   const [scale, setScale] = useState(1.5)
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(0)
@@ -2519,33 +2584,25 @@ export default function FormBuilder() {
     [renameStage, stageNameDraft],
   )
 
-  // Renumber every group's fields into reading order (top→bottom, left→right)
-  // from their positions on the PDF, so the Stages list and entry order follow
-  // the visual layout. One undo step.
-  const autoOrderByLayout = useCallback(() => {
-    setFields((prev) => {
-      const byKey = new Map()
-      for (const f of prev) {
-        const k = stageKey(f)
-        if (!byKey.has(k)) byKey.set(k, [])
-        byKey.get(k).push(f)
-      }
-      const orderById = new Map()
-      for (const arr of byKey.values()) {
-        readingOrderSort(arr).forEach((f, i) => orderById.set(f.id, i + 1))
-      }
-      let changed = false
-      const next = prev.map((f) => {
-        const o = orderById.get(f.id)
-        if (o != null && f.orderInGroup !== o) {
-          changed = true
-          return { ...f, orderInGroup: o }
-        }
-        return f
-      })
-      return changed ? next : prev
-    })
-  }, [])
+  // One click that does both: renumber every group's fields into reading order
+  // (top→bottom, left→right) from their positions on the PDF, then give fields
+  // that share a label within a stage a numbered suffix — "Date #1", "Date #2",
+  // … — in that same reading order. The matching slug name is renumbered too
+  // (date_1, date_2) so stored data stays distinct. Re-runnable: it strips any
+  // prior index and re-derives from the current layout, so fixing a field's
+  // position and clicking again corrects the numbers. Singletons keep their
+  // label untouched. One undo step.
+  const autoNameDuplicates = useCallback(() => {
+    const { next, renamedCount } = planAutoName(fields)
+    if (next !== fields) setFields(next)
+    setAutoNameCount(renamedCount)
+    setAutoNameToastVisible(true)
+    if (autoNameToastTimerRef.current) clearTimeout(autoNameToastTimerRef.current)
+    autoNameToastTimerRef.current = setTimeout(() => {
+      setAutoNameToastVisible(false)
+      autoNameToastTimerRef.current = null
+    }, 2200)
+  }, [fields])
 
   const handlePillClick = useCallback(
     (e, f) => {
@@ -2878,6 +2935,13 @@ export default function FormBuilder() {
           Copied {clipboardCount} field{clipboardCount === 1 ? '' : 's'}
         </div>
       )}
+      {autoNameToastVisible && (
+        <div className="fb-copy-toast" role="status" aria-live="polite">
+          {autoNameCount === 0
+            ? 'No duplicate labels to number'
+            : `Renamed ${autoNameCount} field${autoNameCount === 1 ? '' : 's'}`}
+        </div>
+      )}
 
       {!canEditForm && (
         <div className="fb-readonly-banner" role="status">
@@ -2919,11 +2983,11 @@ export default function FormBuilder() {
                         <button
                           type="button"
                           className="fb-stages-autoorder-btn"
-                          onClick={autoOrderByLayout}
-                          title="Number every field in reading order — top to bottom, then left to right — from its position on the PDF"
+                          onClick={autoNameDuplicates}
+                          title="Order every field by its position on the PDF — top to bottom, then left to right — and number fields that share a label in the same stage: “Date #1”, “Date #2”. Re-run after moving a field to fix the order and numbers."
                         >
-                          <NumberedListIcon className="fb-stages-expand-icon" />
-                          <span>Auto-order</span>
+                          <TagIcon className="fb-stages-expand-icon" />
+                          <span>Auto-name</span>
                         </button>
                         <button
                           type="button"
