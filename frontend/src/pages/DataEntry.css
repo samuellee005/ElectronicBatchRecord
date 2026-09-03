@@ -663,6 +663,13 @@
   gap: 8px;
 }
 
+.de-field-panel-multiselect--horizontal {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 18px;
+}
+
 .de-field-panel-collab .overlay-collab-label {
   font-size: 0.82rem;
 }
@@ -2260,6 +2267,15 @@ button.de-signature-correction-link {
   max-height: 100%;
   overflow-y: auto;
   padding: 2px 0;
+}
+
+/* Horizontal layout: options sit side by side and wrap to new rows as needed. */
+.overlay-radio-group--horizontal,
+.overlay-multiselect-group--horizontal {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
 }
 
 .overlay-radio-label {

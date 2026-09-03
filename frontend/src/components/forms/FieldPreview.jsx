@@ -81,15 +81,17 @@ export default function FieldPreview({ field, selected = false, onFieldUpdate, r
           </button>
         </div>
       )
-    case 'radio':
+    case 'radio': {
+      const horizontal = field.optionLayout === 'horizontal'
       return (
         <div
           style={{
             ...containerStyle,
             justifyContent: 'flex-start',
-            flexDirection: 'column',
-            alignItems: 'stretch',
-            gap: 4,
+            flexDirection: horizontal ? 'row' : 'column',
+            flexWrap: horizontal ? 'wrap' : 'nowrap',
+            alignItems: horizontal ? 'center' : 'stretch',
+            gap: horizontal ? '4px 14px' : 4,
             overflowY: 'auto',
           }}
         >
@@ -100,15 +102,18 @@ export default function FieldPreview({ field, selected = false, onFieldUpdate, r
           ))}
         </div>
       )
-    case 'multiselect':
+    }
+    case 'multiselect': {
+      const horizontal = field.optionLayout === 'horizontal'
       return (
         <div
           style={{
             ...containerStyle,
             justifyContent: 'flex-start',
-            flexDirection: 'column',
-            alignItems: 'stretch',
-            gap: 4,
+            flexDirection: horizontal ? 'row' : 'column',
+            flexWrap: horizontal ? 'wrap' : 'nowrap',
+            alignItems: horizontal ? 'center' : 'stretch',
+            gap: horizontal ? '4px 14px' : 4,
             overflowY: 'auto',
           }}
         >
@@ -119,6 +124,7 @@ export default function FieldPreview({ field, selected = false, onFieldUpdate, r
           ))}
         </div>
       )
+    }
     case 'collaborator':
       return (
         <div

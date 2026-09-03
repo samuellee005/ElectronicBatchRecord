@@ -1150,7 +1150,7 @@ function FieldDetailPanel({
       case 'multiselect': {
         const selected = parseMultiselectValue(editSourceValue)
         valueEditor = (
-          <div className="de-field-panel-multiselect">
+          <div className={`de-field-panel-multiselect${field.optionLayout === 'horizontal' ? ' de-field-panel-multiselect--horizontal' : ''}`}>
             {(field.options || []).map((opt) => (
               <label key={opt} className="de-field-panel-check">
                 <input
@@ -1862,7 +1862,7 @@ function OverlayField({
     }
     case 'radio':
       input = (
-        <div className="overlay-radio-group">
+        <div className={`overlay-radio-group${field.optionLayout === 'horizontal' ? ' overlay-radio-group--horizontal' : ''}`}>
           {(field.options || []).map(opt => (
             <label key={opt} className="overlay-radio-label">
               <input
@@ -1882,7 +1882,7 @@ function OverlayField({
     case 'multiselect': {
       const selected = parseMultiselectValue(value)
       input = (
-        <div className="overlay-multiselect-group">
+        <div className={`overlay-multiselect-group${field.optionLayout === 'horizontal' ? ' overlay-multiselect-group--horizontal' : ''}`}>
           {(field.options || []).map(opt => (
             <label key={opt} className="overlay-radio-label">
               <input

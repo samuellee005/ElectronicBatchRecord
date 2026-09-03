@@ -4178,6 +4178,28 @@ function stageOrderForExistingStageName(fields, stageNameTrimmed, excludeFieldId
   return null
 }
 
+/**
+ * Options editor for choice fields. Keeps its own raw text buffer so a blank
+ * line typed with Enter survives: the stored `options` is the trimmed,
+ * empty-filtered array, but the textarea shows exactly what was typed (mount it
+ * with `key={field.id}` so switching fields reseeds it). Previously the value
+ * was rebuilt from the filtered array on every keystroke, which deleted the new
+ * blank line and made it impossible to start another option.
+ */
+function OptionsEditor({ field, onUpdate }) {
+  const [text, setText] = useState((field.options || []).join('\n'))
+  return (
+    <textarea
+      value={text}
+      placeholder={'Option 1\nOption 2'}
+      onChange={(e) => {
+        setText(e.target.value)
+        onUpdate({ options: e.target.value.split('\n').filter((o) => o.trim() !== '') })
+      }}
+    />
+  )
+}
+
 function PropertiesForm({ field, existingStages, fields, onRenameStage, onUpdate }) {
   const [stageMode, setStageMode] = useState(
     field.stageInProcess && !existingStages.includes(field.stageInProcess) ? 'new' : 'select',
@@ -4536,12 +4558,20 @@ function PropertiesForm({ field, existingStages, fields, onRenameStage, onUpdate
       {(field.type === 'dropdown' || field.type === 'radio' || field.type === 'multiselect') && (
         <div className="fb-form-group">
           <label>Options (one per line):</label>
-          <textarea
-            value={(field.options || []).join('\n')}
-            onChange={(e) =>
-              onUpdate({ options: e.target.value.split('\n').filter((o) => o.trim()) })
-            }
-          />
+          <OptionsEditor key={field.id} field={field} onUpdate={onUpdate} />
+        </div>
+      )}
+
+      {(field.type === 'radio' || field.type === 'multiselect') && (
+        <div className="fb-form-group">
+          <label>Option layout:</label>
+          <select
+            value={field.optionLayout === 'horizontal' ? 'horizontal' : 'vertical'}
+            onChange={(e) => onUpdate({ optionLayout: e.target.value })}
+          >
+            <option value="vertical">Vertical (stacked)</option>
+            <option value="horizontal">Horizontal (side by side)</option>
+          </select>
         </div>
       )}
 
