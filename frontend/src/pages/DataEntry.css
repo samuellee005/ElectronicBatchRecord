@@ -775,42 +775,48 @@
 }
 
 /*
- * Drawn box + checkmark (native checkbox hidden/clipped).
- * Screen matches overlay 18px control; print avoids [ ] / widget text from PDF engines.
+ * Checkboxes are drawn, never native: read-only values use an inline SVG
+ * (.de-checkbox-glyph); interactive inputs use appearance:none boxes
+ * (.de-checkbox-control) with an SVG check when set. Both render the same on
+ * screen and in print, so no engine paints a native "[x]" / widget.
  */
-.de-checkbox-print-visual {
+.de-checkbox-glyph {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  vertical-align: middle;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+.de-checkbox-control {
+  appearance: none;
+  -webkit-appearance: none;
   box-sizing: border-box;
   width: 18px;
   height: 18px;
   min-width: 18px;
   min-height: 18px;
+  margin: 0;
+  padding: 0;
   border: 2px solid #1a1a1a;
   border-radius: 3px;
-  background: #fff;
+  background-color: #fff;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 12px 12px;
   vertical-align: middle;
   flex-shrink: 0;
-  position: relative;
-  display: inline-block;
-  pointer-events: none;
+  cursor: pointer;
 }
 
-/* Multiselect: keep native on screen; sibling box only for print (see JSX). */
-.de-checkbox-print-visual--print-only {
-  display: none !important;
+.de-checkbox-control:checked {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 18'%3E%3Cpath d='M4.3 9.4 L7.5 12.6 L13.7 5.5' fill='none' stroke='%231a1a1a' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 
-.de-checkbox-print-visual--checked::after {
-  content: '';
-  display: block;
-  position: absolute;
-  left: 5px;
-  top: 1px;
-  width: 5px;
-  height: 10px;
-  border: solid #1a1a1a;
-  border-width: 0 2px 2px 0;
-  transform: rotate(45deg);
-  box-sizing: border-box;
+.de-checkbox-control:disabled {
+  cursor: default;
+  opacity: 1;
 }
 
 .de-signature-correction-wrap {
@@ -2309,7 +2315,7 @@ button.de-signature-correction-link {
   accent-color: #667eea;
 }
 
-/* Compact PDF checkbox: .de-checkbox-print-visual is the visible box; input on top for clicks */
+/* Compact PDF checkbox: the drawn box (.de-checkbox-control) is centered in the field. */
 .overlay-field-input-container--compact > .overlay-checkbox-wrap {
   position: relative;
 }
@@ -2319,11 +2325,9 @@ button.de-signature-correction-link {
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
-  z-index: 2;
   width: 18px;
   height: 18px;
   margin: 0;
-  opacity: 0;
   cursor: pointer;
   flex-shrink: 0;
 }
@@ -2331,11 +2335,6 @@ button.de-signature-correction-link {
 .overlay-checkbox-wrap span {
   font-size: 0.8rem;
   color: #333;
-}
-
-.overlay-checkbox-wrap span.de-checkbox-print-visual {
-  font-size: 0;
-  line-height: 0;
 }
 
 /* ── Signature pad ──────────────────────────────────────── */
@@ -2538,13 +2537,6 @@ button.de-signature-correction-link {
   font-size: 0.75rem;
   color: #b45309;
   font-weight: 600;
-}
-
-.overlay-field-recorded-by {
-  display: block;
-  font-size: 0.72rem;
-  color: #667eea;
-  margin-top: 4px;
 }
 
 .overlay-table-scroll {
@@ -2856,31 +2848,11 @@ button.de-signature-correction-link {
   }
 
   /*
-   * Remove native checkbox from print output (many engines draw “[ ]” / widget text).
-   * .de-checkbox-print-visual is the box; use .de-checkbox-print-visual--print-only for multiselect.
+   * Checkboxes are drawn (SVG glyph + appearance:none boxes), so force their
+   * colours to print rather than hiding a native widget.
    */
-  html.de-data-entry-print-host .de-checkbox-readonly input[type='checkbox'],
-  html.de-data-entry-print-host .overlay-field-input-container--compact > .overlay-checkbox-wrap input[type='checkbox'],
-  html.de-data-entry-print-host .overlay-multiselect-group .overlay-radio-label > input[type='checkbox'] {
-    display: none !important;
-    appearance: none !important;
-    -webkit-appearance: none !important;
-    position: absolute !important;
-    left: -99999px !important;
-    width: 0 !important;
-    height: 0 !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    border: 0 !important;
-    opacity: 0 !important;
-    visibility: hidden !important;
-    clip: rect(0, 0, 0, 0) !important;
-    clip-path: inset(50%) !important;
-    pointer-events: none !important;
-  }
-
-  html.de-data-entry-print-host .de-checkbox-print-visual {
-    display: inline-block !important;
+  html.de-data-entry-print-host .de-checkbox-glyph,
+  html.de-data-entry-print-host .de-checkbox-control {
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }

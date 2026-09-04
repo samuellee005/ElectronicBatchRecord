@@ -353,19 +353,39 @@ function isCheckboxChecked(value) {
   return value === true || value === 'true' || value === 1
 }
 
-/** Submitted / locked checkbox: drawn box on screen and in print; native clipped for accessibility only. */
+/**
+ * Submitted / locked checkbox drawn as an inline SVG box (+ check when set), so
+ * no browser or PDF/print engine ever paints a native "[x]" widget — the SVG
+ * renders identically on screen and in print.
+ */
+function CheckboxGlyph({ checked }) {
+  return (
+    <svg className="de-checkbox-glyph" viewBox="0 0 18 18" aria-hidden="true" focusable="false">
+      <rect x="1" y="1" width="16" height="16" rx="3" ry="3" fill="#fff" stroke="#1a1a1a" strokeWidth="2" />
+      {checked && (
+        <path
+          d="M4.3 9.4 L7.5 12.6 L13.7 5.5"
+          fill="none"
+          stroke="#1a1a1a"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      )}
+    </svg>
+  )
+}
+
 function ReadonlyCheckboxValue({ value, className = '' }) {
   const checked = isCheckboxChecked(value)
   return (
     <span
       className={`de-checkbox-readonly${className ? ` ${className}` : ''}`}
       onClick={(e) => e.stopPropagation()}
+      role="img"
+      aria-label={checked ? 'Checked' : 'Unchecked'}
     >
-      <input type="checkbox" checked={checked} disabled tabIndex={-1} aria-label={checked ? 'Checked' : 'Unchecked'} />
-      <span
-        className={`de-checkbox-print-visual${checked ? ' de-checkbox-print-visual--checked' : ''}`}
-        aria-hidden="true"
-      />
+      <CheckboxGlyph checked={checked} />
     </span>
   )
 }
@@ -1124,6 +1144,7 @@ function FieldDetailPanel({
           <label className="de-field-panel-check">
             <input
               type="checkbox"
+              className="de-checkbox-control"
               checked={editSourceValue === true || editSourceValue === 'true' || editSourceValue === 1}
               onChange={(e) => setFieldValue(e.target.checked)}
             />
@@ -1345,100 +1366,6 @@ function FieldDetailPanel({
         </div>
       </div>
     </aside>
-  )
-}
-
-/** Info icon: click to show entered time, lock time, recorded-by, correction history (reduces on-form clutter). */
-function FieldAuditInfoPopover({ entry, formatTs, correctionRef }) {
-  const [open, setOpen] = useState(false)
-  const rootRef = useRef(null)
-
-  useEffect(() => {
-    if (!open) return
-    const onDoc = (e) => {
-      if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false)
-    }
-    document.addEventListener('mousedown', onDoc)
-    return () => document.removeEventListener('mousedown', onDoc)
-  }, [open])
-
-  if (!isFieldEntryObject(entry)) return null
-  const enteredAt = entry.enteredAt
-  const lockedAt = entry.lockedAt
-  const recordedBy = entry.recordedBy
-  const corrs = Array.isArray(entry.corrections) ? entry.corrections : []
-  const show =
-    enteredAt ||
-    lockedAt ||
-    (recordedBy != null && recordedBy !== '') ||
-    corrs.length > 0 ||
-    correctionRef != null
-  if (!show) return null
-
-  return (
-    <div className="overlay-audit-info-wrap" ref={rootRef}>
-      <button
-        type="button"
-        className="overlay-audit-info-btn"
-        aria-label="Entry details"
-        aria-expanded={open}
-        title="Entry details"
-        onClick={(e) => {
-          e.stopPropagation()
-          setOpen((o) => !o)
-        }}
-      >
-        <svg className="overlay-audit-info-icon" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
-          <path
-            fillRule="evenodd"
-            d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
-            clipRule="evenodd"
-          />
-        </svg>
-      </button>
-      {open && (
-        <div className="overlay-audit-info-popover" role="region" aria-label="Entry audit details">
-          <div className="overlay-audit-info-popover-title">Entry details</div>
-          {enteredAt && (
-            <div className="overlay-audit-info-row">
-              <span className="overlay-audit-info-key">First entered</span>
-              <span className="overlay-audit-info-val">{formatTs(enteredAt)}</span>
-            </div>
-          )}
-          {lockedAt && (
-            <div className="overlay-audit-info-row">
-              <span className="overlay-audit-info-key">Submitted / locked</span>
-              <span className="overlay-audit-info-val">{formatTs(lockedAt)}</span>
-            </div>
-          )}
-          {attributionName(recordedBy) !== '' && (
-            <div className="overlay-audit-info-row">
-              <span className="overlay-audit-info-key">Recorded by</span>
-              <span className="overlay-audit-info-val">{attributionName(recordedBy)}</span>
-            </div>
-          )}
-          {correctionRef != null && (
-            <div className="overlay-audit-info-row">
-              <span className="overlay-audit-info-key">Correction ref</span>
-              <span className="overlay-audit-info-val">#{correctionRef} (see Corrections panel for this page)</span>
-            </div>
-          )}
-          {corrs.length > 0 && (
-            <div className="overlay-audit-info-corrections">
-              <div className="overlay-audit-info-key">Correction history</div>
-              <ul className="overlay-audit-info-correction-list">
-                {corrs.map((c, i) => (
-                  <li key={i}>
-                    <span className="overlay-audit-info-val">{formatTs(c.at)}</span>
-                    <span className="overlay-audit-info-by"> — {attributionName(c.by) || '—'}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
   )
 }
 
@@ -1818,14 +1745,11 @@ function OverlayField({
         <div className="overlay-checkbox-wrap overlay-checkbox-wrap--compact">
           <input
             type="checkbox"
+            className="de-checkbox-control"
             checked={chk}
             disabled={stageLocked}
             aria-label={field.label || 'Checkbox'}
             onChange={e => onChange(field.id, e.target.checked)}
-          />
-          <span
-            className={`de-checkbox-print-visual${chk ? ' de-checkbox-print-visual--checked' : ''}`}
-            aria-hidden="true"
           />
         </div>
       )
@@ -1887,6 +1811,7 @@ function OverlayField({
             <label key={opt} className="overlay-radio-label">
               <input
                 type="checkbox"
+                className="de-checkbox-control"
                 checked={selected.includes(opt)}
                 disabled={stageLocked}
                 onChange={() => {
@@ -1895,10 +1820,6 @@ function OverlayField({
                     : [...selected, opt]
                   onChange(field.id, next)
                 }}
-              />
-              <span
-                className={`de-checkbox-print-visual de-checkbox-print-visual--print-only${selected.includes(opt) ? ' de-checkbox-print-visual--checked' : ''}`}
-                aria-hidden="true"
               />
               <span>{opt}</span>
             </label>
