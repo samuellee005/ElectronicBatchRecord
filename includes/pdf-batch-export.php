@@ -641,10 +641,22 @@ function ebr_pdf_draw_field_value_in_box($pdf, $field, $x, $y, $fw, $fh, $val, $
     $fhUse = max(4.0, (float) $fh - (float) $recReservePt);
 
     if ($type === 'checkbox') {
-        $pdf->SetFont('Helvetica', '', 8);
-        $lineH = 8 * 1.15;
-        $pdf->SetXY($x, $y + ($fhUse - $lineH) / 2);
-        $pdf->Cell($fw, $lineH, $val, 0, 0, 'C');
+        // Draw a real box (+ check when set) instead of literal "[x]" / "[ ]" text.
+        $checked = strpos($val, 'x') !== false || strpos($val, 'X') !== false;
+        $size = min(11.0, (float) $fw - 2.0, $fhUse - 1.0);
+        $size = max(6.0, $size);
+        $bx = $x + ((float) $fw - $size) / 2.0;
+        $by = $y + ($fhUse - $size) / 2.0;
+        $pdf->SetDrawColor(26, 26, 26);
+        $pdf->SetLineWidth(0.5);
+        $pdf->Rect($bx, $by, $size, $size, 'D');
+        if ($checked) {
+            $pdf->SetLineWidth(0.9);
+            $pdf->Line($bx + $size * 0.22, $by + $size * 0.52, $bx + $size * 0.42, $by + $size * 0.74);
+            $pdf->Line($bx + $size * 0.42, $by + $size * 0.74, $bx + $size * 0.80, $by + $size * 0.26);
+        }
+        $pdf->SetLineWidth(0.567); // FPDF default (0.2mm)
+        $pdf->SetDrawColor(0, 0, 0);
         return;
     }
     if ($val === '') {
@@ -1057,25 +1069,16 @@ function ebr_build_batch_pdf_binary($form, $formData, $batch) {
             $sigOk = $isSig && is_string($rawEff) && strpos($rawEff, 'data:image') === 0
                 && ebr_pdf_place_signature_from_data_uri($pdf, $rawEff, $x, $y, $fw, $fh);
 
+            // "Rec:" attribution is intentionally not stamped on the document — it
+            // stays in the entry data and the backend audit trail. (Correction
+            // attribution is still shown in the corrections log.)
             if (!$sigOk) {
-                $recReserve = (is_array($ent) && !empty($ent['recordedBy'])) ? 9.0 : 0.0;
                 if (ebr_is_table_field($field)) {
-                    ebr_pdf_draw_table_field_in_box($pdf, $field, $x, $y, $fw, $fh, $rawEff, $recReserve);
+                    ebr_pdf_draw_table_field_in_box($pdf, $field, $x, $y, $fw, $fh, $rawEff, 0.0);
                 } else {
                     $val = ebr_format_pdf_field_value($field, $rawEff);
-                    ebr_pdf_draw_field_value_in_box($pdf, $field, $x, $y, $fw, $fh, $val, $recReserve);
+                    ebr_pdf_draw_field_value_in_box($pdf, $field, $x, $y, $fw, $fh, $val, 0.0);
                 }
-                if (is_array($ent) && !empty($ent['recordedBy'])) {
-                    $pdf->SetFont('Helvetica', 'I', 6);
-                    $pdf->SetXY($x, $y + $fh - 8);
-                    $pdf->Cell($fw, 8, 'Rec: ' . ebr_format_pdf_recorded_by($ent['recordedBy']), 0, 0, 'C');
-                    $pdf->SetFont('Helvetica', '', 8);
-                }
-            } elseif (is_array($ent) && !empty($ent['recordedBy'])) {
-                $pdf->SetXY($x, $y + $fh);
-                $pdf->SetFont('Helvetica', 'I', 6);
-                $pdf->Cell($fw, 10, 'Rec: ' . ebr_format_pdf_recorded_by($ent['recordedBy']), 0, 0, 'C');
-                $pdf->SetFont('Helvetica', '', 8);
             }
 
             $badgeNum = $spatialBadgeByFieldId[$id];
