@@ -376,6 +376,17 @@ function CheckboxGlyph({ checked }) {
   )
 }
 
+/** Radio option drawn as an inline SVG circle (+ filled dot when selected), so
+ *  no engine paints a native radio widget in print. */
+function RadioGlyph({ checked }) {
+  return (
+    <svg className="de-checkbox-glyph" viewBox="0 0 18 18" aria-hidden="true" focusable="false">
+      <circle cx="9" cy="9" r="7" fill="#fff" stroke="#1a1a1a" strokeWidth="2" />
+      {checked && <circle cx="9" cy="9" r="3.5" fill="#1a1a1a" />}
+    </svg>
+  )
+}
+
 function ReadonlyCheckboxValue({ value, className = '' }) {
   const checked = isCheckboxChecked(value)
   return (
@@ -1802,19 +1813,35 @@ function OverlayField({
     case 'radio':
       input = (
         <div className={`overlay-radio-group${field.optionLayout === 'horizontal' ? ' overlay-radio-group--horizontal' : ''}`}>
-          {(field.options || []).map(opt => (
-            <label key={opt} className="overlay-radio-label">
-              <input
-                type="radio"
-                name={`de-r-${field.id}`}
-                value={opt}
-                checked={value === opt}
-                disabled={stageLocked}
-                onChange={() => onChange(field.id, opt)}
-              />
-              <span>{opt}</span>
-            </label>
-          ))}
+          {(field.options || []).map(opt => {
+            const isSel = value === opt
+            return (
+              <span
+                key={opt}
+                role="radio"
+                aria-checked={isSel}
+                aria-disabled={stageLocked || undefined}
+                tabIndex={stageLocked ? -1 : 0}
+                className={`overlay-radio-label de-checkbox-option${stageLocked ? ' de-checkbox-button--disabled' : ''}`}
+                onClick={(e) => {
+                  if (stageLocked) return
+                  e.stopPropagation()
+                  onChange(field.id, opt)
+                }}
+                onKeyDown={(e) => {
+                  if (stageLocked) return
+                  if (e.key === ' ' || e.key === 'Enter') {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    onChange(field.id, opt)
+                  }
+                }}
+              >
+                <RadioGlyph checked={isSel} />
+                <span>{opt}</span>
+              </span>
+            )
+          })}
         </div>
       )
       break
