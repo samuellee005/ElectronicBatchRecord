@@ -789,6 +789,34 @@
   pointer-events: none;
 }
 
+/*
+ * Clickable checkbox with no native <input>, so it stays editable on screen but
+ * never prints as a native "[x]" widget. .de-checkbox-button wraps a single
+ * glyph; .de-checkbox-option is a full multi-select row (glyph + label).
+ */
+.de-checkbox-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+}
+
+.de-checkbox-option {
+  cursor: pointer;
+}
+
+.de-checkbox-button--disabled {
+  cursor: default;
+}
+
+.de-checkbox-button:focus-visible,
+.de-checkbox-option:focus-visible {
+  outline: 2px solid #667eea;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
 .de-checkbox-control {
   appearance: none;
   -webkit-appearance: none;
@@ -2315,26 +2343,10 @@ button.de-signature-correction-link {
   accent-color: #667eea;
 }
 
-/* Compact PDF checkbox: the drawn box (.de-checkbox-control) is centered in the field. */
+/* Compact PDF checkbox: the drawn box is centered in the field. */
 .overlay-field-input-container--compact > .overlay-checkbox-wrap {
   position: relative;
-}
-
-.overlay-field-input-container--compact > .overlay-checkbox-wrap input[type='checkbox'] {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  width: 18px;
-  height: 18px;
-  margin: 0;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-.overlay-checkbox-wrap span {
-  font-size: 0.8rem;
-  color: #333;
+  justify-content: center;
 }
 
 /* ── Signature pad ──────────────────────────────────────── */

@@ -1743,14 +1743,29 @@ function OverlayField({
       const chk = value === true || value === 'true' || value === 1
       input = (
         <div className="overlay-checkbox-wrap overlay-checkbox-wrap--compact">
-          <input
-            type="checkbox"
-            className="de-checkbox-control"
-            checked={chk}
-            disabled={stageLocked}
+          <span
+            role="checkbox"
+            aria-checked={chk}
             aria-label={field.label || 'Checkbox'}
-            onChange={e => onChange(field.id, e.target.checked)}
-          />
+            aria-disabled={stageLocked || undefined}
+            tabIndex={stageLocked ? -1 : 0}
+            className={`de-checkbox-button${stageLocked ? ' de-checkbox-button--disabled' : ''}`}
+            onClick={(e) => {
+              if (stageLocked) return
+              e.stopPropagation()
+              onChange(field.id, !chk)
+            }}
+            onKeyDown={(e) => {
+              if (stageLocked) return
+              if (e.key === ' ' || e.key === 'Enter') {
+                e.preventDefault()
+                e.stopPropagation()
+                onChange(field.id, !chk)
+              }
+            }}
+          >
+            <CheckboxGlyph checked={chk} />
+          </span>
         </div>
       )
       break
@@ -1807,23 +1822,37 @@ function OverlayField({
       const selected = parseMultiselectValue(value)
       input = (
         <div className={`overlay-multiselect-group${field.optionLayout === 'horizontal' ? ' overlay-multiselect-group--horizontal' : ''}`}>
-          {(field.options || []).map(opt => (
-            <label key={opt} className="overlay-radio-label">
-              <input
-                type="checkbox"
-                className="de-checkbox-control"
-                checked={selected.includes(opt)}
-                disabled={stageLocked}
-                onChange={() => {
-                  const next = selected.includes(opt)
-                    ? selected.filter(x => x !== opt)
-                    : [...selected, opt]
-                  onChange(field.id, next)
+          {(field.options || []).map(opt => {
+            const isSel = selected.includes(opt)
+            const toggle = () =>
+              onChange(field.id, isSel ? selected.filter(x => x !== opt) : [...selected, opt])
+            return (
+              <span
+                key={opt}
+                role="checkbox"
+                aria-checked={isSel}
+                aria-disabled={stageLocked || undefined}
+                tabIndex={stageLocked ? -1 : 0}
+                className={`overlay-radio-label de-checkbox-option${stageLocked ? ' de-checkbox-button--disabled' : ''}`}
+                onClick={(e) => {
+                  if (stageLocked) return
+                  e.stopPropagation()
+                  toggle()
                 }}
-              />
-              <span>{opt}</span>
-            </label>
-          ))}
+                onKeyDown={(e) => {
+                  if (stageLocked) return
+                  if (e.key === ' ' || e.key === 'Enter') {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    toggle()
+                  }
+                }}
+              >
+                <CheckboxGlyph checked={isSel} />
+                <span>{opt}</span>
+              </span>
+            )
+          })}
         </div>
       )
       break
