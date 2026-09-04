@@ -931,14 +931,16 @@ function fieldTypeLabel(type) {
 }
 
 /** Read-only audit lines (same facts as the on-field info popover). */
-function FieldAuditDetails({ entry, formatTs, correctionRef }) {
+function FieldAuditDetails({ entry, formatTs, correctionRef, showRecordedBy = false }) {
   if (!isFieldEntryObject(entry)) return null
   const enteredAt = entry.enteredAt
   const lockedAt = entry.lockedAt
+  const recordedBy = entry.recordedBy
   const corrs = Array.isArray(entry.corrections) ? entry.corrections : []
   const show =
     enteredAt ||
     lockedAt ||
+    (showRecordedBy && recordedBy != null && recordedBy !== '') ||
     corrs.length > 0 ||
     correctionRef != null
   if (!show) return null
@@ -955,6 +957,12 @@ function FieldAuditDetails({ entry, formatTs, correctionRef }) {
         <div className="de-field-panel-row">
           <span className="de-field-panel-k">Submitted / locked</span>
           <span className="de-field-panel-v">{formatTs(lockedAt)}</span>
+        </div>
+      )}
+      {showRecordedBy && attributionName(recordedBy) !== '' && (
+        <div className="de-field-panel-row">
+          <span className="de-field-panel-k">Recorded by</span>
+          <span className="de-field-panel-v">{attributionName(recordedBy)}</span>
         </div>
       )}
       {correctionRef != null && (
@@ -1334,7 +1342,12 @@ function FieldDetailPanel({
           </div>
         )}
 
-        <FieldAuditDetails entry={entry} formatTs={formatTs} correctionRef={correctionRef} />
+        <FieldAuditDetails
+          entry={entry}
+          formatTs={formatTs}
+          correctionRef={correctionRef}
+          showRecordedBy={!batchReadOnly}
+        />
 
         <div className="de-field-panel-actions">
           {canSubmit && onLockField && (
