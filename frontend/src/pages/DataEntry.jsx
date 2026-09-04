@@ -935,12 +935,10 @@ function FieldAuditDetails({ entry, formatTs, correctionRef }) {
   if (!isFieldEntryObject(entry)) return null
   const enteredAt = entry.enteredAt
   const lockedAt = entry.lockedAt
-  const recordedBy = entry.recordedBy
   const corrs = Array.isArray(entry.corrections) ? entry.corrections : []
   const show =
     enteredAt ||
     lockedAt ||
-    (recordedBy != null && recordedBy !== '') ||
     corrs.length > 0 ||
     correctionRef != null
   if (!show) return null
@@ -957,12 +955,6 @@ function FieldAuditDetails({ entry, formatTs, correctionRef }) {
         <div className="de-field-panel-row">
           <span className="de-field-panel-k">Submitted / locked</span>
           <span className="de-field-panel-v">{formatTs(lockedAt)}</span>
-        </div>
-      )}
-      {attributionName(recordedBy) !== '' && (
-        <div className="de-field-panel-row">
-          <span className="de-field-panel-k">Recorded by</span>
-          <span className="de-field-panel-v">{attributionName(recordedBy)}</span>
         </div>
       )}
       {correctionRef != null && (
