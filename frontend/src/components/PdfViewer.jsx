@@ -128,6 +128,10 @@ const PdfViewer = forwardRef(function PdfViewer(
               onRenderSuccess={onRenderSuccess}
               loading={null}
               renderTextLayer={false}
+              // The template's own AcroForm widgets (e.g. checkbox fields) otherwise
+              // render as native "[x]" marks under our overlay — visible in print.
+              // All data entry uses the overlay, so the PDF annotation layer is unused.
+              renderAnnotationLayer={false}
             />
           </Document>
           {canvasSize.width > 0 && canvasSize.height > 0 && (
