@@ -1757,31 +1757,32 @@ function OverlayField({
       break
     case 'checkbox': {
       const chk = value === true || value === 'true' || value === 1
+      // The whole field box toggles (not just the small glyph), so clicking
+      // anywhere in a checkbox field flips it instead of opening the panel.
       input = (
-        <div className="overlay-checkbox-wrap overlay-checkbox-wrap--compact">
-          <span
-            role="checkbox"
-            aria-checked={chk}
-            aria-label={field.label || 'Checkbox'}
-            aria-disabled={stageLocked || undefined}
-            tabIndex={stageLocked ? -1 : 0}
-            className={`de-checkbox-button${stageLocked ? ' de-checkbox-button--disabled' : ''}`}
-            onClick={(e) => {
-              if (stageLocked) return
+        <div
+          className={`overlay-checkbox-wrap overlay-checkbox-wrap--compact de-checkbox-fieldtoggle${stageLocked ? ' de-checkbox-button--disabled' : ''}`}
+          role="checkbox"
+          aria-checked={chk}
+          aria-label={field.label || 'Checkbox'}
+          aria-disabled={stageLocked || undefined}
+          tabIndex={stageLocked ? -1 : 0}
+          onClick={(e) => {
+            if (stageLocked) return
+            e.stopPropagation()
+            onChange(field.id, !chk)
+          }}
+          onKeyDown={(e) => {
+            if (stageLocked) return
+            // Space toggles; leave Enter to bubble up and submit/lock the field.
+            if (e.key === ' ') {
+              e.preventDefault()
               e.stopPropagation()
               onChange(field.id, !chk)
-            }}
-            onKeyDown={(e) => {
-              if (stageLocked) return
-              if (e.key === ' ' || e.key === 'Enter') {
-                e.preventDefault()
-                e.stopPropagation()
-                onChange(field.id, !chk)
-              }
-            }}
-          >
-            <CheckboxGlyph checked={chk} />
-          </span>
+            }
+          }}
+        >
+          <CheckboxGlyph checked={chk} />
         </div>
       )
       break
