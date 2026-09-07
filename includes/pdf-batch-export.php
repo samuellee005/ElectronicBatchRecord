@@ -627,6 +627,85 @@ function ebr_pdf_wrap_lines($pdf, $text, $maxW) {
 }
 
 /**
+ * Draw a radio field's options as circles (filled when selected) + labels,
+ * matching the on-screen overlay. Vertical stack by default; horizontal wraps
+ * across rows. Options that don't fit the box height are dropped.
+ */
+function ebr_pdf_draw_radio_options_in_box($pdf, $field, $x, $y, $fw, $fh, $selected) {
+    $options = (isset($field['options']) && is_array($field['options'])) ? $field['options'] : [];
+    if ($options === []) {
+        return;
+    }
+    $sel = (string) $selected;
+    $horizontal = (($field['optionLayout'] ?? '') === 'horizontal');
+
+    $fontPt = 8.0;
+    $pdf->SetFont('Helvetica', '', $fontPt);
+    $lineH = $fontPt * 1.15;
+    $glyph = min(9.0, $lineH);   // circle diameter
+    $r = $glyph / 2.0;
+    $gap = 3.0;                  // circle-to-label gap
+    $colGap = 10.0;              // gap between horizontal options
+    $rowH = max($glyph, $lineH) + 2.0;
+    $pad = 1.5;
+
+    $drawDot = function ($ccx, $ccy, $isSel) use ($pdf, $r) {
+        $pdf->SetDrawColor(26, 26, 26);
+        $pdf->Circle($ccx, $ccy, $r, 'D');
+        if ($isSel) {
+            $pdf->SetFillColor(26, 26, 26);
+            $pdf->Circle($ccx, $ccy, $r * 0.5, 'F');
+            $pdf->SetFillColor(255, 255, 255);
+        }
+    };
+
+    $pdf->SetLineWidth(0.5);
+
+    if (!$horizontal) {
+        $cy = $y + $pad;
+        foreach ($options as $opt) {
+            if ($cy + $rowH > $y + $fh + 0.5) {
+                break;
+            }
+            $opt = (string) $opt;
+            $ccy = $cy + $rowH / 2.0;
+            $drawDot($x + $pad + $r, $ccy, $opt === $sel && $sel !== '');
+            $labelX = $x + $pad + $glyph + $gap;
+            $labelW = max(1.0, (float) $fw - ($labelX - $x) - $pad);
+            $label = $opt;
+            while ($label !== '' && $pdf->GetStringWidth($label) > $labelW) {
+                $label = substr($label, 0, -1);
+            }
+            $pdf->SetXY($labelX, $ccy - $lineH / 2.0);
+            $pdf->Cell($labelW, $lineH, $label, 0, 0, 'L');
+            $cy += $rowH;
+        }
+    } else {
+        $cx = $x + $pad;
+        $cy = $y + $pad;
+        foreach ($options as $opt) {
+            $opt = (string) $opt;
+            $labelW = $pdf->GetStringWidth($opt);
+            if ($cx > $x + $pad && $cx + $glyph + $gap + $labelW > $x + (float) $fw - $pad) {
+                $cx = $x + $pad;
+                $cy += $rowH;
+            }
+            if ($cy + $rowH > $y + $fh + 0.5) {
+                break;
+            }
+            $ccy = $cy + $rowH / 2.0;
+            $drawDot($cx + $r, $ccy, $opt === $sel && $sel !== '');
+            $pdf->SetXY($cx + $glyph + $gap, $ccy - $lineH / 2.0);
+            $pdf->Cell($labelW + 0.5, $lineH, $opt, 0, 0, 'L');
+            $cx += $glyph + $gap + $labelW + $colGap;
+        }
+    }
+
+    $pdf->SetLineWidth(0.567);
+    $pdf->SetDrawColor(0, 0, 0);
+}
+
+/**
  * Draw a field value inside its box, auto-fitting to the box.
  *
  * Starts from the field's own "Input font size" (the px set in the builder,
@@ -657,6 +736,12 @@ function ebr_pdf_draw_field_value_in_box($pdf, $field, $x, $y, $fw, $fh, $val, $
         }
         $pdf->SetLineWidth(0.567); // FPDF default (0.2mm)
         $pdf->SetDrawColor(0, 0, 0);
+        return;
+    }
+    if ($type === 'radio') {
+        // Draw each option as a circle (filled when selected) + label, matching
+        // the on-screen overlay, instead of just the selected value as text.
+        ebr_pdf_draw_radio_options_in_box($pdf, $field, $x, $y, $fw, $fhUse, $val);
         return;
     }
     if ($val === '') {
