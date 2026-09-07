@@ -627,35 +627,54 @@ function ebr_pdf_wrap_lines($pdf, $text, $maxW) {
 }
 
 /**
- * Draw a radio field's options as circles (filled when selected) + labels,
- * matching the on-screen overlay. Vertical stack by default; horizontal wraps
- * across rows. Options that don't fit the box height are dropped.
+ * Draw a radio / multi-select field's options as glyphs + labels, matching the
+ * on-screen overlay: circles with a filled dot for radios ($shape 'circle'),
+ * squares with a check for multi-selects ($shape 'square'). $selected is the set
+ * of chosen option strings. Vertical stack by default; horizontal wraps across
+ * rows. Options that don't fit the box height are dropped.
  */
-function ebr_pdf_draw_radio_options_in_box($pdf, $field, $x, $y, $fw, $fh, $selected) {
+function ebr_pdf_draw_choice_options_in_box($pdf, $field, $x, $y, $fw, $fh, $selected, $shape = 'circle') {
     $options = (isset($field['options']) && is_array($field['options'])) ? $field['options'] : [];
     if ($options === []) {
         return;
     }
-    $sel = (string) $selected;
+    $selectedSet = [];
+    foreach ((array) $selected as $s) {
+        $s = (string) $s;
+        if ($s !== '') {
+            $selectedSet[$s] = true;
+        }
+    }
     $horizontal = (($field['optionLayout'] ?? '') === 'horizontal');
 
     $fontPt = 8.0;
     $pdf->SetFont('Helvetica', '', $fontPt);
     $lineH = $fontPt * 1.15;
-    $glyph = min(9.0, $lineH);   // circle diameter
+    $glyph = min(9.0, $lineH);   // glyph box size
     $r = $glyph / 2.0;
-    $gap = 3.0;                  // circle-to-label gap
+    $gap = 3.0;                  // glyph-to-label gap
     $colGap = 10.0;              // gap between horizontal options
     $rowH = max($glyph, $lineH) + 2.0;
     $pad = 1.5;
 
-    $drawDot = function ($ccx, $ccy, $isSel) use ($pdf, $r) {
+    // Draw the glyph with its top-left at ($gx, $gy).
+    $drawGlyph = function ($gx, $gy, $isSel) use ($pdf, $shape, $glyph, $r) {
         $pdf->SetDrawColor(26, 26, 26);
-        $pdf->Circle($ccx, $ccy, $r, 'D');
-        if ($isSel) {
-            $pdf->SetFillColor(26, 26, 26);
-            $pdf->Circle($ccx, $ccy, $r * 0.5, 'F');
-            $pdf->SetFillColor(255, 255, 255);
+        if ($shape === 'square') {
+            $pdf->Rect($gx, $gy, $glyph, $glyph, 'D');
+            if ($isSel) {
+                $pdf->SetLineWidth(0.9);
+                $pdf->Line($gx + $glyph * 0.22, $gy + $glyph * 0.52, $gx + $glyph * 0.42, $gy + $glyph * 0.74);
+                $pdf->Line($gx + $glyph * 0.42, $gy + $glyph * 0.74, $gx + $glyph * 0.80, $gy + $glyph * 0.26);
+                $pdf->SetLineWidth(0.5);
+            }
+        } else {
+            $pdf->Circle($gx + $r, $gy + $r, $r, 'D');
+            if ($isSel) {
+                $pdf->SetFillColor(26, 26, 26);
+                $pdf->Circle($gx + $r, $gy + $r, $r * 0.5, 'F');
+                $pdf->SetFillColor(255, 255, 255);
+            }
         }
     };
 
@@ -668,15 +687,15 @@ function ebr_pdf_draw_radio_options_in_box($pdf, $field, $x, $y, $fw, $fh, $sele
                 break;
             }
             $opt = (string) $opt;
-            $ccy = $cy + $rowH / 2.0;
-            $drawDot($x + $pad + $r, $ccy, $opt === $sel && $sel !== '');
+            $gy = $cy + ($rowH - $glyph) / 2.0;
+            $drawGlyph($x + $pad, $gy, isset($selectedSet[$opt]));
             $labelX = $x + $pad + $glyph + $gap;
             $labelW = max(1.0, (float) $fw - ($labelX - $x) - $pad);
             $label = $opt;
             while ($label !== '' && $pdf->GetStringWidth($label) > $labelW) {
                 $label = substr($label, 0, -1);
             }
-            $pdf->SetXY($labelX, $ccy - $lineH / 2.0);
+            $pdf->SetXY($labelX, $cy + ($rowH - $lineH) / 2.0);
             $pdf->Cell($labelW, $lineH, $label, 0, 0, 'L');
             $cy += $rowH;
         }
@@ -693,9 +712,9 @@ function ebr_pdf_draw_radio_options_in_box($pdf, $field, $x, $y, $fw, $fh, $sele
             if ($cy + $rowH > $y + $fh + 0.5) {
                 break;
             }
-            $ccy = $cy + $rowH / 2.0;
-            $drawDot($cx + $r, $ccy, $opt === $sel && $sel !== '');
-            $pdf->SetXY($cx + $glyph + $gap, $ccy - $lineH / 2.0);
+            $gy = $cy + ($rowH - $glyph) / 2.0;
+            $drawGlyph($cx, $gy, isset($selectedSet[$opt]));
+            $pdf->SetXY($cx + $glyph + $gap, $cy + ($rowH - $lineH) / 2.0);
             $pdf->Cell($labelW + 0.5, $lineH, $opt, 0, 0, 'L');
             $cx += $glyph + $gap + $labelW + $colGap;
         }
@@ -741,7 +760,15 @@ function ebr_pdf_draw_field_value_in_box($pdf, $field, $x, $y, $fw, $fh, $val, $
     if ($type === 'radio') {
         // Draw each option as a circle (filled when selected) + label, matching
         // the on-screen overlay, instead of just the selected value as text.
-        ebr_pdf_draw_radio_options_in_box($pdf, $field, $x, $y, $fw, $fhUse, $val);
+        ebr_pdf_draw_choice_options_in_box($pdf, $field, $x, $y, $fw, $fhUse, ($val === '' ? [] : [$val]), 'circle');
+        return;
+    }
+    if ($type === 'multiselect') {
+        // Draw each option as a square (+ check when selected) + label. The value
+        // arrives here as the ", "-joined list of chosen options (see
+        // ebr_format_pdf_value), so split it back into the selected set.
+        $selectedSet = ($val === '') ? [] : array_map('trim', explode(',', $val));
+        ebr_pdf_draw_choice_options_in_box($pdf, $field, $x, $y, $fw, $fhUse, $selectedSet, 'square');
         return;
     }
     if ($val === '') {
