@@ -2224,6 +2224,9 @@ export default function DataEntry() {
   const [pdfPreviewLoading, setPdfPreviewLoading] = useState(false)
   const [pdfPreviewError, setPdfPreviewError] = useState(null)
   const [pdfPreviewFilename, setPdfPreviewFilename] = useState('batch.pdf')
+  // Page the preview should open to (captured when opened), so it starts on the
+  // page you're viewing rather than page 1 each time.
+  const [pdfPreviewPage, setPdfPreviewPage] = useState(1)
 
   const formConfigRef = useRef(null)
   formConfigRef.current = formConfig
@@ -2742,6 +2745,7 @@ export default function DataEntry() {
     if (!formConfig) return
     setPdfPreviewError(null)
     setPdfPreviewOpen(true)
+    setPdfPreviewPage(currentPage)
     setPdfPreviewLoading(true)
     setPdfPreviewUrl((prev) => {
       if (prev) URL.revokeObjectURL(prev)
@@ -2767,7 +2771,7 @@ export default function DataEntry() {
     } finally {
       setPdfPreviewLoading(false)
     }
-  }, [formConfig, formData, batchRecord])
+  }, [formConfig, formData, batchRecord, currentPage])
 
   const handleDownloadPdfFromPreview = useCallback(() => {
     if (!pdfPreviewUrl) return
@@ -3509,7 +3513,7 @@ export default function DataEntry() {
             {pdfPreviewLoading && <p className="de-pdf-preview-status">Generating PDF…</p>}
             {pdfPreviewError && <p className="de-pdf-preview-error">{pdfPreviewError}</p>}
             {pdfPreviewUrl && !pdfPreviewLoading && (
-              <iframe title="PDF preview" src={pdfPreviewUrl} className="de-pdf-preview-iframe" />
+              <iframe title="PDF preview" src={`${pdfPreviewUrl}#page=${pdfPreviewPage}`} className="de-pdf-preview-iframe" />
             )}
             <div className="de-modal-actions">
               <button type="button" className="de-modal-btn ghost" onClick={handleClosePdfPreview}>
