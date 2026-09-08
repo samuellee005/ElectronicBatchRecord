@@ -100,6 +100,9 @@ function ebr_db_form_row_to_api(array $row): array
         'updatedByUserId' => isset($row['updated_by_user_id']) ? (int) $row['updated_by_user_id'] : null,
         'collaborators' => $json('collaborators'),
         'storageFilename' => $row['storage_filename'] ?? null,
+        'department' => $row['department'] ?? '',
+        'program' => $row['program'] ?? '',
+        'formType' => $row['form_type'] ?? '',
     ];
 }
 
@@ -132,22 +135,42 @@ function ebr_db_forms_fetch_by_id(string $id): ?array
 }
 
 /**
+ * Lazy add of the grouping-category columns, so saving works even on
+ * deployments where schema.sql has not been re-applied. Idempotent.
+ */
+function ebr_db_forms_ensure_category_columns(): void
+{
+    static $done = false;
+    if ($done) {
+        return;
+    }
+    $pdo = ebr_pg_pdo();
+    $pdo->exec("ALTER TABLE ebr_forms ADD COLUMN IF NOT EXISTS department TEXT NOT NULL DEFAULT ''");
+    $pdo->exec("ALTER TABLE ebr_forms ADD COLUMN IF NOT EXISTS program TEXT NOT NULL DEFAULT ''");
+    $pdo->exec("ALTER TABLE ebr_forms ADD COLUMN IF NOT EXISTS form_type TEXT NOT NULL DEFAULT ''");
+    $done = true;
+}
+
+/**
  * @param array<string, mixed> $form API-shaped form config
  */
 function ebr_db_forms_insert_api(array $form, ?string $storageFilename): void
 {
+    ebr_db_forms_ensure_category_columns();
     $pdo = ebr_pg_pdo();
     $sql = <<<'SQL'
 INSERT INTO ebr_forms (
     id, name, description, pdf_file, fields, version, is_latest,
     source_form_ids, is_combined, audit_trail,
     created_at, updated_at, created_by, updated_by, storage_filename,
-    collaborators, created_by_user_id, updated_by_user_id
+    collaborators, created_by_user_id, updated_by_user_id,
+    department, program, form_type
 ) VALUES (
     :id, :name, :description, :pdf_file, CAST(:fields AS jsonb), :version, :is_latest,
     CAST(:source_form_ids AS jsonb), :is_combined, CAST(:audit_trail AS jsonb),
     :created_at, :updated_at, :created_by, :updated_by, :storage_filename,
-    CAST(:collaborators AS jsonb), :created_by_user_id, :updated_by_user_id
+    CAST(:collaborators AS jsonb), :created_by_user_id, :updated_by_user_id,
+    :department, :program, :form_type
 )
 SQL;
     $st = $pdo->prepare($sql);
@@ -170,6 +193,9 @@ SQL;
         'collaborators' => ebr_db_forms_json_enc($form['collaborators'] ?? []),
         'created_by_user_id' => ((int) ($form['createdByUserId'] ?? 0)) > 0 ? (int) $form['createdByUserId'] : null,
         'updated_by_user_id' => ((int) ($form['updatedByUserId'] ?? 0)) > 0 ? (int) $form['updatedByUserId'] : null,
+        'department' => (string) ($form['department'] ?? ''),
+        'program' => (string) ($form['program'] ?? ''),
+        'form_type' => (string) ($form['formType'] ?? ''),
     ]);
 }
 
@@ -180,6 +206,7 @@ SQL;
  */
 function ebr_db_forms_update_api(array $form, ?string $storageFilename): void
 {
+    ebr_db_forms_ensure_category_columns();
     $pdo = ebr_pg_pdo();
     $sql = <<<'SQL'
 UPDATE ebr_forms SET
@@ -199,7 +226,10 @@ UPDATE ebr_forms SET
     storage_filename = :storage_filename,
     collaborators = CAST(:collaborators AS jsonb),
     created_by_user_id = :created_by_user_id,
-    updated_by_user_id = :updated_by_user_id
+    updated_by_user_id = :updated_by_user_id,
+    department = :department,
+    program = :program,
+    form_type = :form_type
 WHERE id = :id
 SQL;
     $st = $pdo->prepare($sql);
@@ -222,6 +252,9 @@ SQL;
         'collaborators' => ebr_db_forms_json_enc($form['collaborators'] ?? []),
         'created_by_user_id' => ((int) ($form['createdByUserId'] ?? 0)) > 0 ? (int) $form['createdByUserId'] : null,
         'updated_by_user_id' => ((int) ($form['updatedByUserId'] ?? 0)) > 0 ? (int) $form['updatedByUserId'] : null,
+        'department' => (string) ($form['department'] ?? ''),
+        'program' => (string) ($form['program'] ?? ''),
+        'form_type' => (string) ($form['formType'] ?? ''),
     ]);
 }
 

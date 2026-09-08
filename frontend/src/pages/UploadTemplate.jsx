@@ -37,6 +37,10 @@ export default function UploadTemplate() {
   const [totalPages, setTotalPages] = useState(0)
   const pdfRef = useRef(null)
   const [uploadedFilename, setUploadedFilename] = useState(null)
+  // Grouping categories (free text), carried to the builder to pre-fill the Save modal.
+  const [department, setDepartment] = useState('')
+  const [program, setProgram] = useState('')
+  const [formType, setFormType] = useState('')
   const [detectDebugEnabled, setDetectDebugEnabled] = useState(false)
   const fileBufferRef = useRef(null)
   const detectTimerRef = useRef(null)
@@ -244,8 +248,12 @@ export default function UploadTemplate() {
   const openFormBuilder = (withSuggestions) => {
     if (!uploadedFilename) return
     const flag = withSuggestions ? '1' : '0'
+    const cat = (k, v) => (v.trim() ? `&${k}=${encodeURIComponent(v.trim())}` : '')
     navigate(
-      `/forms/builder?file=${encodeURIComponent(uploadedFilename)}&applySuggestions=${flag}`,
+      `/forms/builder?file=${encodeURIComponent(uploadedFilename)}&applySuggestions=${flag}` +
+        cat('department', department) +
+        cat('program', program) +
+        cat('formType', formType),
     )
   }
 
@@ -365,6 +373,38 @@ export default function UploadTemplate() {
           />
         </div>
         {file && <div className="file-name">Selected: {file.name}</div>}
+        <div className="upload-categories">
+          <div className="upload-category-field">
+            <label htmlFor="upload-department" className="upload-field-label">Department (optional)</label>
+            <input
+              id="upload-department"
+              type="text"
+              value={department}
+              onChange={(e) => setDepartment(e.target.value)}
+              placeholder="e.g. Manufacturing"
+            />
+          </div>
+          <div className="upload-category-field">
+            <label htmlFor="upload-program" className="upload-field-label">Program (optional)</label>
+            <input
+              id="upload-program"
+              type="text"
+              value={program}
+              onChange={(e) => setProgram(e.target.value)}
+              placeholder="e.g. Program A"
+            />
+          </div>
+          <div className="upload-category-field">
+            <label htmlFor="upload-form-type" className="upload-field-label">Form type (optional)</label>
+            <input
+              id="upload-form-type"
+              type="text"
+              value={formType}
+              onChange={(e) => setFormType(e.target.value)}
+              placeholder="e.g. Production, Purification, R&amp;D run"
+            />
+          </div>
+        </div>
         {detectLoading && (
           <div className="upload-detect-status">
             <div className="upload-detect-spinner" aria-hidden="true" />

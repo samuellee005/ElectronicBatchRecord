@@ -54,6 +54,16 @@ ALTER TABLE ebr_forms ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER;
 ALTER TABLE ebr_forms ADD COLUMN IF NOT EXISTS updated_by_user_id INTEGER;
 
 ---STATEMENT---
+-- Grouping categories (free text): used to filter the forms list.
+ALTER TABLE ebr_forms ADD COLUMN IF NOT EXISTS department TEXT NOT NULL DEFAULT '';
+
+---STATEMENT---
+ALTER TABLE ebr_forms ADD COLUMN IF NOT EXISTS program TEXT NOT NULL DEFAULT '';
+
+---STATEMENT---
+ALTER TABLE ebr_forms ADD COLUMN IF NOT EXISTS form_type TEXT NOT NULL DEFAULT '';
+
+---STATEMENT---
 CREATE TABLE IF NOT EXISTS ebr_batch_records (
     id TEXT PRIMARY KEY,
     form_id TEXT NOT NULL,

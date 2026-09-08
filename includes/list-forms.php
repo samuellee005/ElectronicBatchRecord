@@ -32,6 +32,9 @@ foreach ($all as $formData) {
         'filename' => $formData['storageFilename'] ?? ($formData['id'] . '.json'),
         'createdBy' => $formData['createdBy'] ?? null,
         'updatedBy' => $formData['updatedBy'] ?? null,
+        'department' => $formData['department'] ?? '',
+        'program' => $formData['program'] ?? '',
+        'formType' => $formData['formType'] ?? '',
     ];
 }
 

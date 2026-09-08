@@ -42,6 +42,30 @@
   font-size: 0.9rem;
 }
 
+.upload-page .upload-categories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: center;
+  max-width: min(100%, 42rem);
+  margin: 0 auto 1rem;
+}
+
+.upload-page .upload-category-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 12rem;
+  min-width: 11rem;
+}
+
+.upload-page .upload-category-field input {
+  padding: 8px 10px;
+  border: 1px solid #cfd2dc;
+  border-radius: 8px;
+  font-size: 0.9rem;
+}
+
 .upload-page .upload-file-input::file-selector-button,
 .upload-page .upload-file-input::-webkit-file-upload-button {
   padding: 12px 20px;

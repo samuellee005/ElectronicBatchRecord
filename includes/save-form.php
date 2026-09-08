@@ -43,6 +43,14 @@ if ($actorName === '') {
     exit;
 }
 
+// Grouping categories (free text). The client always resends these (pre-filled
+// when editing), so read straight from the payload.
+$formCategories = [
+    'department' => trim((string) ($formData['department'] ?? '')),
+    'program' => trim((string) ($formData['program'] ?? '')),
+    'formType' => trim((string) ($formData['formType'] ?? '')),
+];
+
 function versionToDecimal($v)
 {
     return round(floatval($v), 1);
@@ -322,6 +330,9 @@ if ($isUpdate && !$isNewVersion) {
             'auditTrail' => $auditTrail,
             'createdBy' => $oldFormConfig['createdBy'] ?? $actorName,
             'updatedBy' => $actorName,
+            'department' => $formCategories['department'],
+            'program' => $formCategories['program'],
+            'formType' => $formCategories['formType'],
         ];
 
         $oldFormConfig['isLatest'] = false;
@@ -370,6 +381,9 @@ if ($isUpdate && !$isNewVersion) {
             'auditTrail' => $auditTrail,
             'createdBy' => $oldFormConfig['createdBy'] ?? $actorName,
             'updatedBy' => $actorName,
+            'department' => $formCategories['department'],
+            'program' => $formCategories['program'],
+            'formType' => $formCategories['formType'],
         ];
 
         $oldFormConfig['isLatest'] = false;
@@ -422,6 +436,9 @@ if ($isUpdate && !$isNewVersion) {
         'auditTrail' => $auditTrail,
         'createdBy' => $actorName,
         'updatedBy' => $actorName,
+        'department' => $formCategories['department'],
+        'program' => $formCategories['program'],
+        'formType' => $formCategories['formType'],
     ];
 
     if ($isNewVersion && !empty($formData['formId'])) {

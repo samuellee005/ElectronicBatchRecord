@@ -926,6 +926,10 @@ export default function FormBuilder() {
   // the server-saved detected fields. ?applySuggestions=0 → skip modal, start
   // blank. Absent → show the start modal so the user can pick.
   const urlApplySuggestions = searchParams.get('applySuggestions')
+  // Grouping categories can be pre-filled from the upload screen via the URL.
+  const urlDepartment = searchParams.get('department') || ''
+  const urlProgram = searchParams.get('program') || ''
+  const urlFormType = searchParams.get('formType') || ''
 
   const pdfRef = useRef(null)
   const overlayRef = useRef(null)
@@ -1010,6 +1014,10 @@ export default function FormBuilder() {
   const [saveFormNameNew, setSaveFormNameNew] = useState('')
   const [saveFormNameMode, setSaveFormNameMode] = useState('select')
   const [saveDescription, setSaveDescription] = useState('')
+  // Grouping categories (free text) — pre-filled from the upload URL, editable here.
+  const [saveDepartment, setSaveDepartment] = useState(urlDepartment)
+  const [saveProgram, setSaveProgram] = useState(urlProgram)
+  const [saveFormType, setSaveFormType] = useState(urlFormType)
   const [saveUserName, setSaveUserName] = useState('')
   const [saveSelectedFormId, setSaveSelectedFormId] = useState('')
   const [saveCreateNewVersion, setSaveCreateNewVersion] = useState(false)
@@ -1360,6 +1368,9 @@ export default function FormBuilder() {
           setSourceFormIds(data.form.sourceFormIds?.length ? data.form.sourceFormIds : [urlFormId])
           setCanEditForm(data.canEdit !== false)
           setFormCollaborators(Array.isArray(data.form.collaborators) ? data.form.collaborators : [])
+          if (data.form.department) setSaveDepartment(data.form.department)
+          if (data.form.program) setSaveProgram(data.form.program)
+          if (data.form.formType) setSaveFormType(data.form.formType)
           markBaseline()
           setFields(
             normalizeFieldGroupOrder(
@@ -2369,6 +2380,9 @@ export default function FormBuilder() {
           )
           setCanEditForm(data.canEdit !== false)
           setFormCollaborators(Array.isArray(data.form.collaborators) ? data.form.collaborators : [])
+          if (data.form.department) setSaveDepartment(data.form.department)
+          if (data.form.program) setSaveProgram(data.form.program)
+          if (data.form.formType) setSaveFormType(data.form.formType)
           markBaseline()
           setFields(
             normalizeFieldGroupOrder(
@@ -2404,6 +2418,9 @@ export default function FormBuilder() {
           )
           if (match) {
             setSaveSelectedFormId(match.id)
+            setSaveDepartment(match.department || '')
+            setSaveProgram(match.program || '')
+            setSaveFormType(match.formType || '')
           }
         }
       }
@@ -2436,6 +2453,9 @@ export default function FormBuilder() {
       const body = {
         name: finalName,
         description: saveDescription.trim(),
+        department: saveDepartment.trim(),
+        program: saveProgram.trim(),
+        formType: saveFormType.trim(),
         pdfFile,
         fields,
         formId: saveSelectedFormId || null,
@@ -3900,6 +3920,60 @@ export default function FormBuilder() {
                 onChange={(e) => setSaveDescription(e.target.value)}
                 placeholder="Enter description"
               />
+            </div>
+
+            <div className="fb-form-group">
+              <label>Department (optional):</label>
+              <input
+                type="text"
+                list="fb-department-options"
+                value={saveDepartment}
+                onChange={(e) => setSaveDepartment(e.target.value)}
+                placeholder="e.g. Manufacturing"
+              />
+              <datalist id="fb-department-options">
+                {[...new Set(allFormsData.map((f) => (f.department || '').trim()).filter(Boolean))]
+                  .sort()
+                  .map((v) => (
+                    <option key={v} value={v} />
+                  ))}
+              </datalist>
+            </div>
+
+            <div className="fb-form-group">
+              <label>Program (optional):</label>
+              <input
+                type="text"
+                list="fb-program-options"
+                value={saveProgram}
+                onChange={(e) => setSaveProgram(e.target.value)}
+                placeholder="e.g. Program A"
+              />
+              <datalist id="fb-program-options">
+                {[...new Set(allFormsData.map((f) => (f.program || '').trim()).filter(Boolean))]
+                  .sort()
+                  .map((v) => (
+                    <option key={v} value={v} />
+                  ))}
+              </datalist>
+            </div>
+
+            <div className="fb-form-group">
+              <label>Form type (optional):</label>
+              <input
+                type="text"
+                list="fb-form-type-options"
+                value={saveFormType}
+                onChange={(e) => setSaveFormType(e.target.value)}
+                placeholder="e.g. Production, Purification, R&D run"
+              />
+              <datalist id="fb-form-type-options">
+                {[...new Set(allFormsData.map((f) => (f.formType || '').trim()).filter(Boolean))]
+                  .sort()
+                  .map((v) => (
+                    <option key={v} value={v} />
+                  ))}
+              </datalist>
             </div>
 
             <div className="fb-form-group">
