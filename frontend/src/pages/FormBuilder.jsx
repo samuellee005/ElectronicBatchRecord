@@ -52,7 +52,10 @@ const COMPONENT_TYPES = [
   { type: 'signature', Icon: PencilIcon, name: 'Signature' },
   { type: 'radio', Icon: StopCircleIcon, name: 'Radio Group' },
   { type: 'multiselect', Icon: Squares2X2Icon, name: 'Multi Select' },
-  { type: 'collaborator', Icon: UserGroupIcon, name: 'Collaborator' },
+  // Hidden from the palette for now: collaborators are captured when a batch is
+  // created/started, so a dedicated form component isn't needed. `hidden` keeps
+  // the type meta available for any existing forms that already use it.
+  { type: 'collaborator', Icon: UserGroupIcon, name: 'Collaborator', hidden: true },
   { type: 'table', Icon: TableCellsIcon, name: 'Data Table' },
 ]
 
@@ -3220,7 +3223,7 @@ export default function FormBuilder() {
                     <p className="fb-drag-hint">Drag onto the PDF to add a field.</p>
                   )}
                   <div className="fb-palette-list">
-                    {COMPONENT_TYPES.map((c) => {
+                    {COMPONENT_TYPES.filter((c) => !c.hidden).map((c) => {
                       const Icon = c.Icon
                       return (
                         <div

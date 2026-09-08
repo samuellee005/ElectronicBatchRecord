@@ -2964,24 +2964,52 @@ export default function DataEntry() {
                 No accounts on the roster yet. Add people under User administration first.
               </p>
             ) : (
-              <div className="de-collab-picker" role="group" aria-labelledby="batch-collab-label">
-                {rosterOptions.map((u) => (
-                  <label key={u.dbUserId} className="de-collab-picker-item">
-                    <input
-                      type="checkbox"
-                      checked={newBatchCollaboratorIds.includes(u.dbUserId)}
-                      onChange={(e) =>
-                        setNewBatchCollaboratorIds((prev) =>
-                          e.target.checked
-                            ? [...prev, u.dbUserId]
-                            : prev.filter((x) => x !== u.dbUserId),
-                        )
-                      }
-                    />
-                    <span className="de-collab-picker-name">{u.displayName}</span>
-                    <span className="de-collab-picker-user">{u.username}</span>
-                  </label>
-                ))}
+              <div className="de-collab-picker-field">
+                <select
+                  className="de-collab-picker-select"
+                  aria-labelledby="batch-collab-label"
+                  value=""
+                  onChange={(e) => {
+                    const u = rosterOptions.find((x) => String(x.dbUserId) === e.target.value)
+                    if (!u) return
+                    setNewBatchCollaboratorIds((prev) =>
+                      prev.includes(u.dbUserId) ? prev : [...prev, u.dbUserId],
+                    )
+                  }}
+                >
+                  <option value="">Add a collaborator…</option>
+                  {rosterOptions
+                    .filter((u) => !newBatchCollaboratorIds.includes(u.dbUserId))
+                    .map((u) => (
+                      <option key={u.dbUserId} value={String(u.dbUserId)}>
+                        {u.displayName}{u.username ? ` (${u.username})` : ''}
+                      </option>
+                    ))}
+                </select>
+                {newBatchCollaboratorIds.length > 0 && (
+                  <ul className="de-collab-chips">
+                    {newBatchCollaboratorIds.map((id) => {
+                      const u = rosterOptions.find((x) => x.dbUserId === id)
+                      if (!u) return null
+                      const label = u.displayName || u.username
+                      return (
+                        <li key={id} className="de-collab-chip">
+                          <span className="de-collab-chip-name">{label}</span>
+                          <button
+                            type="button"
+                            className="de-collab-chip-remove"
+                            aria-label={`Remove ${label}`}
+                            onClick={() =>
+                              setNewBatchCollaboratorIds((prev) => prev.filter((x) => x !== id))
+                            }
+                          >
+                            ×
+                          </button>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                )}
               </div>
             )}
           </div>
