@@ -4,9 +4,15 @@
 .search-box:focus { outline: none; border-color: #667eea; }
 .batch-table-wrapper { overflow-x: auto; border-radius: 8px; border: 1px solid #e0e0e0; background: #fff; }
 
-/* In progress / Completed: table is width-balanced so Actions stays on-screen (no horizontal scroll). */
+/*
+ * In progress / Completed: table is width-balanced (fixed layout, cells clip
+ * their own text) so it never overflows horizontally. Keep overflow visible so
+ * the absolutely-positioned Actions menu can pop out over the row instead of
+ * being trapped in a scroll container (overflow-x: hidden would force
+ * overflow-y: auto, which grows the row instead of overlaying).
+ */
 .batch-table-wrapper--records {
-  overflow-x: hidden;
+  overflow: visible;
   min-width: 0;
 }
 .batch-table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
