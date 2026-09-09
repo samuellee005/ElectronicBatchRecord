@@ -154,7 +154,7 @@ if (isset($formData['collaborators']) && is_array($formData['collaborators'])) {
     $collaboratorsToStore = $existingForm['collaborators'];
 }
 
-function compareFields($oldFields, $newFields, $userName)
+function compareFields($oldFields, $newFields, $userName, $version = null)
 {
     $auditEntries = [];
     $oldFieldsMap = [];
@@ -255,10 +255,17 @@ function compareFields($oldFields, $newFields, $userName)
         }
     }
 
+    if ($version !== null) {
+        foreach ($auditEntries as &$e) {
+            $e['version'] = $version;
+        }
+        unset($e);
+    }
+
     return $auditEntries;
 }
 
-function generateInitialAuditTrail($fields, $userName)
+function generateInitialAuditTrail($fields, $userName, $version = null)
 {
     $auditEntries = [];
     foreach ($fields as $field) {
@@ -274,6 +281,13 @@ function generateInitialAuditTrail($fields, $userName)
                 'size' => ['width' => $field['width'] ?? 0, 'height' => $field['height'] ?? 0],
             ],
         ];
+    }
+
+    if ($version !== null) {
+        foreach ($auditEntries as &$e) {
+            $e['version'] = $version;
+        }
+        unset($e);
     }
 
     return $auditEntries;
@@ -312,8 +326,9 @@ if ($isUpdate && !$isNewVersion) {
             'user' => $actorName,
             'timestamp' => date('c'),
             'versionChange' => $oldVersion . ' → ' . number_format($newVersion, 1),
+            'version' => number_format($newVersion, 1),
         ];
-        $auditTrail = array_merge($auditTrail, generateInitialAuditTrail($formData['fields'] ?? [], $actorName));
+        $auditTrail = array_merge($auditTrail, generateInitialAuditTrail($formData['fields'] ?? [], $actorName, number_format($newVersion, 1)));
 
         $formConfig = [
             'id' => uniqid('form_'),
@@ -353,7 +368,7 @@ if ($isUpdate && !$isNewVersion) {
 
         $oldFields = $oldFormConfig['fields'] ?? [];
         $newFields = $formData['fields'] ?? [];
-        $fieldChanges = compareFields($oldFields, $newFields, $actorName);
+        $fieldChanges = compareFields($oldFields, $newFields, $actorName, number_format($newVersion, 1));
 
         $auditTrail = $formConfig['auditTrail'] ?? [];
         $auditTrail = array_merge($auditTrail, $fieldChanges);
@@ -364,6 +379,7 @@ if ($isUpdate && !$isNewVersion) {
             'user' => $actorName,
             'timestamp' => date('c'),
             'reason' => 'Field modifications',
+            'version' => number_format($newVersion, 1),
         ];
 
         $formConfig = [
@@ -419,7 +435,7 @@ if ($isUpdate && !$isNewVersion) {
 
     $storageFilename = $sanitizedName . '_v' . number_format($version, 1) . '_' . time() . '.json';
 
-    $auditTrail = generateInitialAuditTrail($formData['fields'] ?? [], $actorName);
+    $auditTrail = generateInitialAuditTrail($formData['fields'] ?? [], $actorName, number_format($version, 1));
 
     $formConfig = [
         'id' => uniqid('form_'),

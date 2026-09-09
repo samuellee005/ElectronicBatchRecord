@@ -189,6 +189,9 @@ export default function FormAudit() {
                   <th className="form-audit-th form-audit-th--num" scope="col">
                     #
                   </th>
+                  <th className="form-audit-th form-audit-th--version" scope="col">
+                    Version
+                  </th>
                   <th className="form-audit-th form-audit-th--when" scope="col">
                     When
                   </th>
@@ -210,6 +213,9 @@ export default function FormAudit() {
                 {auditBlocks.map((b, i) => (
                   <tr key={b.key}>
                     <td className="form-audit-td form-audit-td--num">{i + 1}</td>
+                    <td className="form-audit-td form-audit-td--version">
+                      {b.raw?.version ? `v${b.raw.version}` : '—'}
+                    </td>
                     <td className="form-audit-td form-audit-td--when">
                       <span className="form-audit-time" title={b.at}>
                         {b.at}
