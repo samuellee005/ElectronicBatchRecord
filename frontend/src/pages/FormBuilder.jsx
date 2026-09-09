@@ -1495,10 +1495,19 @@ export default function FormBuilder() {
         else undo()
         return
       }
-      if (e.key === 'Delete' && selectedFieldIds.size > 0) {
-        const toRemove = new Set(selectedFieldIds)
-        setFields((prev) => normalizeFieldGroupOrder(prev.filter((f) => !toRemove.has(f.id))))
-        setSelectedFieldIds(new Set())
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedFieldIds.size > 0) {
+        const tag = e.target?.tagName
+        const editing =
+          tag === 'INPUT' ||
+          tag === 'TEXTAREA' ||
+          tag === 'SELECT' ||
+          e.target?.isContentEditable
+        if (!editing) {
+          e.preventDefault()
+          const toRemove = new Set(selectedFieldIds)
+          setFields((prev) => normalizeFieldGroupOrder(prev.filter((f) => !toRemove.has(f.id))))
+          setSelectedFieldIds(new Set())
+        }
       }
       // Cmd/Ctrl + C copies the currently-selected fields onto an
       // in-app clipboard. Ignored when the user is typing in an input
@@ -1622,6 +1631,15 @@ export default function FormBuilder() {
       next.delete(id)
       return next
     })
+  }, [])
+
+  // Remove every currently-selected field in one step (keyboard Delete/Backspace
+  // and the "Delete selected" button both use this).
+  const deleteSelectedFields = useCallback(() => {
+    const ids = new Set(selectedFieldIdsRef.current)
+    if (ids.size === 0) return
+    setFields((prev) => normalizeFieldGroupOrder(prev.filter((f) => !ids.has(f.id))))
+    setSelectedFieldIds(new Set())
   }, [])
 
   // Mint a fresh field id with the same shape `addField` uses.
@@ -2914,6 +2932,14 @@ export default function FormBuilder() {
           {selectedFieldIds.size > 1 && (
             <span className="fb-selection-count" title="Selected fields">
               {selectedFieldIds.size} selected
+              <button
+                type="button"
+                className="fb-selection-delete"
+                onClick={deleteSelectedFields}
+                title="Delete selected fields (Delete)"
+              >
+                Delete
+              </button>
             </span>
           )}
           <button
