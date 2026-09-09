@@ -2321,3 +2321,23 @@
   font-size: 0.72rem;
   color: #8a93a3;
 }
+
+/* Calculated number field editor */
+.fb-calc-editor { border: 1px solid #e2e2ea; border-radius: 8px; padding: 10px 12px; background: #fafbff; }
+.fb-calc-toggle { display: flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; }
+.fb-calc-toggle input { accent-color: #667eea; }
+.fb-calc-body { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.fb-calc-refs-head { display: flex; align-items: center; justify-content: space-between; font-size: 0.82rem; color: #555; font-weight: 600; }
+.fb-calc-add { border: 1px solid #c5c9d6; background: #fff; border-radius: 6px; padding: 3px 8px; font-size: 0.78rem; cursor: pointer; color: #4c5fb1; font-weight: 600; }
+.fb-calc-add:hover { border-color: #667eea; }
+.fb-calc-hint { margin: 0; font-size: 0.8rem; color: #888; }
+.fb-calc-ref-row { display: flex; align-items: center; gap: 8px; }
+.fb-calc-token { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; height: 24px; padding: 0 6px; border-radius: 6px; background: #667eea; color: #fff; font-weight: 700; font-size: 0.8rem; }
+.fb-calc-ref-row select { flex: 1; min-width: 0; }
+.fb-calc-remove { border: none; background: #eee; color: #666; border-radius: 50%; width: 22px; height: 22px; cursor: pointer; font-size: 15px; line-height: 1; flex-shrink: 0; }
+.fb-calc-remove:hover { background: #e5484d; color: #fff; }
+.fb-calc-formula-label { font-size: 0.82rem; font-weight: 600; color: #555; }
+.fb-calc-formula { font-family: ui-monospace, Menlo, Consolas, monospace; }
+.fb-calc-status { font-size: 0.8rem; font-weight: 600; }
+.fb-calc-status.ok { color: #1a8a4b; }
+.fb-calc-status.err { color: #c93b40; }

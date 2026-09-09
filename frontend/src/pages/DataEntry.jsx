@@ -18,6 +18,7 @@ import {
   endCollabPresence,
 } from '../api/client'
 import { useUserPrefs } from '../context/UserPrefsContext'
+import { evaluateFormula } from '../utils/formula'
 import './DataEntry.css'
 import { buildTableMergeLayout, tableCellKey } from '../utils/tableMergeLayout'
 import { tableColWidthPx, tableRowHeightPx } from '../utils/tableFieldDims'
@@ -96,6 +97,39 @@ function addCorrection(entry, newValue, correctedBy, correctedAt) {
 function isRequired(field) {
   const v = field.required
   return v === true || v === 'true' || v === 1
+}
+
+/** Whether a field is a configured calculated (formula) number field. */
+function isCalcField(field) {
+  return field?.type === 'number' && field?.calc?.enabled === true
+}
+
+/**
+ * Compute a calculated number field from the current entries.
+ * Every referenced field must be *submitted* (locked) and numeric before the
+ * cell takes a value. Returns { status: 'ok'|'awaiting'|'unconfigured'|'error', value?, error? }.
+ */
+function computeCalcField(field, allFields, formData) {
+  const calc = field?.calc
+  if (!calc?.enabled) return { status: 'unconfigured' }
+  const refs = Array.isArray(calc.refs) ? calc.refs : []
+  if (refs.length === 0 || String(calc.formula || '').trim() === '') return { status: 'unconfigured' }
+  const values = {}
+  for (const r of refs) {
+    if (!r.fieldId) return { status: 'unconfigured' }
+    const entry = formData[r.fieldId]
+    if (!isFieldEntryLocked(entry)) return { status: 'awaiting' }
+    const raw = getEffectiveValue(entry)
+    const num = Number(raw)
+    if (raw === '' || raw == null || !Number.isFinite(num)) return { status: 'awaiting' }
+    values[r.token] = num
+  }
+  try {
+    const value = evaluateFormula(calc.formula, values)
+    return { status: 'ok', value: Math.round(value * 1e6) / 1e6 }
+  } catch (e) {
+    return { status: 'error', error: e.message }
+  }
 }
 
 /** Local (not UTC) YYYY-MM-DD for the date field's "Today" shortcut. */
@@ -1081,6 +1115,16 @@ function FieldDetailPanel({
         )
         break
       case 'number':
+        if (isCalcField(field)) {
+          const has = editSourceValue !== '' && editSourceValue != null
+          valueEditor = (
+            <div className="de-calc-readonly">
+              <span>{has ? `${editSourceValue}${field.unit ? ' ' + field.unit : ''}` : 'Awaiting inputs'}</span>
+              <span className="de-calc-badge">Calculated</span>
+            </div>
+          )
+          break
+        }
         valueEditor = field.unit ? (
           <div className="unit-input-group">
             <input
@@ -1704,6 +1748,15 @@ function OverlayField({
       )
       break
     case 'number':
+      if (isCalcField(field)) {
+        const has = value !== '' && value != null
+        input = (
+          <div className="overlay-calc-readonly" title="Calculated field">
+            {has ? `${value}${field.unit ? ' ' + field.unit : ''}` : 'Awaiting inputs'}
+          </div>
+        )
+        break
+      }
       input = field.unit ? (
         <div className="unit-input-group">
           <input
@@ -2104,6 +2157,36 @@ export default function DataEntry() {
   const formDataEffective = useMemo(() => {
     if (!formConfig?.fields) return {}
     return Object.fromEntries(formConfig.fields.map(f => [f.id, getEffectiveValue(formData[f.id])]))
+  }, [formConfig, formData])
+
+  // Auto-fill calculated number fields once their referenced fields are
+  // submitted; recompute (and log a correction) when a source value changes.
+  useEffect(() => {
+    const fields = formConfig?.fields
+    if (!fields) return
+    const calcFields = fields.filter(isCalcField)
+    if (calcFields.length === 0) return
+    setFormData((prev) => {
+      let changed = false
+      const next = { ...prev }
+      for (const f of calcFields) {
+        const res = computeCalcField(f, fields, prev)
+        if (res.status !== 'ok') continue
+        const existing = prev[f.id]
+        const curr = getEffectiveValue(existing)
+        const currNum = curr === '' || curr == null ? null : Number(curr)
+        if (currNum != null && Number.isFinite(currNum) && Math.abs(currNum - res.value) < 1e-9) {
+          continue // unchanged
+        }
+        if (existing == null || curr === '' || curr == null) {
+          next[f.id] = normalizeEntry(existing, res.value, { setEnteredAt: true })
+        } else {
+          next[f.id] = addCorrection(existing, res.value, 'Auto-calculated (formula)', new Date().toISOString())
+        }
+        changed = true
+      }
+      return changed ? next : prev
+    })
   }, [formConfig, formData])
 
   const stages = useMemo(() => buildStages(formConfig?.fields), [formConfig])

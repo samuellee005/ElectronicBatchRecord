@@ -36,6 +36,7 @@ import {
 import { useUserPrefs } from '../context/UserPrefsContext'
 import { useAuth } from '../context/AuthContext'
 import { pageDesignSize } from '../utils/pdfDesignCoords'
+import { validateFormula } from '../utils/formula'
 import { buildTableMergeLayout, tableCellKey } from '../utils/tableMergeLayout'
 import { DEFAULT_TABLE_COL_WIDTH, DEFAULT_TABLE_ROW_HEIGHT, tableColWidthPx, tableRowHeightPx } from '../utils/tableFieldDims'
 import { FORM_FIELD_DEFAULTS, DEFAULT_INPUT_FONT_PX } from '../utils/formFieldDefaults'
@@ -4303,6 +4304,122 @@ function OptionsEditor({ field, onUpdate }) {
   )
 }
 
+/** Token (A, B, … Z, A1, …) for a reference slot; stable per ref once assigned. */
+function calcTokenForIndex(i) {
+  const letter = String.fromCharCode(65 + (i % 26))
+  const suffix = i >= 26 ? String(Math.floor(i / 26)) : ''
+  return letter + suffix
+}
+
+/**
+ * Calculated-number config: pick source number fields (each gets a token) and
+ * write a formula referencing those tokens. Live-validates that the formula
+ * yields a number. Stored on `field.calc = { enabled, refs:[{fieldId, token}], formula }`.
+ */
+function NumberCalcEditor({ field, fields, onUpdate }) {
+  const calc = field.calc || { enabled: false, refs: [], formula: '' }
+  const refs = Array.isArray(calc.refs) ? calc.refs : []
+  const numberFields = fields.filter(
+    (f) => f.type === 'number' && f.id !== field.id && !f.calc?.enabled,
+  )
+  const setCalc = (patch) => onUpdate({ calc: { ...calc, ...patch } })
+
+  const labelForField = (id) => {
+    const f = fields.find((x) => x.id === id)
+    if (!f) return '(deleted field)'
+    const st = (f.stageInProcess || '').trim()
+    return (f.label || 'Field') + (st ? ` — ${st}` : '')
+  }
+
+  const addRef = () => {
+    const used = new Set(refs.map((r) => r.token))
+    let token = 'A'
+    for (let i = 0; i < 200; i++) {
+      const t = calcTokenForIndex(i)
+      if (!used.has(t)) {
+        token = t
+        break
+      }
+    }
+    setCalc({ refs: [...refs, { fieldId: '', token }] })
+  }
+  const updateRef = (i, fieldId) =>
+    setCalc({ refs: refs.map((r, idx) => (idx === i ? { ...r, fieldId } : r)) })
+  const removeRef = (i) => setCalc({ refs: refs.filter((_, idx) => idx !== i) })
+
+  const tokens = refs.map((r) => r.token)
+  const validation = validateFormula(calc.formula || '', tokens)
+  const refsComplete = refs.length > 0 && refs.every((r) => r.fieldId)
+
+  return (
+    <div className="fb-form-group fb-calc-editor">
+      <label className="fb-calc-toggle">
+        <input
+          type="checkbox"
+          checked={!!calc.enabled}
+          onChange={(e) => setCalc({ enabled: e.target.checked })}
+        />
+        Calculated field (read-only, auto-filled from a formula)
+      </label>
+
+      {calc.enabled && (
+        <div className="fb-calc-body">
+          <div className="fb-calc-refs-head">
+            <span>References (submitted number fields)</span>
+            <button type="button" className="fb-calc-add" onClick={addRef}>
+              + Add reference
+            </button>
+          </div>
+          {refs.length === 0 && (
+            <p className="fb-calc-hint">Add the number fields this cell calculates from.</p>
+          )}
+          {refs.map((r, i) => (
+            <div key={i} className="fb-calc-ref-row">
+              <span className="fb-calc-token">{r.token}</span>
+              <select value={r.fieldId || ''} onChange={(e) => updateRef(i, e.target.value)}>
+                <option value="">— Select a number field —</option>
+                {numberFields.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {labelForField(f.id)}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="fb-calc-remove"
+                onClick={() => removeRef(i)}
+                aria-label={`Remove reference ${r.token}`}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+
+          <label className="fb-calc-formula-label">Formula</label>
+          <input
+            type="text"
+            className="fb-calc-formula"
+            value={calc.formula || ''}
+            onChange={(e) => setCalc({ formula: e.target.value })}
+            placeholder={refs.length ? `e.g. (${tokens[0]} - ${tokens[1] || tokens[0]}) / ${tokens[0]} * 100` : 'Add references first'}
+          />
+          <small className="fb-hint">
+            Use the tokens above with + − * / ( ) and min, max, round, abs, sqrt.
+          </small>
+          {(calc.formula || '').trim() !== '' && (
+            <div className={`fb-calc-status ${validation.ok ? 'ok' : 'err'}`}>
+              {validation.ok ? '✓ Formula produces a value' : `✕ ${validation.error}`}
+            </div>
+          )}
+          {!refsComplete && (
+            <div className="fb-calc-status err">✕ Every reference must point to a number field.</div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function PropertiesForm({ field, existingStages, fields, onRenameStage, onUpdate }) {
   const [stageMode, setStageMode] = useState(
     field.stageInProcess && !existingStages.includes(field.stageInProcess) ? 'new' : 'select',
@@ -4656,6 +4773,10 @@ function PropertiesForm({ field, existingStages, fields, onRenameStage, onUpdate
             ))}
           </select>
         </div>
+      )}
+
+      {field.type === 'number' && (
+        <NumberCalcEditor field={field} fields={fields} onUpdate={onUpdate} />
       )}
 
       {(field.type === 'dropdown' || field.type === 'radio' || field.type === 'multiselect') && (

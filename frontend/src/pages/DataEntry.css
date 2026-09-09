@@ -3640,3 +3640,33 @@ button.de-signature-correction-link {
 .de-field-panel-today:hover {
   background: rgba(102, 126, 234, 0.22);
 }
+
+/* Calculated (formula) number fields render read-only */
+.overlay-calc-readonly {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  font-size: 0.85rem;
+  color: #333;
+  font-variant-numeric: tabular-nums;
+}
+.de-calc-readonly {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  font-size: 0.95rem;
+  color: #222;
+}
+.de-calc-badge {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #4c5fb1;
+  background: rgba(102, 126, 234, 0.14);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
