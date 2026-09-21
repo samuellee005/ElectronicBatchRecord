@@ -61,6 +61,7 @@ export function describeAuditChange(c) {
   if (f === 'stageInProcess') return `Stage: ${str(c.old)} → ${str(c.new)}`
   if (f === 'stageOrder') return `Stage order: ${str(c.old)} → ${str(c.new)}`
   if (f === 'page') return `Page: ${str(c.old)} → ${str(c.new)}`
+  if (f === 'calc') return `Formula: ${str(c.old)} → ${str(c.new)}`
   return `${f}: ${str(c.old)} → ${str(c.new)}`
 }
 

@@ -154,6 +154,44 @@ if (isset($formData['collaborators']) && is_array($formData['collaborators'])) {
     $collaboratorsToStore = $existingForm['collaborators'];
 }
 
+/**
+ * Comparable shape of a field's calculated-value config (formula, references,
+ * on/off), or null when the field is not calculated. Only these keys count, so
+ * key order or unrelated props never register as a change.
+ */
+function normalizeCalc($field)
+{
+    $calc = $field['calc'] ?? null;
+    if (!is_array($calc) || empty($calc['enabled'])) {
+        return null;
+    }
+    $refs = [];
+    foreach (($calc['refs'] ?? []) as $r) {
+        $refs[] = [(string)($r['token'] ?? ''), (string)($r['fieldId'] ?? '')];
+    }
+    return ['formula' => trim((string)($calc['formula'] ?? '')), 'refs' => $refs];
+}
+
+/**
+ * Readable summary of a field's calc config for the audit trail, with each
+ * reference named by the label it had in the same form version:
+ * "A + B (A = Mass, B = Volume)", or "Off".
+ */
+function describeCalc($field, $fieldsMap)
+{
+    $calc = normalizeCalc($field);
+    if ($calc === null) {
+        return 'Off';
+    }
+    $names = [];
+    foreach ($calc['refs'] as [$token, $fieldId]) {
+        $label = $fieldId === '' ? '(unset)' : ($fieldsMap[$fieldId]['label'] ?? '(deleted field)');
+        $names[] = $token . ' = ' . $label;
+    }
+    $formula = $calc['formula'] !== '' ? $calc['formula'] : '(no formula)';
+    return $names ? $formula . ' (' . implode(', ', $names) . ')' : $formula;
+}
+
 function compareFields($oldFields, $newFields, $userName, $version = null)
 {
     $auditEntries = [];
@@ -240,6 +278,13 @@ function compareFields($oldFields, $newFields, $userName, $version = null)
                 if ($oldVal !== $newVal) {
                     $changes[] = ['field' => $prop, 'old' => $oldVal, 'new' => $newVal];
                 }
+            }
+            if (normalizeCalc($oldField) !== normalizeCalc($newField)) {
+                $changes[] = [
+                    'field' => 'calc',
+                    'old' => describeCalc($oldField, $oldFieldsMap),
+                    'new' => describeCalc($newField, $newFieldsMap),
+                ];
             }
             if (!empty($changes)) {
                 $auditEntries[] = [
