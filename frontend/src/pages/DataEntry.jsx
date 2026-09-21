@@ -106,22 +106,42 @@ function isCalcField(field) {
 
 /**
  * Compute a calculated number field from the current entries.
- * Every referenced field must be *submitted* (locked) and numeric before the
- * cell takes a value. Returns { status: 'ok'|'awaiting'|'unconfigured'|'error', value?, error? }.
+ *
+ * A manually entered reference must be *submitted* (locked) and numeric before
+ * the cell takes a value. A reference that is itself calculated is never locked
+ * — it auto-fills — so it is resolved recursively instead, and counts as ready
+ * once it computes. The value used downstream is the rounded one the source
+ * cell displays, so a chain always reconciles with what is on screen.
+ *
+ * `seen` guards against a cyclic form (the builder cannot create one, but an
+ * imported or hand-edited definition could).
+ * Returns { status: 'ok'|'awaiting'|'unconfigured'|'error', value?, error? }.
  */
-function computeCalcField(field, allFields, formData) {
+function computeCalcField(field, allFields, formData, seen) {
   const calc = field?.calc
   if (!calc?.enabled) return { status: 'unconfigured' }
   const refs = Array.isArray(calc.refs) ? calc.refs : []
   if (refs.length === 0 || String(calc.formula || '').trim() === '') return { status: 'unconfigured' }
+  if (seen?.has(field.id)) return { status: 'error', error: 'Circular reference' }
+  const chain = new Set(seen || [])
+  chain.add(field.id)
   const values = {}
   for (const r of refs) {
     if (!r.fieldId) return { status: 'unconfigured' }
-    const entry = formData[r.fieldId]
-    if (!isFieldEntryLocked(entry)) return { status: 'awaiting' }
-    const raw = getEffectiveValue(entry)
-    const num = Number(raw)
-    if (raw === '' || raw == null || !Number.isFinite(num)) return { status: 'awaiting' }
+    const refField = (allFields || []).find((f) => f.id === r.fieldId)
+    let num
+    if (isCalcField(refField)) {
+      const upstream = computeCalcField(refField, allFields, formData, chain)
+      if (upstream.status === 'error') return upstream
+      if (upstream.status !== 'ok') return { status: 'awaiting' }
+      num = upstream.value
+    } else {
+      const entry = formData[r.fieldId]
+      if (!isFieldEntryLocked(entry)) return { status: 'awaiting' }
+      const raw = getEffectiveValue(entry)
+      num = Number(raw)
+      if (raw === '' || raw == null || !Number.isFinite(num)) return { status: 'awaiting' }
+    }
     values[r.token] = num
   }
   try {
@@ -2161,6 +2181,8 @@ export default function DataEntry() {
 
   // Auto-fill calculated number fields once their referenced fields are
   // submitted; recompute (and log a correction) when a source value changes.
+  // Each field resolves its own references recursively, so a chain of
+  // calculated fields settles in this single pass regardless of field order.
   useEffect(() => {
     const fields = formConfig?.fields
     if (!fields) return

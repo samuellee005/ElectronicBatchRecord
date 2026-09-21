@@ -36,7 +36,7 @@ import {
 import { useUserPrefs } from '../context/UserPrefsContext'
 import { useAuth } from '../context/AuthContext'
 import { pageDesignSize } from '../utils/pdfDesignCoords'
-import { validateFormula } from '../utils/formula'
+import { validateFormula, calcIneligibleRefs } from '../utils/formula'
 import { buildTableMergeLayout, tableCellKey } from '../utils/tableMergeLayout'
 import { DEFAULT_TABLE_COL_WIDTH, DEFAULT_TABLE_ROW_HEIGHT, tableColWidthPx, tableRowHeightPx } from '../utils/tableFieldDims'
 import { FORM_FIELD_DEFAULTS, DEFAULT_INPUT_FONT_PX } from '../utils/formFieldDefaults'
@@ -4319,16 +4319,19 @@ function calcTokenForIndex(i) {
 function NumberCalcEditor({ field, fields, onUpdate }) {
   const calc = field.calc || { enabled: false, refs: [], formula: '' }
   const refs = Array.isArray(calc.refs) ? calc.refs : []
-  const numberFields = fields.filter(
-    (f) => f.type === 'number' && f.id !== field.id && !f.calc?.enabled,
-  )
+  // A calculated field may read other calculated fields, so the only number
+  // fields kept out of the picker are this one and anything that already
+  // depends on it — those would close a cycle.
+  const ineligible = calcIneligibleRefs(field.id, fields)
+  const numberFields = fields.filter((f) => f.type === 'number' && !ineligible.has(f.id))
   const setCalc = (patch) => onUpdate({ calc: { ...calc, ...patch } })
 
   const labelForField = (id) => {
     const f = fields.find((x) => x.id === id)
     if (!f) return '(deleted field)'
     const st = (f.stageInProcess || '').trim()
-    return (f.label || 'Field') + (st ? ` — ${st}` : '')
+    const calcMark = f.calc?.enabled ? ' (calculated)' : ''
+    return (f.label || 'Field') + calcMark + (st ? ` — ${st}` : '')
   }
 
   const addRef = () => {
@@ -4365,13 +4368,16 @@ function NumberCalcEditor({ field, fields, onUpdate }) {
       {calc.enabled && (
         <div className="fb-calc-body">
           <div className="fb-calc-refs-head">
-            <span>References (submitted number fields)</span>
+            <span>References (number fields)</span>
             <button type="button" className="fb-calc-add" onClick={addRef}>
               + Add reference
             </button>
           </div>
           {refs.length === 0 && (
-            <p className="fb-calc-hint">Add the number fields this cell calculates from.</p>
+            <p className="fb-calc-hint">
+              Add the number fields this cell calculates from. Other calculated
+              fields are allowed — they resolve first.
+            </p>
           )}
           {refs.map((r, i) => (
             <div key={i} className="fb-calc-ref-row">

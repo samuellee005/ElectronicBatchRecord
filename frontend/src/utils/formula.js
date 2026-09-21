@@ -181,3 +181,41 @@ export function validateFormula(formula, allowedTokens) {
     return { ok: false, error: e.message || 'Invalid formula.' }
   }
 }
+
+/* ---------------- calculated-field dependency graph ---------------- */
+
+/** Resolved references of a configured calculated field: [{ fieldId, token }]. */
+function calcRefsOf(field) {
+  if (!field || field.type !== 'number' || field.calc?.enabled !== true) return []
+  const refs = field.calc.refs
+  return Array.isArray(refs) ? refs.filter((r) => r && r.fieldId) : []
+}
+
+/**
+ * Ids a calculated field must not reference: itself, plus every field that
+ * already depends on it (directly or through other calculated fields) —
+ * picking one of those would close a cycle.
+ *
+ * Walks the reverse graph from `fieldId`, so it is cycle-safe and visits each
+ * field at most once.
+ */
+export function calcIneligibleRefs(fieldId, fields) {
+  const dependents = new Map() // field id -> ids of calc fields reading it
+  for (const f of fields || []) {
+    for (const r of calcRefsOf(f)) {
+      const list = dependents.get(r.fieldId)
+      if (list) list.push(f.id)
+      else dependents.set(r.fieldId, [f.id])
+    }
+  }
+  const out = new Set([fieldId])
+  const stack = [fieldId]
+  while (stack.length) {
+    for (const dep of dependents.get(stack.pop()) || []) {
+      if (out.has(dep)) continue
+      out.add(dep)
+      stack.push(dep)
+    }
+  }
+  return out
+}
