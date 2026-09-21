@@ -2341,3 +2341,73 @@
 .fb-calc-status { font-size: 0.8rem; font-weight: 600; }
 .fb-calc-status.ok { color: #1a8a4b; }
 .fb-calc-status.err { color: #c93b40; }
+
+/* Stage selection + Stage properties panel */
+.fb-stage-block-header--selectable:hover {
+  background: linear-gradient(180deg, #e9ecf7 0%, #e0e4f2 100%);
+}
+
+.fb-stage-block-header--selectable:focus-visible {
+  outline: 2px solid #667eea;
+  outline-offset: -2px;
+}
+
+.fb-stage-block-header.is-selected {
+  background: linear-gradient(180deg, #e3e7fb 0%, #d7ddf8 100%);
+  box-shadow: inset 3px 0 0 #667eea;
+}
+
+.fb-stage-block-gate {
+  font-size: 0.66rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #9a3412;
+  background: #ffedd5;
+  padding: 2px 6px;
+  border-radius: 999px;
+}
+
+.fb-stage-order-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fb-stage-order-row input {
+  width: 6rem;
+}
+
+.fb-stage-order-of {
+  font-size: 0.85rem;
+  color: #6b7280;
+}
+
+.fb-stage-summary {
+  margin: 0 0 8px;
+  font-size: 0.85rem;
+  color: #374151;
+}
+
+.fb-stage-bulk-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.fb-stage-bulk-btn {
+  padding: 6px 12px;
+  font-size: 0.82rem;
+  background: #fff;
+  color: #374151;
+  border: 1px solid #d1d5db;
+}
+
+.fb-stage-bulk-btn:hover:not(:disabled) {
+  background: #f3f4f6;
+}
+
+.fb-stage-bulk-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

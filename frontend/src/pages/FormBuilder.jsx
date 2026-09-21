@@ -37,6 +37,7 @@ import { useUserPrefs } from '../context/UserPrefsContext'
 import { useAuth } from '../context/AuthContext'
 import { pageDesignSize } from '../utils/pdfDesignCoords'
 import { validateFormula, calcIneligibleRefs } from '../utils/formula'
+import { isStageGate, stageRequiredForJoin } from '../utils/stageSettings'
 import { buildTableMergeLayout, tableCellKey } from '../utils/tableMergeLayout'
 import { DEFAULT_TABLE_COL_WIDTH, DEFAULT_TABLE_ROW_HEIGHT, tableColWidthPx, tableRowHeightPx } from '../utils/tableFieldDims'
 import { FORM_FIELD_DEFAULTS, DEFAULT_INPUT_FONT_PX } from '../utils/formFieldDefaults'
@@ -371,6 +372,7 @@ function applyFieldGroupPlacement(prev, fieldId, newKey, orderedIds, oldKey, pat
       }
       if (!nk) {
         const o = { ...f, orderInGroup: og, stageInProcess: '', stageOrder: null }
+        delete o.stageRequired
         return patch && Object.keys(patch).length ? { ...o, ...patch } : o
       }
       const peer = prev.find(
@@ -382,7 +384,12 @@ function applyFieldGroupPlacement(prev, fieldId, newKey, orderedIds, oldKey, pat
           : peer != null && Number.isFinite(Number(peer.stageOrder))
             ? Number(peer.stageOrder)
             : nextUnusedStageOrder(prev.filter((x) => x.id !== fieldId))
-      const o = { ...f, orderInGroup: og, stageInProcess: nk, stageOrder: so }
+      // Joining a stage takes on its settings; a brand-new stage starts optional.
+      const sr =
+        patch && patch.stageRequired !== undefined
+          ? patch.stageRequired
+          : stageRequiredForJoin(prev, nk, fieldId)
+      const o = { ...f, orderInGroup: og, stageInProcess: nk, stageOrder: so, stageRequired: sr }
       if (patch && Object.keys(patch).length) {
         const p = { ...o, ...patch, orderInGroup: og, stageInProcess: nk }
         if (patch.stageOrder != null) p.stageOrder = patch.stageOrder
@@ -1031,6 +1038,9 @@ export default function FormBuilder() {
   // Inline rename of a stage name in the sidebar (double-click the title).
   const [editingStageName, setEditingStageName] = useState(null)
   const [stageNameDraft, setStageNameDraft] = useState('')
+  // Stage whose properties are open in the right panel (click a stage header).
+  // Mutually exclusive with a field selection.
+  const [selectedStageName, setSelectedStageName] = useState(null)
   // Multi-select of stage pills (Ctrl/Cmd+click, Shift range, marquee) + context menu.
   const [selectedPillIds, setSelectedPillIds] = useState(() => new Set())
   const selectedPillIdsRef = useRef(selectedPillIds)
@@ -1581,7 +1591,7 @@ export default function FormBuilder() {
       width: config.width,
       height: config.height,
       label: config.label,
-      required: true,
+      required: false,
       stageInProcess: '',
       stageOrder: null,
       placeholder: config.placeholder || '',
@@ -1887,6 +1897,12 @@ export default function FormBuilder() {
       if (k && !stageOrders.has(k)) stageOrders.set(k, Number(f.stageOrder) || 9999)
     }
     let nextStageOrder = nextUnusedStageOrder(fields)
+    // A stage this form already has keeps its own settings; a stage that comes
+    // in new keeps the setting it had in the source form.
+    const stageGates = new Map()
+    for (const k of stageOrders.keys()) {
+      stageGates.set(k, isStageGate(fields.filter((f) => stageKey(f) === k)))
+    }
     const groupMax = new Map()
     for (const f of fields) {
       const k = stageKey(f)
@@ -1918,8 +1934,10 @@ export default function FormBuilder() {
           nextStageOrder += 1
         }
         clone.stageOrder = stageOrders.get(k)
+        if (stageGates.has(k)) clone.stageRequired = stageGates.get(k)
       } else {
         clone.stageOrder = null
+        delete clone.stageRequired
       }
       const n = (groupMax.get(k) || 0) + 1
       groupMax.set(k, n)
@@ -2365,7 +2383,10 @@ export default function FormBuilder() {
       container.removeEventListener('scroll', onScroll)
       if (rafId != null) cancelAnimationFrame(rafId)
       setCanvasMarquee(null)
-      if (!moved && !additive) setSelectedFieldIds(new Set())
+      if (!moved && !additive) {
+        setSelectedFieldIds(new Set())
+        setSelectedStageName(null)
+      }
     }
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
@@ -2519,6 +2540,46 @@ export default function FormBuilder() {
   const existingStages = useMemo(() => buildOrderedStageNames(fields), [fields])
   const unassignedFields = useMemo(() => sortFieldsInGroupList(fields, ''), [fields])
 
+  // Selecting a field hands the properties panel back to it; a stage that no
+  // longer exists (all its fields moved or deleted, or undo) drops out.
+  useEffect(() => {
+    if (selectedFieldIds.size > 0) setSelectedStageName(null)
+  }, [selectedFieldIds])
+  useEffect(() => {
+    if (selectedStageName && !existingStages.includes(selectedStageName)) setSelectedStageName(null)
+  }, [existingStages, selectedStageName])
+
+  const selectStage = useCallback((stageName) => {
+    setSelectedFieldIds(new Set())
+    setSelectedPillIds(new Set())
+    setSelectedStageName(stageName)
+  }, [])
+
+  // Move a stage to 1-based position `position` in the completion order.
+  const moveStageToPosition = useCallback((stageName, position) => {
+    setFields((prev) => {
+      const list = buildOrderedStageNames(prev)
+      const from = list.indexOf(stageName)
+      const to = Math.min(Math.max(1, Math.round(Number(position)) || 1), list.length) - 1
+      if (from < 0 || from === to) return prev
+      return applyStageNameOrderToFields(reorderStringArray(list, from, to))(prev)
+    })
+  }, [])
+
+  // Apply `patch` to every field in a stage — one undo step.
+  const updateStageFields = useCallback((stageName, patch) => {
+    setFields((prev) => {
+      let changed = false
+      const next = prev.map((f) => {
+        if (stageKey(f) !== stageName) return f
+        if (Object.keys(patch).every((k) => f[k] === patch[k])) return f
+        changed = true
+        return { ...f, ...patch }
+      })
+      return changed ? next : prev
+    })
+  }, [])
+
   // Field ids whose data label is shared by another field in the same group —
   // flagged in the builder so a duplicate is a deliberate choice (repeats get a
   // separate "(2)" column in Data Search rather than being merged).
@@ -2600,6 +2661,9 @@ export default function FormBuilder() {
     const to = String(newName || '').trim()
     if (!from || !to || from === to) return
     setFields((prev) => {
+      // Merging into a stage that already exists adopts that stage's settings.
+      const target = prev.filter((f) => stageKey(f) === to)
+      const gate = target.length ? isStageGate(target) : null
       const renamed = prev.map((f) =>
         stageKey(f) === from ? { ...f, stageInProcess: to } : f,
       )
@@ -2610,12 +2674,16 @@ export default function FormBuilder() {
           if (Number.isFinite(n) && n > 0 && (so === null || n < so)) so = n
         }
       }
-      const unified =
-        so === null
-          ? renamed
-          : renamed.map((f) => (stageKey(f) === to ? { ...f, stageOrder: so } : f))
+      const unified = renamed.map((f) => {
+        if (stageKey(f) !== to) return f
+        let n = f
+        if (so !== null && n.stageOrder !== so) n = { ...n, stageOrder: so }
+        if (gate !== null && n.stageRequired !== gate) n = { ...n, stageRequired: gate }
+        return n
+      })
       return normalizeFieldGroupOrder(unified)
     })
+    setSelectedStageName((cur) => (cur === from ? to : cur))
   }, [])
 
   const commitStageRename = useCallback(
@@ -3113,7 +3181,23 @@ export default function FormBuilder() {
                             }}
                           >
                             <div
-                              className="fb-stage-block-header"
+                              className={`fb-stage-block-header fb-stage-block-header--selectable${
+                                selectedStageName === stageName ? ' is-selected' : ''
+                              }`}
+                              role="button"
+                              tabIndex={0}
+                              aria-pressed={selectedStageName === stageName}
+                              title="Click for stage properties · double-click the name to rename · drag to reorder"
+                              onClick={() => {
+                                if (editingStageName !== stageName) selectStage(stageName)
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.target !== e.currentTarget) return
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault()
+                                  selectStage(stageName)
+                                }
+                              }}
                               draggable={editingStageName !== stageName}
                               onDragStart={(e) => {
                                 e.stopPropagation()
@@ -3147,7 +3231,7 @@ export default function FormBuilder() {
                               ) : (
                                 <span
                                   className="fb-stage-block-title"
-                                  title="Double-click to rename this stage (updates every field in it)"
+                                  title="Click for stage properties · double-click to rename (updates every field in it)"
                                   onDoubleClick={(e) => {
                                     e.stopPropagation()
                                     setEditingStageName(stageName)
@@ -3155,6 +3239,14 @@ export default function FormBuilder() {
                                   }}
                                 >
                                   {stageName}
+                                </span>
+                              )}
+                              {isStageGate(inStage) && (
+                                <span
+                                  className="fb-stage-block-gate"
+                                  title="Must be completed before later stages"
+                                >
+                                  Required
                                 </span>
                               )}
                               <span className="fb-stage-block-count">{inStage.length}</span>
@@ -3468,8 +3560,8 @@ export default function FormBuilder() {
           </div>
         </div>
 
-        {/* Properties Panel - only visible when a field is selected; collapsible like components */}
-        {selectedField && (
+        {/* Properties Panel - visible when a field or a stage is selected; collapsible like components */}
+        {(selectedField || selectedStageName) && (
           <div
             className={`fb-properties-panel${propertiesPanelCollapsed ? ' fb-properties-panel-collapsed' : ''}${
               propertiesPanelResizing ? ' fb-properties-panel--resizing' : ''
@@ -3510,14 +3602,31 @@ export default function FormBuilder() {
                   onTouchStart={onPropertiesResizePointerDown}
                 />
                 <div className="fb-properties-panel-content">
-                  <h2 className="fb-properties-panel-title">Properties</h2>
-                  <PropertiesForm
-                    field={selectedField}
-                    existingStages={existingStages}
-                    fields={fields}
-                    onRenameStage={renameStage}
-                    onUpdate={(updates) => updateField(selectedField.id, updates)}
-                  />
+                  {selectedField ? (
+                    <>
+                      <h2 className="fb-properties-panel-title">Properties</h2>
+                      <PropertiesForm
+                        field={selectedField}
+                        existingStages={existingStages}
+                        fields={fields}
+                        onRenameStage={renameStage}
+                        onOpenStage={selectStage}
+                        onUpdate={(updates) => updateField(selectedField.id, updates)}
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <h2 className="fb-properties-panel-title">Stage properties</h2>
+                      <StagePropertiesForm
+                        stageName={selectedStageName}
+                        existingStages={existingStages}
+                        fields={fields}
+                        onRename={renameStage}
+                        onMove={moveStageToPosition}
+                        onUpdateStageFields={updateStageFields}
+                      />
+                    </>
+                  )}
                 </div>
               </>
             )}
@@ -4426,7 +4535,130 @@ function NumberCalcEditor({ field, fields, onUpdate }) {
   )
 }
 
-function PropertiesForm({ field, existingStages, fields, onRenameStage, onUpdate }) {
+/**
+ * Right-panel settings for one stage (opened by clicking a stage header in the
+ * Stages list). Every change is written to all the stage's fields so the stage
+ * stays one block — see utils/stageSettings.js.
+ */
+function StagePropertiesForm({ stageName, existingStages, fields, onRename, onMove, onUpdateStageFields }) {
+  const inStage = useMemo(() => fields.filter((f) => stageKey(f) === stageName), [fields, stageName])
+  const position = existingStages.indexOf(stageName) + 1
+  const gate = isStageGate(inStage)
+  const requiredCount = inStage.filter((f) => f.required === true).length
+
+  // Name and order hold free text while typing and commit on blur / Enter;
+  // both resync when the stage (or its position) changes underneath them.
+  const [nameDraft, setNameDraft] = useState(stageName)
+  const [orderDraft, setOrderDraft] = useState(String(position))
+  const [synced, setSynced] = useState({ stageName, position })
+  if (synced.stageName !== stageName || synced.position !== position) {
+    setSynced({ stageName, position })
+    setNameDraft(stageName)
+    setOrderDraft(String(position))
+  }
+
+  const commitName = () => {
+    const v = nameDraft.trim()
+    if (v && v !== stageName) onRename(stageName, v)
+    else setNameDraft(stageName)
+  }
+  const commitOrder = () => {
+    const n = parseInt(orderDraft, 10)
+    if (Number.isFinite(n) && n !== position) onMove(stageName, n)
+    else setOrderDraft(String(position))
+  }
+
+  return (
+    <div className="fb-properties-form">
+      <div className="fb-form-group">
+        <label>Stage name:</label>
+        <input
+          type="text"
+          value={nameDraft}
+          onChange={(e) => setNameDraft(e.target.value)}
+          onBlur={commitName}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur() }
+            else if (e.key === 'Escape') { e.preventDefault(); setNameDraft(stageName) }
+          }}
+        />
+        <small className="fb-hint">
+          Renames the stage on every field in it. Using another stage&apos;s name merges the two.
+        </small>
+      </div>
+
+      <div className="fb-form-group">
+        <label>Completion order:</label>
+        <div className="fb-stage-order-row">
+          <input
+            type="number"
+            min={1}
+            max={existingStages.length}
+            value={orderDraft}
+            onChange={(e) => setOrderDraft(e.target.value)}
+            onBlur={commitOrder}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur() }
+            }}
+          />
+          <span className="fb-stage-order-of">of {existingStages.length}</span>
+        </div>
+        <small className="fb-hint">
+          Where this stage sits in the process. The other stages shift to make room (same as dragging
+          it in the Stages list).
+        </small>
+      </div>
+
+      <div className="fb-form-group">
+        <label className="fb-checkbox-label">
+          <input
+            type="checkbox"
+            checked={gate}
+            onChange={(e) => onUpdateStageFields(stageName, { stageRequired: e.target.checked })}
+          />
+          Must be completed before later stages
+        </label>
+        <small className="fb-hint">
+          When on, later stages stay locked in data entry until every Required field in this stage has
+          been submitted. When off, analysts can work ahead.
+        </small>
+        {gate && requiredCount === 0 && (
+          <small className="fb-dup-label-warn">
+            This stage has no Required fields, so it won&apos;t block anything yet. Mark the fields that
+            must be filled as Required.
+          </small>
+        )}
+      </div>
+
+      <div className="fb-form-group">
+        <label>Fields:</label>
+        <p className="fb-stage-summary">
+          {inStage.length} field{inStage.length === 1 ? '' : 's'} · {requiredCount} required
+        </p>
+        <div className="fb-stage-bulk-row">
+          <button
+            type="button"
+            className="fb-btn fb-stage-bulk-btn"
+            disabled={requiredCount === inStage.length}
+            onClick={() => onUpdateStageFields(stageName, { required: true })}
+          >
+            Make all required
+          </button>
+          <button
+            type="button"
+            className="fb-btn fb-stage-bulk-btn"
+            disabled={requiredCount === 0}
+            onClick={() => onUpdateStageFields(stageName, { required: false })}
+          >
+            Make all optional
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function PropertiesForm({ field, existingStages, fields, onRenameStage, onOpenStage, onUpdate }) {
   const [stageMode, setStageMode] = useState(
     field.stageInProcess && !existingStages.includes(field.stageInProcess) ? 'new' : 'select',
   )
@@ -4449,7 +4681,6 @@ function PropertiesForm({ field, existingStages, fields, onRenameStage, onUpdate
     setRenameValue((field.stageInProcess || '').trim())
   }, [field.id, field.stageInProcess, existingStages])
 
-  const suggestedNextOrder = useMemo(() => nextUnusedStageOrder(fields), [fields])
   const hasDuplicateLabel = useMemo(() => {
     const lbl = String(field.label || '').trim().toLowerCase()
     if (!lbl) return false
@@ -4645,15 +4876,20 @@ function PropertiesForm({ field, existingStages, fields, onRenameStage, onUpdate
         <input
           type="number"
           value={field.stageOrder ?? ''}
-          placeholder={String(suggestedNextOrder)}
-          onChange={(e) =>
-            onUpdate({ stageOrder: e.target.value === '' ? null : parseInt(e.target.value, 10) })
-          }
+          readOnly
+          className="fb-disabled-input"
         />
-        <small className="fb-hint">
-          Sequential order (1, 2, 3…). Choosing a stage sets this automatically: same number as other
-          fields in that stage, or the next free number for a new stage (placeholder shows the next free).
-        </small>
+        {inExistingStage && onOpenStage ? (
+          <button
+            type="button"
+            className="fb-link-btn"
+            onClick={() => onOpenStage(currentStage)}
+          >
+            Edit “{currentStage}” stage settings (order, required before later stages)
+          </button>
+        ) : (
+          <small className="fb-hint">Set by the stage. Choose a stage above to give this field one.</small>
+        )}
       </div>
 
       <div className="fb-form-group">

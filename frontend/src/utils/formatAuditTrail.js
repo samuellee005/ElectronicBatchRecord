@@ -6,6 +6,7 @@ const EVENT_TYPE_LABELS = {
   component_added: 'Field added',
   component_removed: 'Field removed',
   component_modified: 'Field updated',
+  stage_modified: 'Stage updated',
   pdf_changed: 'PDF changed',
   version_updated: 'Version saved',
 }
@@ -62,6 +63,10 @@ export function describeAuditChange(c) {
   if (f === 'stageOrder') return `Stage order: ${str(c.old)} → ${str(c.new)}`
   if (f === 'page') return `Page: ${str(c.old)} → ${str(c.new)}`
   if (f === 'calc') return `Formula: ${str(c.old)} → ${str(c.new)}`
+  if (f === 'stageRequired') {
+    const yn = (v) => (v ? 'Yes' : 'No')
+    return `Must be completed before later stages: ${yn(c.old)} → ${yn(c.new)}`
+  }
   return `${f}: ${str(c.old)} → ${str(c.new)}`
 }
 
@@ -120,6 +125,15 @@ export function formatAuditEntryBlock(entry) {
       ...base,
       headline: `Updated field: "${label}" (${typ})`,
       bodyLines,
+    }
+  }
+
+  if (type === 'stage_modified') {
+    const changes = Array.isArray(entry.changes) ? entry.changes : []
+    return {
+      ...base,
+      headline: `Updated stage: "${entry.stageName || 'Unnamed'}"`,
+      bodyLines: changes.map((c) => (c && typeof c === 'object' ? describeAuditChange(c) : String(c))),
     }
   }
 

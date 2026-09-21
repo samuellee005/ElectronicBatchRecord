@@ -22,6 +22,7 @@ import { evaluateFormula } from '../utils/formula'
 import './DataEntry.css'
 import { buildTableMergeLayout, tableCellKey } from '../utils/tableMergeLayout'
 import { tableColWidthPx, tableRowHeightPx } from '../utils/tableFieldDims'
+import { isStageGate } from '../utils/stageSettings'
 
 /** Default matches FormBuilder `DEFAULT_INPUT_FONT_PX` when `inputFontSize` is unset. */
 const OVERLAY_DEFAULT_INPUT_FONT_PX = 13
@@ -572,6 +573,20 @@ function isFieldValueFilled(field, value) {
   return value !== undefined && value !== null && value !== '' && (typeof value !== 'string' || value.trim() !== '')
 }
 
+/**
+ * A Required field counts toward completing its stage (and the batch record)
+ * only once its value is submitted: locked by the analyst or by the idle
+ * auto-lock. Calculated fields never lock — they fill from submitted inputs —
+ * so a value is enough. Plain (non-object) values come from records saved
+ * before entries were locked and count as submitted.
+ */
+function isFieldDone(field, entry) {
+  if (isDisplayOnlyField(field)) return true
+  if (!isFieldValueFilled(field, getEffectiveValue(entry))) return false
+  if (isCalcField(field) || !isFieldEntryObject(entry)) return true
+  return isFieldEntryLocked(entry)
+}
+
 function buildStages(fields) {
   if (!fields || fields.length === 0) return []
   const map = {}
@@ -586,6 +601,7 @@ function buildStages(fields) {
     }
     map[name].fields.push(f)
   })
+  for (const s of Object.values(map)) s.gate = isStageGate(s.fields)
   return Object.values(map).sort((a, b) => {
     if (a.order != null && b.order != null) return a.order - b.order
     if (a.order != null) return -1
@@ -594,10 +610,11 @@ function buildStages(fields) {
   })
 }
 
+/** `formData` holds raw entries (not effective values) so submission can be checked. */
 function computeStageCompletion(stages, formData) {
   const comp = {}
   stages.forEach(s => {
-    comp[s.stage] = s.fields.every(f => !isRequired(f) || isFieldValueFilled(f, formData[f.id]))
+    comp[s.stage] = s.fields.every(f => !isRequired(f) || isFieldDone(f, formData[f.id]))
   })
   return comp
 }
@@ -686,19 +703,21 @@ function useCorrectionRefs(fields, formData, currentPage) {
   }, [fields, formData, currentPage])
 }
 
+/** Locked while any earlier ordered stage that is set to "must be completed" is not done. */
 function isStageAccessible(stage, stages, stageCompletion) {
   if (stage.order == null) return true
   for (const prev of stages) {
-    if (prev.order != null && prev.order < stage.order && !stageCompletion[prev.stage]) {
+    if (prev.gate && prev.order != null && prev.order < stage.order && !stageCompletion[prev.stage]) {
       return false
     }
   }
   return true
 }
 
+/** `formData` holds raw entries, as for computeStageCompletion. */
 function allRequiredFilled(fields, formData) {
   if (!fields) return true
-  return fields.every(f => !isRequired(f) || isFieldValueFilled(f, formData[f.id]))
+  return fields.every(f => !isRequired(f) || isFieldDone(f, formData[f.id]))
 }
 
 // ─── Signature Pad ───────────────────────────────────────────────────────────
@@ -2173,12 +2192,6 @@ export default function DataEntry() {
     return () => document.documentElement.classList.remove('de-data-entry-print-host')
   }, [])
 
-  // Derived data: effective values for validation (handles audit object shape)
-  const formDataEffective = useMemo(() => {
-    if (!formConfig?.fields) return {}
-    return Object.fromEntries(formConfig.fields.map(f => [f.id, getEffectiveValue(formData[f.id])]))
-  }, [formConfig, formData])
-
   // Auto-fill calculated number fields once their referenced fields are
   // submitted; recompute (and log a correction) when a source value changes.
   // Each field resolves its own references recursively, so a chain of
@@ -2212,8 +2225,8 @@ export default function DataEntry() {
   }, [formConfig, formData])
 
   const stages = useMemo(() => buildStages(formConfig?.fields), [formConfig])
-  const stageCompletion = useMemo(() => computeStageCompletion(stages, formDataEffective), [stages, formDataEffective])
-  const canComplete = useMemo(() => allRequiredFilled(formConfig?.fields, formDataEffective), [formConfig, formDataEffective])
+  const stageCompletion = useMemo(() => computeStageCompletion(stages, formData), [stages, formData])
+  const canComplete = useMemo(() => allRequiredFilled(formConfig?.fields, formData), [formConfig, formData])
 
   const currentPageFields = useMemo(() => {
     if (!formConfig?.fields) return []
@@ -2719,18 +2732,24 @@ export default function DataEntry() {
         (formConfig.fields || []).map((f) => [f.id, getEffectiveValue(snapshot[f.id])]),
       )
       if (requireAllRequired) {
-        const errors = []
+        const empty = []
+        const unsubmitted = []
         formConfig.fields.forEach((f) => {
-          if (isRequired(f) && !isFieldValueFilled(f, effectiveMap[f.id])) {
-            errors.push(f.label || f.id)
-          }
+          if (!isRequired(f) || isFieldDone(f, snapshot[f.id])) return
+          if (isFieldValueFilled(f, effectiveMap[f.id])) unsubmitted.push(f.label || f.id)
+          else empty.push(f.label || f.id)
         })
-        if (errors.length) {
-          alert('Please fill in all required fields:\n- ' + errors.join('\n- '))
+        if (empty.length || unsubmitted.length) {
+          const parts = []
+          if (empty.length) parts.push('Please fill in all required fields:\n- ' + empty.join('\n- '))
+          if (unsubmitted.length) {
+            parts.push('Submit these required fields:\n- ' + unsubmitted.join('\n- '))
+          }
+          alert(parts.join('\n\n'))
           return { ok: false }
         }
       }
-      const stageCompletionPayload = computeStageCompletion(stages, effectiveMap)
+      const stageCompletionPayload = computeStageCompletion(stages, snapshot)
       const bid = batchIdRef.current || batchId
       const body = {
         formId: formConfig.id,
@@ -3270,7 +3289,11 @@ export default function DataEntry() {
           {stages.length > 0 && (
             <div className="de-card stages-panel">
               <h3>Stages</h3>
-              <p className="stages-panel-hint">Click a stage to open the next unfilled field on the form (or the first field if that stage is complete).</p>
+              <p className="stages-panel-hint">
+                Click a stage to open the next unfilled field on the form (or the first field if that stage is
+                complete). A required stage is complete once its required fields are submitted; optional stages
+                don&apos;t hold up later ones.
+              </p>
               {stages.map(stage => {
                 const completed = stageCompletion[stage.stage]
                 const accessible = isStageAccessible(stage, stages, stageCompletion)
@@ -3298,6 +3321,14 @@ export default function DataEntry() {
                       <div className="stage-name">{stage.stage}</div>
                       <div className="stage-order">
                         {stage.order != null ? `Order: ${stage.order}` : 'No order'} &bull; {stage.fields.length} field(s)
+                        {stage.order != null && !stage.gate && (
+                          <span
+                            className="stage-optional-tag"
+                            title="Later stages don't wait for this one"
+                          >
+                            Optional
+                          </span>
+                        )}
                       </div>
                     </div>
                     <div className={`stage-status ${cls}`}>

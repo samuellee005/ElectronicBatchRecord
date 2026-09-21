@@ -3670,3 +3670,16 @@ button.de-signature-correction-link {
   border-radius: 999px;
   padding: 2px 8px;
 }
+
+/* Stage that later stages don't wait for (set in the form builder's Stage properties) */
+.stage-optional-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: #475569;
+  background: #e2e8f0;
+  vertical-align: middle;
+}

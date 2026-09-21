@@ -192,6 +192,27 @@ function describeCalc($field, $fieldsMap)
     return $names ? $formula . ' (' . implode(', ', $names) . ')' : $formula;
 }
 
+/**
+ * Stage name => whether it must be completed before later stages. Mirrors
+ * isStageGate in frontend/src/utils/stageSettings.js: the setting lives on
+ * every field of the stage, and a stage counts as required unless all of its
+ * fields say `stageRequired: false` (forms saved before the setting existed
+ * have none, and always gated).
+ */
+function stageGates($fields)
+{
+    $gates = [];
+    foreach ($fields as $field) {
+        $name = trim((string)($field['stageInProcess'] ?? ''));
+        if ($name === '') {
+            continue;
+        }
+        $optional = array_key_exists('stageRequired', $field) && $field['stageRequired'] === false;
+        $gates[$name] = ($gates[$name] ?? false) || !$optional;
+    }
+    return $gates;
+}
+
 function compareFields($oldFields, $newFields, $userName, $version = null)
 {
     $auditEntries = [];
@@ -297,6 +318,24 @@ function compareFields($oldFields, $newFields, $userName, $version = null)
                     'changes' => $changes,
                 ];
             }
+        }
+    }
+
+    // One entry per stage whose "must be completed first" setting changed —
+    // not one per field, though the setting is stored on each field. New and
+    // removed stages are covered by their fields' entries.
+    $oldGates = stageGates($oldFields);
+    foreach (stageGates($newFields) as $stageName => $gate) {
+        if (array_key_exists($stageName, $oldGates) && $oldGates[$stageName] !== $gate) {
+            $auditEntries[] = [
+                'type' => 'stage_modified',
+                'stageName' => $stageName,
+                'user' => $userName,
+                'timestamp' => date('c'),
+                'changes' => [
+                    ['field' => 'stageRequired', 'old' => $oldGates[$stageName], 'new' => $gate],
+                ],
+            ];
         }
     }
 
