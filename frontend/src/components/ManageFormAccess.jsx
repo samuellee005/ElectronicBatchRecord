@@ -26,16 +26,22 @@ export default function ManageFormAccess({ formId, formName, onClose, onChanged 
   const [results, setResults] = useState([])
   const closeRef = useRef(null)
 
-  const applyPayload = useCallback(
-    (data) => {
-      setRoster(Array.isArray(data.collaborators) ? data.collaborators : [])
-      setCanManage(!!data.canManage)
-      setCreator(data.creator || null)
-      setNotice(data.message || null)
-      if (onChanged) onChanged(Array.isArray(data.collaborators) ? data.collaborators : [])
-    },
-    [onChanged],
-  )
+  // Held in a ref: callers pass an inline function, so depending on it directly
+  // would re-run the load effect on every parent render — the dialog would sit
+  // there flickering between "Loading…" and the list.
+  const onChangedRef = useRef(onChanged)
+  useEffect(() => {
+    onChangedRef.current = onChanged
+  }, [onChanged])
+
+  const applyPayload = useCallback((data) => {
+    const next = Array.isArray(data.collaborators) ? data.collaborators : []
+    setRoster(next)
+    setCanManage(!!data.canManage)
+    setCreator(data.creator || null)
+    setNotice(data.message || null)
+    onChangedRef.current?.(next)
+  }, [])
 
   useEffect(() => {
     let cancelled = false
