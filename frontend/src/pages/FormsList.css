@@ -8,12 +8,60 @@
 .forms-table th, .forms-table td { padding: 12px 16px; text-align: left; border-bottom: 1px solid #eee; }
 .forms-table th { background: #f5f5f5; font-weight: 600; }
 .forms-table .actions-cell a, .forms-table .actions-cell button { display: inline-block; padding: 6px 12px; margin-right: 6px; border-radius: 6px; font-size: 0.85rem; text-decoration: none; border: none; cursor: pointer; }
-.forms-table .actions-cell a.use-link { background: #28a745; color: white; }
-.forms-table .actions-cell a.view-form-link { background: #667eea; color: white; }
-.forms-table .actions-cell a.audit-btn { background: #e9ecef; color: #333; }
-.forms-table .actions-cell a.audit-btn:hover { color: #1a1a1a; }
-.forms-table .actions-cell button.access-btn { background: #fff; color: #444; border: 1px solid #d1d5db; }
-.forms-table .actions-cell button.access-btn:hover { background: #f3f4f6; color: #1a1a1a; }
+/* Row actions are icon-only; the label appears on hover/focus as a tooltip. */
+.forms-table .actions-cell { white-space: nowrap; }
+.forms-table .actions-cell .action-icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  margin-right: 4px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #555;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.forms-table .actions-cell .action-icon:hover { background: #f1f2f6; }
+.forms-table .actions-cell .action-icon:focus-visible { outline: 2px solid #667eea; outline-offset: 1px; }
+.forms-table .actions-cell .action-icon-svg { width: 19px; height: 19px; }
+.forms-table .actions-cell a.use-link { color: #1e7e34; }
+.forms-table .actions-cell a.use-link:hover { background: #e6f4ea; }
+.forms-table .actions-cell a.view-form-link { color: #4c5fd7; }
+.forms-table .actions-cell a.view-form-link:hover { background: #ecefff; }
+.forms-table .actions-cell a.audit-btn { color: #555; }
+.forms-table .actions-cell button.access-btn { color: #555; }
+
+/* Tooltip: the action's label, from data-label. Sits to the left of the icon and
+   within the row's height, so the scrolling table wrapper never clips it. */
+.forms-table .actions-cell .action-icon::after {
+  content: attr(data-label);
+  position: absolute;
+  right: calc(100% + 4px);
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 4px 8px;
+  border-radius: 5px;
+  background: #2d3250;
+  color: #fff;
+  font-size: 0.74rem;
+  line-height: 1.2;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.12s ease;
+  pointer-events: none;
+  z-index: 20;
+}
+.forms-table .actions-cell .action-icon:hover::after,
+.forms-table .actions-cell .action-icon:focus-visible::after {
+  opacity: 1;
+  visibility: visible;
+}
 .btn-fav { background: none; border: none; cursor: pointer; color: #ccc; padding: 4px; display: inline-flex; align-items: center; transition: color 0.2s, transform 0.15s; }
 .btn-fav:hover { transform: scale(1.15); }
 .btn-fav.is-fav { color: #f0ad4e; }

@@ -1,6 +1,12 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { StarIcon } from '@heroicons/react/24/solid'
+import {
+  ClipboardDocumentListIcon,
+  DocumentPlusIcon,
+  PencilSquareIcon,
+  UserGroupIcon,
+} from '@heroicons/react/24/outline'
 import { listForms } from '../api/client'
 import { useUserPrefs } from '../context/UserPrefsContext'
 import ManageFormAccess from '../components/ManageFormAccess'
@@ -148,23 +154,42 @@ export default function FormsList() {
                 <td>v{form.version ?? 1}{form.isLatest ? ' LATEST' : ''}</td>
                 <td><code>{form.pdfFile}</code></td>
                 <td className="actions-cell">
-                  <Link to={'/forms/entry?form=' + encodeURIComponent(form.id)} className="use-link">Use</Link>
+                  {/* Icon-only actions; the label shows on hover and for screen readers. */}
+                  <Link
+                    to={'/forms/entry?form=' + encodeURIComponent(form.id)}
+                    className="action-icon use-link"
+                    data-label="Use"
+                    aria-label="Use this form"
+                  >
+                    <DocumentPlusIcon className="action-icon-svg" aria-hidden />
+                  </Link>
                   {form.pdfFile && (
-                    <Link to={`/forms/builder?file=${encodeURIComponent(form.pdfFile)}&formId=${encodeURIComponent(form.id)}`} className="view-form-link">
-                      View form
+                    <Link
+                      to={`/forms/builder?file=${encodeURIComponent(form.pdfFile)}&formId=${encodeURIComponent(form.id)}`}
+                      className="action-icon view-form-link"
+                      data-label="View form"
+                      aria-label="View form"
+                    >
+                      <PencilSquareIcon className="action-icon-svg" aria-hidden />
                     </Link>
                   )}
-                  <Link to={`/forms/audit?form=${encodeURIComponent(form.id)}`} className="audit-btn">
-                    Audit
+                  <Link
+                    to={`/forms/audit?form=${encodeURIComponent(form.id)}`}
+                    className="action-icon audit-btn"
+                    data-label="Audit"
+                    aria-label="Audit trail"
+                  >
+                    <ClipboardDocumentListIcon className="action-icon-svg" aria-hidden />
                   </Link>
                   {form.canManageAccess && (
                     <button
                       type="button"
-                      className="access-btn"
+                      className="action-icon access-btn"
+                      data-label="Manage access"
+                      aria-label="Manage access"
                       onClick={() => setAccessForm({ id: form.id, name: form.name })}
-                      title="Change who can edit this form"
                     >
-                      Manage access
+                      <UserGroupIcon className="action-icon-svg" aria-hidden />
                     </button>
                   )}
                 </td>
