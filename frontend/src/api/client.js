@@ -142,6 +142,25 @@ export async function loadFormById(id) {
   return request(`/includes/load-form-by-id.php?id=${encodeURIComponent(id)}`)
 }
 
+/**
+ * Who may edit a form and who may manage that list.
+ * @returns {Promise<{ success: boolean, collaborators: Array<{ dbUserId: number, username: string, displayName: string, role: 'owner'|'editor', isCreator: boolean }>, canEdit: boolean, canManage: boolean, creator: { name: string, dbUserId: number|null } }>}
+ */
+export async function listFormCollaborators(formId) {
+  return request(`/includes/form-collaborators.php?formId=${encodeURIComponent(formId)}`)
+}
+
+/**
+ * Change form access. Returns the updated roster in the same shape as listFormCollaborators.
+ * @param {{ formId: string, add?: Array<{ dbUserId: number, role?: string }>, remove?: number[], setRole?: Array<{ dbUserId: number, role: string }> }} body
+ */
+export async function updateFormCollaborators(body) {
+  return request('/includes/form-collaborators.php', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
 export async function saveForm(body) {
   return request('/includes/save-form.php', { method: 'POST', body: JSON.stringify(body) })
 }

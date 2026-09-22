@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { StarIcon } from '@heroicons/react/24/solid'
 import { listForms } from '../api/client'
 import { useUserPrefs } from '../context/UserPrefsContext'
+import ManageFormAccess from '../components/ManageFormAccess'
 import './FormsList.css'
 
 /** Dropdown of checkboxes for filtering by one category; multiple values allowed. */
@@ -64,6 +65,8 @@ export default function FormsList() {
   const [deptFilter, setDeptFilter] = useState([])
   const [progFilter, setProgFilter] = useState([])
   const [typeFilter, setTypeFilter] = useState([])
+  // Form whose access dialog is open: { id, name }.
+  const [accessForm, setAccessForm] = useState(null)
   const favorites = useMemo(
     () => (Array.isArray(prefs.ebrFavorites) ? prefs.ebrFavorites : []),
     [prefs.ebrFavorites],
@@ -154,6 +157,16 @@ export default function FormsList() {
                   <Link to={`/forms/audit?form=${encodeURIComponent(form.id)}`} className="audit-btn">
                     Audit
                   </Link>
+                  {form.canManageAccess && (
+                    <button
+                      type="button"
+                      className="access-btn"
+                      onClick={() => setAccessForm({ id: form.id, name: form.name })}
+                      title="Change who can edit this form"
+                    >
+                      Manage access
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
@@ -161,6 +174,19 @@ export default function FormsList() {
         </table>
       </div>
       {data.forms && data.forms.length === 0 && <div className="empty-state"><p>No forms yet. <Link to="/forms/build">Build Form</Link></p></div>}
+      {accessForm && (
+        <ManageFormAccess
+          formId={accessForm.id}
+          formName={accessForm.name}
+          onClose={() => {
+            setAccessForm(null)
+            // Access changes can remove this user's own rights, so reload the flags.
+            listForms().then((res) =>
+              setData({ forms: res.forms || [], groupedForms: res.groupedForms || {} }),
+            )
+          }}
+        />
+      )}
     </div>
   )
 }

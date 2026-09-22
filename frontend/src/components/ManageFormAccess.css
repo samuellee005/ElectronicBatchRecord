@@ -1,0 +1,227 @@
+/* Manage access dialog (form owners + editors) */
+.mfa-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 3000;
+  padding: 16px;
+}
+
+.mfa-dialog {
+  background: #fff;
+  border-radius: 10px;
+  padding: 20px 24px 16px;
+  width: 100%;
+  max-width: 520px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.25);
+}
+
+.mfa-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.mfa-head h3 {
+  margin: 0;
+  font-size: 1.15rem;
+  color: #2d3250;
+}
+
+.mfa-close {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  line-height: 1;
+  color: #6b7280;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.mfa-close:hover {
+  color: #111827;
+}
+
+.mfa-subtitle {
+  margin: 2px 0 12px;
+  font-size: 0.88rem;
+  color: #6b7280;
+}
+
+.mfa-muted {
+  color: #6b7280;
+  font-size: 0.86rem;
+}
+
+.mfa-empty {
+  padding: 10px 0;
+}
+
+.mfa-readonly,
+.mfa-notice,
+.mfa-error {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+
+.mfa-readonly {
+  background: #f3f4f6;
+  color: #374151;
+}
+
+.mfa-notice {
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.mfa-error {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.mfa-list {
+  list-style: none;
+  margin: 0 0 16px;
+  padding: 0;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.mfa-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #f1f2f6;
+}
+
+.mfa-row:last-child {
+  border-bottom: none;
+}
+
+.mfa-person {
+  flex: 1;
+  min-width: 0;
+}
+
+.mfa-name {
+  display: block;
+  font-size: 0.9rem;
+  color: #1f2937;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mfa-meta {
+  display: block;
+  font-size: 0.75rem;
+  color: #9ca3af;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mfa-role {
+  font-size: 0.82rem;
+  padding: 4px 6px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.mfa-role:disabled,
+.mfa-remove:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.mfa-remove {
+  font-size: 0.8rem;
+  padding: 4px 10px;
+  border: 1px solid #e5b4b4;
+  border-radius: 6px;
+  background: #fff;
+  color: #b91c1c;
+  cursor: pointer;
+}
+
+.mfa-remove:hover:not(:disabled) {
+  background: #fef2f2;
+}
+
+.mfa-add label {
+  display: block;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 4px;
+}
+
+.mfa-search {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 0.88rem;
+}
+
+.mfa-results {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.mfa-result-btn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+
+.mfa-result-btn:hover:not(:disabled) {
+  background: #f3f4f6;
+}
+
+.mfa-hint {
+  margin: 14px 0 0;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: #6b7280;
+}
+
+.mfa-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+
+.mfa-btn {
+  padding: 7px 16px;
+  border: none;
+  border-radius: 6px;
+  background: #667eea;
+  color: #fff;
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+
+.mfa-btn:hover {
+  background: #5a6fd6;
+}

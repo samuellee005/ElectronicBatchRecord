@@ -6,6 +6,7 @@ require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/require-login.php';
 require_once __DIR__ . '/db-forms.php';
 require_once __DIR__ . '/session.php';
+require_once __DIR__ . '/form-permissions.php';
 
 header('Content-Type: application/json');
 
@@ -32,41 +33,20 @@ if ($foundForm) {
         $foundForm['isLatest'] = true;
     }
 
-    // Whether the current user may edit this form (creator + collaborators only
-    // once a form is owned; unowned/legacy forms stay open to everyone).
+    // Who may edit this form and who may change its access list; see
+    // includes/form-permissions.php.
     $sessionUser = ebr_current_user();
-    $actorId = $sessionUser ? (int) $sessionUser['id'] : 0;
-    $actorUsername = $sessionUser ? strtolower((string) $sessionUser['username']) : '';
-    $collabs = is_array($foundForm['collaborators'] ?? null) ? $foundForm['collaborators'] : [];
-    $creatorUser = strtolower(trim((string) ($foundForm['createdBy'] ?? '')));
-    $creatorId = (int) ($foundForm['createdByUserId'] ?? 0);
-    // Only a verified creator id or explicit collaborators make a form owned;
-    // pre-feature forms carry a name but no verified id and stay open.
-    $isOwned = $creatorId > 0 || !empty($collabs);
-    $canEdit = !$isOwned;
-    if ($actorUsername !== '' && $actorUsername === $creatorUser) {
-        $canEdit = true;
-    }
-    if ($actorId > 0 && $actorId === $creatorId) {
-        $canEdit = true;
-    }
-    foreach ($collabs as $c) {
-        if (!is_array($c)) {
-            continue;
-        }
-        $cu = strtolower(trim((string) ($c['username'] ?? '')));
-        $cid = (int) ($c['dbUserId'] ?? 0);
-        if (($actorUsername !== '' && $actorUsername === $cu) || ($actorId > 0 && $actorId === $cid)) {
-            $canEdit = true;
-            break;
-        }
-    }
+    $isOwned = ebr_form_is_owned($foundForm);
+    $canEdit = ebr_form_user_can_edit($foundForm, $sessionUser);
+    $canManageAccess = ebr_form_user_can_manage_access($foundForm, $sessionUser);
 
     echo json_encode([
         'success' => true,
         'form' => $foundForm,
         'canEdit' => $canEdit,
+        'canManageAccess' => $canManageAccess,
         'isOwned' => $isOwned,
+        'roster' => ebr_form_roster($foundForm),
     ]);
 } else {
     echo json_encode(['success' => false, 'message' => 'Form not found']);

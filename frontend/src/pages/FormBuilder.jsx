@@ -35,6 +35,7 @@ import {
 } from '../api/client'
 import { useUserPrefs } from '../context/UserPrefsContext'
 import { useAuth } from '../context/AuthContext'
+import ManageFormAccess from '../components/ManageFormAccess'
 import { pageDesignSize } from '../utils/pdfDesignCoords'
 import { validateFormula, calcIneligibleRefs } from '../utils/formula'
 import { isStageGate, stageRequiredForJoin } from '../utils/stageSettings'
@@ -1000,6 +1001,11 @@ export default function FormBuilder() {
   const draftCheckedRef = useRef(false)
   // Form collaborators (who may edit) + whether the current user is allowed to.
   const [canEditForm, setCanEditForm] = useState(true)
+  // Owners may also change who has access; the dialog handles that on its own,
+  // so saving a form never rewrites its access list.
+  const [canManageAccess, setCanManageAccess] = useState(false)
+  const [accessFormId, setAccessFormId] = useState(null)
+  const [showAccessModal, setShowAccessModal] = useState(false)
   const [formCollaborators, setFormCollaborators] = useState([])
   const [collabSearch, setCollabSearch] = useState('')
   const [collabResults, setCollabResults] = useState([])
@@ -1376,9 +1382,11 @@ export default function FormBuilder() {
       loadFormById(urlFormId).then((data) => {
         if (data.success && data.form?.fields) {
           setLoadedFormName(data.form.name || null)
+          setAccessFormId(urlFormId)
           setSourceFormIds(data.form.sourceFormIds?.length ? data.form.sourceFormIds : [urlFormId])
           setCanEditForm(data.canEdit !== false)
-          setFormCollaborators(Array.isArray(data.form.collaborators) ? data.form.collaborators : [])
+          setCanManageAccess(data.canManageAccess === true)
+          setFormCollaborators(Array.isArray(data.roster) ? data.roster : [])
           if (data.form.department) setSaveDepartment(data.form.department)
           if (data.form.program) setSaveProgram(data.form.program)
           if (data.form.formType) setSaveFormType(data.form.formType)
@@ -2415,11 +2423,13 @@ export default function FormBuilder() {
       loadFormById(selectionFormId).then((data) => {
         if (data.success && data.form?.fields) {
           setLoadedFormName(data.form.name || null)
+          setAccessFormId(selectionFormId)
           setSourceFormIds(
             data.form.sourceFormIds?.length ? data.form.sourceFormIds : [selectionFormId],
           )
           setCanEditForm(data.canEdit !== false)
-          setFormCollaborators(Array.isArray(data.form.collaborators) ? data.form.collaborators : [])
+          setCanManageAccess(data.canManageAccess === true)
+          setFormCollaborators(Array.isArray(data.roster) ? data.roster : [])
           if (data.form.department) setSaveDepartment(data.form.department)
           if (data.form.program) setSaveProgram(data.form.program)
           if (data.form.formType) setSaveFormType(data.form.formType)
@@ -3035,6 +3045,20 @@ export default function FormBuilder() {
               Draft saved
             </span>
           )}
+          {accessFormId && (
+            <button
+              type="button"
+              className="fb-btn fb-btn-ghost"
+              onClick={() => setShowAccessModal(true)}
+              title={
+                canManageAccess
+                  ? 'Change who can edit this form'
+                  : 'See who can edit this form'
+              }
+            >
+              Manage access
+            </button>
+          )}
           <button
             className="fb-btn fb-btn-success"
             onClick={openSaveModal}
@@ -3634,6 +3658,15 @@ export default function FormBuilder() {
         )}
       </div>
 
+      {showAccessModal && accessFormId && (
+        <ManageFormAccess
+          formId={accessFormId}
+          formName={loadedFormName || saveFormName || ''}
+          onClose={() => setShowAccessModal(false)}
+          onChanged={(next) => setFormCollaborators(next)}
+        />
+      )}
+
       {/* Form Selection Modal */}
       {showSelectionModal && !urlFormId && (
         <div className="fb-modal-backdrop" onClick={() => {}}>
@@ -4113,8 +4146,29 @@ export default function FormBuilder() {
             </div>
 
             <div className="fb-form-group">
-              <label>Collaborators (who may edit this form):</label>
-              {formCollaborators.length > 0 ? (
+              <label>Access (who may edit this form):</label>
+              {accessFormId ? (
+                <>
+                  <p className="fb-hint">
+                    {formCollaborators.length > 0
+                      ? formCollaborators
+                          .map((c) => `${c.displayName || c.username}${c.role === 'owner' ? ' (owner)' : ''}`)
+                          .join(', ')
+                      : 'Anyone can edit this form.'}
+                  </p>
+                  <button
+                    type="button"
+                    className="fb-link-btn"
+                    onClick={() => setShowAccessModal(true)}
+                  >
+                    Manage access…
+                  </button>
+                  <small className="fb-hint">
+                    Access is changed in its own dialog and applies to every version, so saving the
+                    form never rewrites it.
+                  </small>
+                </>
+              ) : formCollaborators.length > 0 ? (
                 <div className="fb-collab-chips">
                   {formCollaborators.map((c) => (
                     <span key={c.dbUserId || c.username} className="fb-collab-chip">
@@ -4139,13 +4193,15 @@ export default function FormBuilder() {
                   No collaborators yet — only you (the creator) can edit. Add people to let them edit too.
                 </p>
               )}
-              <input
-                type="text"
-                value={collabSearch}
-                onChange={(e) => setCollabSearch(e.target.value)}
-                placeholder="Search users by name or username to add…"
-              />
-              {collabResults.length > 0 && (
+              {!accessFormId && (
+                <input
+                  type="text"
+                  value={collabSearch}
+                  onChange={(e) => setCollabSearch(e.target.value)}
+                  placeholder="Search users by name or username to add…"
+                />
+              )}
+              {!accessFormId && collabResults.length > 0 && (
                 <ul className="fb-collab-results">
                   {collabResults.map((u) => (
                     <li key={u.dbUserId}>

@@ -7,6 +7,7 @@ const EVENT_TYPE_LABELS = {
   component_removed: 'Field removed',
   component_modified: 'Field updated',
   stage_modified: 'Stage updated',
+  access_changed: 'Access updated',
   pdf_changed: 'PDF changed',
   version_updated: 'Version saved',
 }
@@ -68,6 +69,25 @@ export function describeAuditChange(c) {
     return `Must be completed before later stages: ${yn(c.old)} → ${yn(c.new)}`
   }
   return `${f}: ${str(c.old)} → ${str(c.new)}`
+}
+
+const ROLE_LABELS = { owner: 'owner', editor: 'editor' }
+
+function roleLabel(r) {
+  const k = String(r ?? '').toLowerCase()
+  return ROLE_LABELS[k] || (k === '' ? 'editor' : k)
+}
+
+/**
+ * One line for a single change record from access_changed.
+ * @param {{ action: string, name?: string, role?: string, from?: string }} c
+ */
+export function describeAccessChange(c) {
+  const who = c.name || 'Someone'
+  if (c.action === 'added') return `Added ${who} as ${roleLabel(c.role)}`
+  if (c.action === 'removed') return `Removed ${who} (${roleLabel(c.role)})`
+  if (c.action === 'role') return `${who}: ${roleLabel(c.from)} → ${roleLabel(c.role)}`
+  return `${who}: ${c.action}`
 }
 
 /**
@@ -134,6 +154,15 @@ export function formatAuditEntryBlock(entry) {
       ...base,
       headline: `Updated stage: "${entry.stageName || 'Unnamed'}"`,
       bodyLines: changes.map((c) => (c && typeof c === 'object' ? describeAuditChange(c) : String(c))),
+    }
+  }
+
+  if (type === 'access_changed') {
+    const changes = Array.isArray(entry.changes) ? entry.changes : []
+    return {
+      ...base,
+      headline: 'Form access updated',
+      bodyLines: changes.map((c) => (c && typeof c === 'object' ? describeAccessChange(c) : String(c))),
     }
   }
 

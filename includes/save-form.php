@@ -6,6 +6,8 @@ require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/require-login.php';
 require_once __DIR__ . '/session.php';
 require_once __DIR__ . '/db-forms.php';
+require_once __DIR__ . '/db-db-user.php';
+require_once __DIR__ . '/form-permissions.php';
 
 header('Content-Type: application/json');
 
@@ -35,9 +37,6 @@ $actorName = $sessionUser && ($sessionUser['display_name'] !== '' || $sessionUse
     ? ($sessionUser['display_name'] !== '' ? $sessionUser['display_name'] : $sessionUser['username'])
     : $typedName;
 $actorId = $sessionUser ? (int) $sessionUser['id'] : 0;
-$actorUsername = $sessionUser
-    ? strtolower((string) $sessionUser['username'])
-    : strtolower($typedName);
 if ($actorName === '') {
     echo json_encode(['success' => false, 'message' => 'User name is required for audit trail']);
     exit;
@@ -71,33 +70,9 @@ if ($isUpdate) {
         $existingForm = null;
     }
     if ($existingForm) {
-        $collabs = is_array($existingForm['collaborators'] ?? null) ? $existingForm['collaborators'] : [];
-        $creatorUser = strtolower(trim((string) ($existingForm['createdBy'] ?? '')));
-        $creatorId = (int) ($existingForm['createdByUserId'] ?? 0);
-        // Only a VERIFIED creator (authenticated at save time) or explicit
-        // collaborators make a form owned. Forms created before this feature carry
-        // a self-reported name but no verified id, and stay open to everyone.
-        $isOwned = $creatorId > 0 || !empty($collabs);
-        // Unowned/legacy forms stay open; owned forms restrict to creator + collaborators.
-        $allowed = !$isOwned;
-        if ($actorUsername !== '' && $actorUsername === $creatorUser) {
-            $allowed = true;
-        }
-        if ($actorId > 0 && $actorId === $creatorId) {
-            $allowed = true;
-        }
-        foreach ($collabs as $c) {
-            if (!is_array($c)) {
-                continue;
-            }
-            $cu = strtolower(trim((string) ($c['username'] ?? '')));
-            $cid = (int) ($c['dbUserId'] ?? 0);
-            if (($actorUsername !== '' && $actorUsername === $cu) || ($actorId > 0 && $actorId === $cid)) {
-                $allowed = true;
-                break;
-            }
-        }
-        if (!$allowed) {
+        // Owners and editors may save; unowned legacy forms stay open to
+        // everyone. See includes/form-permissions.php.
+        if (!ebr_form_user_can_edit($existingForm, $sessionUser)) {
             http_response_code(403);
             echo json_encode([
                 'success' => false,
@@ -135,23 +110,61 @@ if ($isUpdate) {
     }
 }
 
-// Collaborators to store: an explicit list from the payload, else carry forward.
+// Access roster to store.
+//
+// Editing a form never rewrites its access list: that is what
+// includes/form-collaborators.php is for, and a save would otherwise let an
+// editor quietly drop the owners. An existing form therefore carries its stored
+// roster forward untouched. A brand-new form takes the people picked while
+// creating it (as editors) plus its creator as the first owner.
 $collaboratorsToStore = [];
-if (isset($formData['collaborators']) && is_array($formData['collaborators'])) {
-    foreach ($formData['collaborators'] as $c) {
+if ($existingForm) {
+    $collaboratorsToStore = ebr_form_roster_for_storage(ebr_form_roster_all($existingForm));
+} else {
+    $seen = [];
+    foreach (($formData['collaborators'] ?? []) as $c) {
         if (!is_array($c)) {
             continue;
         }
-        $u = trim((string) ($c['username'] ?? ''));
-        $dn = trim((string) ($c['displayName'] ?? ''));
         $cid = (int) ($c['dbUserId'] ?? 0);
-        if ($u === '' && $dn === '' && $cid <= 0) {
+        if ($cid <= 0 || isset($seen[$cid])) {
             continue;
         }
-        $collaboratorsToStore[] = ['dbUserId' => $cid, 'username' => $u, 'displayName' => $dn];
+        $userRow = ebr_db_user_fetch_by_id($cid);
+        if ($userRow === null || ebr_db_user_is_disabled($userRow)) {
+            continue;
+        }
+        $seen[$cid] = true;
+        $collaboratorsToStore[] = [
+            'dbUserId' => $cid,
+            'username' => (string) ($userRow['username'] ?? ''),
+            'displayName' => ebr_db_user_display_name($userRow),
+            'role' => strtolower(trim((string) ($c['role'] ?? ''))) === EBR_FORM_ROLE_OWNER
+                ? EBR_FORM_ROLE_OWNER
+                : EBR_FORM_ROLE_EDITOR,
+            'addedByUserId' => $actorId > 0 ? $actorId : null,
+            'addedAt' => date('c'),
+        ];
     }
-} elseif ($existingForm && is_array($existingForm['collaborators'] ?? null)) {
-    $collaboratorsToStore = $existingForm['collaborators'];
+    // The creator owns what they create, so there is always someone who can
+    // grant access.
+    if ($actorId > 0 && !isset($seen[$actorId])) {
+        array_unshift($collaboratorsToStore, [
+            'dbUserId' => $actorId,
+            'username' => $sessionUser['username'] ?? '',
+            'displayName' => $actorName,
+            'role' => EBR_FORM_ROLE_OWNER,
+            'addedByUserId' => $actorId,
+            'addedAt' => date('c'),
+        ]);
+    } elseif ($actorId > 0) {
+        foreach ($collaboratorsToStore as &$entry) {
+            if ((int) $entry['dbUserId'] === $actorId) {
+                $entry['role'] = EBR_FORM_ROLE_OWNER;
+            }
+        }
+        unset($entry);
+    }
 }
 
 /**
@@ -437,12 +450,12 @@ if ($isUpdate && !$isNewVersion) {
         $oldFormConfig['isLatest'] = false;
     } else {
         $sameNameAndPdfVersions = [versionToDecimal($formConfig['version'] ?? 1.0)];
-        foreach ($allForms as $existingForm) {
-            if ($existingForm &&
-                isset($existingForm['name'], $existingForm['pdfFile']) &&
-                $existingForm['name'] === $formData['name'] &&
-                $existingForm['pdfFile'] === $formData['pdfFile']) {
-                $sameNameAndPdfVersions[] = versionToDecimal($existingForm['version'] ?? 1.0);
+        foreach ($allForms as $otherForm) {
+            if ($otherForm &&
+                isset($otherForm['name'], $otherForm['pdfFile']) &&
+                $otherForm['name'] === $formData['name'] &&
+                $otherForm['pdfFile'] === $formData['pdfFile']) {
+                $sameNameAndPdfVersions[] = versionToDecimal($otherForm['version'] ?? 1.0);
             }
         }
         $oldVersion = versionToDecimal($formConfig['version'] ?? 1.0);
@@ -494,14 +507,44 @@ if ($isUpdate && !$isNewVersion) {
     $version = 1.0;
     $sameNameAndPdf = [];
     $sameNameOnly = [];
-    foreach ($allForms as $existingForm) {
-        if (!$existingForm || !isset($existingForm['name']) || $existingForm['name'] !== $formData['name']) {
+    foreach ($allForms as $otherForm) {
+        if (!$otherForm || !isset($otherForm['name']) || $otherForm['name'] !== $formData['name']) {
             continue;
         }
-        $sameNameOnly[] = $existingForm;
-        if (isset($existingForm['pdfFile']) && $existingForm['pdfFile'] === $formData['pdfFile']) {
-            $sameNameAndPdf[] = $existingForm;
+        $sameNameOnly[] = $otherForm;
+        if (isset($otherForm['pdfFile']) && $otherForm['pdfFile'] === $formData['pdfFile']) {
+            $sameNameAndPdf[] = $otherForm;
         }
+    }
+
+    // Saving without a formId still lands in an existing form's lineage when the
+    // name and PDF match: it becomes that form's newest version and pushes the
+    // others off "latest". That has to obey the same access rules as an edit,
+    // otherwise the gate above is bypassed by dropping the formId.
+    $lineageForm = null;
+    foreach ($sameNameAndPdf as $candidate) {
+        if (ebr_form_is_owned($candidate) && !ebr_form_user_can_edit($candidate, $sessionUser)) {
+            http_response_code(403);
+            echo json_encode([
+                'success' => false,
+                'code' => 'not_a_collaborator',
+                'message' => 'A form with this name and PDF already exists and you do not have access to it.'
+                    . ' Ask one of its owners for access, or save under a different name.',
+            ]);
+            exit;
+        }
+        if ($lineageForm === null || (float) ($candidate['version'] ?? 0) > (float) ($lineageForm['version'] ?? 0)) {
+            $lineageForm = $candidate;
+        }
+    }
+    if ($lineageForm !== null) {
+        // Joining an existing form's lineage: keep its roster and its original
+        // creator, so access and ownership do not differ between versions.
+        $lineageRoster = ebr_form_roster_for_storage(ebr_form_roster_all($lineageForm));
+        if ($lineageRoster !== []) {
+            $collaboratorsToStore = $lineageRoster;
+        }
+        $existingForm = $lineageForm;
     }
 
     if (!empty($sameNameAndPdf)) {

@@ -258,6 +258,44 @@ SQL;
     ]);
 }
 
+/**
+ * Write the access roster onto every version of a form.
+ *
+ * Access belongs to the form, not to one saved version, but the roster is a
+ * column on each row — so every row sharing (name, pdf_file), the same grouping
+ * ebr_db_forms_mark_not_latest_same_name_pdf uses for versions, is updated
+ * together. Returns the number of rows written.
+ *
+ * @param list<array<string, mixed>> $collaborators
+ */
+function ebr_db_forms_set_collaborators_same_name_pdf(string $name, string $pdfFile, array $collaborators): int
+{
+    $pdo = ebr_pg_pdo();
+    $st = $pdo->prepare(
+        'UPDATE ebr_forms SET collaborators = CAST(:c AS JSONB) WHERE name = :n AND pdf_file = :p'
+    );
+    $st->execute([
+        'c' => ebr_db_forms_json_enc($collaborators),
+        'n' => $name,
+        'p' => $pdfFile,
+    ]);
+
+    return $st->rowCount();
+}
+
+/**
+ * Replace one form row's audit trail (used when an access change is recorded
+ * against the latest version).
+ *
+ * @param list<array<string, mixed>> $auditTrail
+ */
+function ebr_db_forms_set_audit_trail(string $formId, array $auditTrail): void
+{
+    $pdo = ebr_pg_pdo();
+    $st = $pdo->prepare('UPDATE ebr_forms SET audit_trail = CAST(:a AS JSONB) WHERE id = :i');
+    $st->execute(['a' => ebr_db_forms_json_enc($auditTrail), 'i' => $formId]);
+}
+
 function ebr_db_forms_mark_not_latest_same_name_pdf(string $name, string $pdfFile, ?string $exceptId): void
 {
     $pdo = ebr_pg_pdo();

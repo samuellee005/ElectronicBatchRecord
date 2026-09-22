@@ -5,6 +5,8 @@
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/require-login.php';
 require_once __DIR__ . '/db-forms.php';
+require_once __DIR__ . '/session.php';
+require_once __DIR__ . '/form-permissions.php';
 
 header('Content-Type: application/json');
 
@@ -14,6 +16,10 @@ try {
     echo json_encode(['success' => false, 'forms' => [], 'groupedForms' => [], 'message' => 'Could not load forms']);
     exit;
 }
+
+// Access flags per row, so the list can show and gate "Manage access" without
+// a request per form.
+$sessionUser = ebr_current_user();
 
 $forms = [];
 foreach ($all as $formData) {
@@ -35,6 +41,11 @@ foreach ($all as $formData) {
         'department' => $formData['department'] ?? '',
         'program' => $formData['program'] ?? '',
         'formType' => $formData['formType'] ?? '',
+        'collaborators' => ebr_form_roster($formData),
+        'createdByUserId' => $formData['createdByUserId'] ?? null,
+        'isOwned' => ebr_form_is_owned($formData),
+        'canEdit' => ebr_form_user_can_edit($formData, $sessionUser),
+        'canManageAccess' => ebr_form_user_can_manage_access($formData, $sessionUser),
     ];
 }
 

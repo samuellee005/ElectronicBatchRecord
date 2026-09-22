@@ -12,6 +12,8 @@
 .forms-table .actions-cell a.view-form-link { background: #667eea; color: white; }
 .forms-table .actions-cell a.audit-btn { background: #e9ecef; color: #333; }
 .forms-table .actions-cell a.audit-btn:hover { color: #1a1a1a; }
+.forms-table .actions-cell button.access-btn { background: #fff; color: #444; border: 1px solid #d1d5db; }
+.forms-table .actions-cell button.access-btn:hover { background: #f3f4f6; color: #1a1a1a; }
 .btn-fav { background: none; border: none; cursor: pointer; color: #ccc; padding: 4px; display: inline-flex; align-items: center; transition: color 0.2s, transform 0.15s; }
 .btn-fav:hover { transform: scale(1.15); }
 .btn-fav.is-fav { color: #f0ad4e; }
