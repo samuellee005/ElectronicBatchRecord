@@ -1495,9 +1495,15 @@ export default function FormBuilder() {
         else if (e.key === '0') { e.preventDefault(); resetZoom() }
       }
       if (e.key === 'Escape') {
-        if (showSaveModal) setShowSaveModal(false)
-        if (showPasteModal) setShowPasteModal(false)
-        if (showImportModal) closeImportModal()
+        // The access dialog sits on top (it can be opened from the save modal),
+        // so Escape closes only it and leaves what is underneath open.
+        if (showAccessModal) {
+          setShowAccessModal(false)
+        } else {
+          if (showSaveModal) setShowSaveModal(false)
+          if (showPasteModal) setShowPasteModal(false)
+          if (showImportModal) closeImportModal()
+        }
       }
       // Cmd/Ctrl+Z undo, Cmd/Ctrl+Shift+Z or Ctrl+Y redo. Skipped while
       // typing so the browser's own undo still works inside a text box.
@@ -1571,7 +1577,7 @@ export default function FormBuilder() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [showSaveModal, showPasteModal, showImportModal, closeImportModal, selectedFieldIds, fields, undo, redo])
+  }, [showAccessModal, showSaveModal, showPasteModal, showImportModal, closeImportModal, selectedFieldIds, fields, undo, redo])
 
   // Ctrl+scroll zoom on canvas
   const handleCanvasWheel = useCallback((e) => {

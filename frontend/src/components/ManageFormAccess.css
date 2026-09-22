@@ -1,4 +1,6 @@
 /* Manage access dialog (form owners + editors) */
+/* Above the builder's own modals (z-index 3000): this dialog can be opened
+   from the save modal and must sit on top of it. */
 .mfa-overlay {
   position: fixed;
   inset: 0;
@@ -6,7 +8,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 3000;
+  z-index: 4000;
   padding: 16px;
 }
 
