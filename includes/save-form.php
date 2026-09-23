@@ -81,22 +81,26 @@ if ($isUpdate) {
             ]);
             exit;
         }
-        // Conflict: the version being edited is no longer the latest (someone saved since it was opened).
-        if (!$isNewVersion && empty($existingForm['isLatest']) && empty($formData['force'])) {
-            // Name whoever created the newer version.
-            $latestBy = 'another user';
+        // Conflict: a newer version of this form exists (someone saved since it
+        // was opened). Decided by comparing versions within the form rather than
+        // by the stored is_latest flag, which older rows can carry incorrectly.
+        $newerVersion = null;
+        if (!$isNewVersion && empty($formData['force'])) {
             try {
-                foreach (ebr_db_forms_all_api() as $ef) {
-                    if (!empty($ef['isLatest'])
-                        && ($ef['name'] ?? '') === ($existingForm['name'] ?? '')
-                        && ($ef['pdfFile'] ?? '') === ($existingForm['pdfFile'] ?? '')) {
-                        $latestBy = $ef['updatedBy'] ?: $latestBy;
-                        break;
+                $editingVersion = round((float) ($existingForm['version'] ?? 1), 1);
+                $lineage = (string) ($existingForm['lineageId'] ?? $existingForm['id']);
+                foreach (ebr_db_forms_lineage_rows($lineage) as $ef) {
+                    if (round((float) ($ef['version'] ?? 1), 1) > $editingVersion) {
+                        $newerVersion = $ef;
                     }
                 }
             } catch (Throwable $e) {
-                // fall back to the generic name
+                // Treat an unreadable lineage as no conflict; the save still goes
+                // through the permission gate above.
             }
+        }
+        if ($newerVersion !== null) {
+            $latestBy = ($newerVersion['updatedBy'] ?? '') !== '' ? $newerVersion['updatedBy'] : 'another user';
             http_response_code(409);
             echo json_encode([
                 'success' => false,
@@ -108,6 +112,25 @@ if ($isUpdate) {
             exit;
         }
     }
+}
+
+/**
+ * Another form already using this name and PDF. A name has to identify one form
+ * in the list, so a save that would collide with a different form is refused
+ * rather than creating two rows people cannot tell apart.
+ */
+function ebr_form_name_taken(array $allForms, string $name, string $pdfFile, string $lineageId): bool
+{
+    foreach ($allForms as $f) {
+        if (($f['name'] ?? '') !== $name || ($f['pdfFile'] ?? '') !== $pdfFile) {
+            continue;
+        }
+        if ((string) ($f['lineageId'] ?? ($f['id'] ?? '')) !== $lineageId) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 // Access roster to store.
@@ -406,6 +429,20 @@ if ($isUpdate && !$isNewVersion) {
     $oldFormConfig = json_decode(json_encode($formConfig), true);
 
     $pdfChanged = ($formConfig['pdfFile'] !== $formData['pdfFile']);
+    // The form this save belongs to. Renaming stays in the same lineage, so the
+    // old name stops being a form of its own and the version history continues.
+    $lineageId = (string) ($formConfig['lineageId'] ?? $formConfig['id']);
+    $oldName = (string) ($formConfig['name'] ?? '');
+    $renamed = $oldName !== (string) $formData['name'];
+    if ($renamed && ebr_form_name_taken($allForms, (string) $formData['name'], (string) $formData['pdfFile'], $lineageId)) {
+        http_response_code(409);
+        echo json_encode([
+            'success' => false,
+            'code' => 'name_taken',
+            'message' => 'Another form already uses this name with this PDF. Choose a different name.',
+        ]);
+        exit;
+    }
 
     $sanitizedName = preg_replace('/[^a-zA-Z0-9_-]/', '_', $formData['name']);
 
@@ -425,10 +462,21 @@ if ($isUpdate && !$isNewVersion) {
             'versionChange' => $oldVersion . ' → ' . number_format($newVersion, 1),
             'version' => number_format($newVersion, 1),
         ];
+        if ($renamed) {
+            $auditTrail[] = [
+                'type' => 'form_renamed',
+                'oldName' => $oldName,
+                'newName' => (string) $formData['name'],
+                'user' => $actorName,
+                'timestamp' => date('c'),
+                'version' => number_format($newVersion, 1),
+            ];
+        }
         $auditTrail = array_merge($auditTrail, generateInitialAuditTrail($formData['fields'] ?? [], $actorName, number_format($newVersion, 1)));
 
         $formConfig = [
             'id' => uniqid('form_'),
+            'lineageId' => $lineageId,
             'name' => $formData['name'],
             'description' => $formData['description'] ?? '',
             'pdfFile' => $formData['pdfFile'],
@@ -449,17 +497,14 @@ if ($isUpdate && !$isNewVersion) {
 
         $oldFormConfig['isLatest'] = false;
     } else {
-        $sameNameAndPdfVersions = [versionToDecimal($formConfig['version'] ?? 1.0)];
+        $lineageVersions = [versionToDecimal($formConfig['version'] ?? 1.0)];
         foreach ($allForms as $otherForm) {
-            if ($otherForm &&
-                isset($otherForm['name'], $otherForm['pdfFile']) &&
-                $otherForm['name'] === $formData['name'] &&
-                $otherForm['pdfFile'] === $formData['pdfFile']) {
-                $sameNameAndPdfVersions[] = versionToDecimal($otherForm['version'] ?? 1.0);
+            if ($otherForm && (string) ($otherForm['lineageId'] ?? $otherForm['id']) === $lineageId) {
+                $lineageVersions[] = versionToDecimal($otherForm['version'] ?? 1.0);
             }
         }
         $oldVersion = versionToDecimal($formConfig['version'] ?? 1.0);
-        $newVersion = versionToDecimal(max($sameNameAndPdfVersions) + 0.1);
+        $newVersion = versionToDecimal(max($lineageVersions) + 0.1);
 
         $storageFilename = $sanitizedName . '_v' . number_format($newVersion, 1) . '_' . time() . '.json';
 
@@ -468,6 +513,16 @@ if ($isUpdate && !$isNewVersion) {
         $fieldChanges = compareFields($oldFields, $newFields, $actorName, number_format($newVersion, 1));
 
         $auditTrail = $formConfig['auditTrail'] ?? [];
+        if ($renamed) {
+            $auditTrail[] = [
+                'type' => 'form_renamed',
+                'oldName' => $oldName,
+                'newName' => (string) $formData['name'],
+                'user' => $actorName,
+                'timestamp' => date('c'),
+                'version' => number_format($newVersion, 1),
+            ];
+        }
         $auditTrail = array_merge($auditTrail, $fieldChanges);
         $auditTrail[] = [
             'type' => 'version_updated',
@@ -481,6 +536,7 @@ if ($isUpdate && !$isNewVersion) {
 
         $formConfig = [
             'id' => uniqid('form_'),
+            'lineageId' => $lineageId,
             'name' => $formData['name'],
             'description' => $formData['description'] ?? '',
             'pdfFile' => $formData['pdfFile'],
@@ -537,6 +593,9 @@ if ($isUpdate && !$isNewVersion) {
             $lineageForm = $candidate;
         }
     }
+    // A form created here is its own lineage; one that joins an existing form
+    // takes that form's lineage id (set below, once the row id exists).
+    $lineageId = null;
     if ($lineageForm !== null) {
         // Joining an existing form's lineage: keep its roster and its original
         // creator, so access and ownership do not differ between versions.
@@ -545,6 +604,7 @@ if ($isUpdate && !$isNewVersion) {
             $collaboratorsToStore = $lineageRoster;
         }
         $existingForm = $lineageForm;
+        $lineageId = (string) ($lineageForm['lineageId'] ?? $lineageForm['id']);
     }
 
     if (!empty($sameNameAndPdf)) {
@@ -564,8 +624,10 @@ if ($isUpdate && !$isNewVersion) {
 
     $auditTrail = generateInitialAuditTrail($formData['fields'] ?? [], $actorName, number_format($version, 1));
 
+    $newFormId = uniqid('form_');
     $formConfig = [
-        'id' => uniqid('form_'),
+        'id' => $newFormId,
+        'lineageId' => $lineageId ?? $newFormId,
         'name' => $formData['name'],
         'description' => $formData['description'] ?? '',
         'pdfFile' => $formData['pdfFile'],
@@ -584,11 +646,6 @@ if ($isUpdate && !$isNewVersion) {
         'formType' => $formCategories['formType'],
     ];
 
-    if ($isNewVersion && !empty($formData['formId'])) {
-        ebr_db_forms_mark_not_latest_same_name_pdf($formData['name'], $formData['pdfFile'], null);
-    } else {
-        ebr_db_forms_mark_not_latest_same_name_pdf($formData['name'], $formData['pdfFile'], $formConfig['id']);
-    }
 }
 
 // Attribution + collaborators on the new row.
@@ -614,6 +671,9 @@ try {
     } else {
         ebr_db_forms_insert_api($formConfig, $storageFilename);
     }
+    // Exactly one current version per form. Every path ends here, so the stored
+    // flag is right without the forms list having to recompute it.
+    ebr_db_forms_mark_not_latest_in_lineage((string) $formConfig['lineageId'], (string) $formConfig['id']);
 } catch (Throwable $e) {
     error_log('ebr save-form: ' . $e->getMessage());
     $show = getenv('EBR_SHOW_UPLOAD_ERRORS');

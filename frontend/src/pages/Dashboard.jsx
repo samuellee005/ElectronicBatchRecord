@@ -27,14 +27,33 @@ function normalizeWidgetOrder(raw) {
   return ordered
 }
 
+/**
+ * Key for the per-form state kept in user preferences (last seen version,
+ * dismissed "newer version" notices). The form's lineage id survives a rename;
+ * the older name|pdf key is read as a fallback so nothing resurfaces after the
+ * lineage change.
+ */
+function formGroupKey(form) {
+  return form?.lineageId || (form?.name || '') + '|' + (form?.pdfFile || '')
+}
+
+function legacyFormGroupKey(form) {
+  return (form?.name || '') + '|' + (form?.pdfFile || '')
+}
+
+/** Version last seen for a form, tolerating the pre-lineage key. */
+function seenVersionFor(map, form) {
+  const m = map || {}
+  return m[formGroupKey(form)] ?? m[legacyFormGroupKey(form)] ?? 0
+}
+
 function buildLatestByKey(groupedForms) {
   const latestByKey = {}
   Object.keys(groupedForms || {}).forEach((k) => {
     const group = groupedForms[k]
     if (!group || !group.length) return
     const latest = group[0]
-    const key = (latest.name || '') + '|' + (latest.pdfFile || '')
-    latestByKey[key] = latest
+    latestByKey[formGroupKey(latest)] = latest
   })
   return latestByKey
 }
@@ -237,8 +256,8 @@ export default function Dashboard() {
       const group = groupedForms[k]
       if (!group || !group.length) return
       const latest = group[0]
-      const groupKey = (latest.name || '') + '|' + (latest.pdfFile || '')
-      const lastVersion = lastSeen[groupKey] || 0
+      const groupKey = formGroupKey(latest)
+      const lastVersion = seenVersionFor(lastSeen, latest)
       const curVersion = latest.version || 1
       if (curVersion > lastVersion) {
         list.push({
@@ -255,7 +274,7 @@ export default function Dashboard() {
 
   const favoritedKeys = {}
   forms.forEach((f) => {
-    if (favorites.includes(f.id)) favoritedKeys[(f.name || '') + '|' + (f.pdfFile || '')] = true
+    if (favorites.includes(f.id)) favoritedKeys[formGroupKey(f)] = true
   })
 
   const handleReplaceFav = (oldId, latestId, groupKey, latestVer) => {
@@ -296,9 +315,10 @@ export default function Dashboard() {
           <>
             <ul className="widget-list" id="favoritesList">
               {favForms.slice(0, WIDGET_LIMIT).map((f) => {
-                const groupKey = (f.name || '') + '|' + (f.pdfFile || '')
+                const groupKey = formGroupKey(f)
                 const latest = latestByKey[groupKey]
-                const hasNewer = latest && latest.id !== f.id && (latest.version || 1) > (resolved[groupKey] || 0)
+                const hasNewer =
+                  latest && latest.id !== f.id && (latest.version || 1) > seenVersionFor(resolved, f)
                 const popoverOpen = favPopover === f.id
                 return (
                   <li key={f.id}>

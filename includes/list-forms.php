@@ -25,6 +25,8 @@ $forms = [];
 foreach ($all as $formData) {
     $forms[] = [
         'id' => $formData['id'] ?? '',
+        // The form these versions belong to; unchanged by a rename.
+        'lineageId' => $formData['lineageId'] ?? ($formData['id'] ?? ''),
         'name' => $formData['name'] ?? 'Unnamed Form',
         'description' => $formData['description'] ?? '',
         'pdfFile' => $formData['pdfFile'] ?? '',
@@ -49,10 +51,11 @@ foreach ($all as $formData) {
     ];
 }
 
-// Group forms by name and PDF file
+// Group the versions of each form. Keyed on the lineage, so renaming a form
+// keeps its history in one group instead of starting a second one.
 $groupedForms = [];
 foreach ($forms as $form) {
-    $key = $form['name'] . '|' . $form['pdfFile'];
+    $key = $form['lineageId'] !== '' ? $form['lineageId'] : ($form['name'] . '|' . $form['pdfFile']);
     if (!isset($groupedForms[$key])) {
         $groupedForms[$key] = [];
     }

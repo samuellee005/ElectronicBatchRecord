@@ -8,7 +8,7 @@
  * Only an owner (or an app admin) may change the roster, and the last owner
  * cannot be removed or demoted — a form always has someone who can grant access.
  * The roster is written to every version of the form; see
- * ebr_db_forms_set_collaborators_same_name_pdf.
+ * ebr_db_forms_set_collaborators_in_lineage.
  */
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/require-login.php';
@@ -306,23 +306,11 @@ $auditEntry = [
 ];
 
 try {
-    $written = ebr_db_forms_set_collaborators_same_name_pdf(
-        (string) $form['name'],
-        (string) $form['pdfFile'],
-        $stored
-    );
+    $lineageId = (string) ($form['lineageId'] ?? $form['id']);
+    $written = ebr_db_forms_set_collaborators_in_lineage($lineageId, $stored);
 
     // Record it against the latest version, where the form audit page reads.
-    $latest = null;
-    foreach (ebr_db_forms_all_api() as $f) {
-        if (($f['name'] ?? '') !== ($form['name'] ?? '') || ($f['pdfFile'] ?? '') !== ($form['pdfFile'] ?? '')) {
-            continue;
-        }
-        if ($latest === null || (float) ($f['version'] ?? 0) > (float) ($latest['version'] ?? 0)) {
-            $latest = $f;
-        }
-    }
-    $target = $latest ?? $form;
+    $target = ebr_db_forms_lineage_latest($lineageId) ?? $form;
     $trail = is_array($target['auditTrail'] ?? null) ? $target['auditTrail'] : [];
     $auditEntry['version'] = number_format((float) ($target['version'] ?? 1), 1);
     $trail[] = $auditEntry;

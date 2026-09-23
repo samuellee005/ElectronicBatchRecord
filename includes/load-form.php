@@ -26,6 +26,8 @@ $latestForm = null;
 $latestTime = 0;
 $hasLatestFlag = false;
 
+// Newest form built on this PDF. Several forms can share a template, so the
+// winner is the most recently updated current version among them.
 foreach ($all as $formData) {
     if ($formData && isset($formData['pdfFile']) && $formData['pdfFile'] === $pdfFile) {
         $isLatest = isset($formData['isLatest']) && $formData['isLatest'] === true;

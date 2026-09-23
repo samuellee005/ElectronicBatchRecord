@@ -1005,6 +1005,9 @@ export default function FormBuilder() {
   // so saving a form never rewrites its access list.
   const [canManageAccess, setCanManageAccess] = useState(false)
   const [accessFormId, setAccessFormId] = useState(null)
+  // The form (across versions) being edited; renaming keeps this, so the save
+  // modal can tell a rename from "save as a new form".
+  const [loadedLineageId, setLoadedLineageId] = useState(null)
   const [showAccessModal, setShowAccessModal] = useState(false)
   const [formCollaborators, setFormCollaborators] = useState([])
   const [collabSearch, setCollabSearch] = useState('')
@@ -1383,6 +1386,7 @@ export default function FormBuilder() {
         if (data.success && data.form?.fields) {
           setLoadedFormName(data.form.name || null)
           setAccessFormId(urlFormId)
+          setLoadedLineageId(data.form.lineageId || urlFormId)
           setSourceFormIds(data.form.sourceFormIds?.length ? data.form.sourceFormIds : [urlFormId])
           setCanEditForm(data.canEdit !== false)
           setCanManageAccess(data.canManageAccess === true)
@@ -2430,6 +2434,7 @@ export default function FormBuilder() {
         if (data.success && data.form?.fields) {
           setLoadedFormName(data.form.name || null)
           setAccessFormId(selectionFormId)
+          setLoadedLineageId(data.form.lineageId || selectionFormId)
           setSourceFormIds(
             data.form.sourceFormIds?.length ? data.form.sourceFormIds : [selectionFormId],
           )
@@ -2468,9 +2473,11 @@ export default function FormBuilder() {
         const names = [...new Set(data.forms.map((f) => f.name))].sort()
         setAllFormNames(names)
 
-        if (loadedFormName) {
-          const match = data.forms.find(
-            (f) => f.name === loadedFormName && f.pdfFile === pdfFile && f.isLatest,
+        if (loadedLineageId || loadedFormName) {
+          const match = data.forms.find((f) =>
+            loadedLineageId
+              ? f.lineageId === loadedLineageId && f.isLatest
+              : f.name === loadedFormName && f.pdfFile === pdfFile && f.isLatest,
           )
           if (match) {
             setSaveSelectedFormId(match.id)
@@ -2483,16 +2490,46 @@ export default function FormBuilder() {
     } catch {}
   }
 
+  /** Next version within a form's own history (the server bumps by 0.1). */
+  const nextVersionFor = (rows) =>
+    (Math.max(...rows.map((f) => Number(f.version) || 1)) + 0.1).toFixed(1)
+
   const getVersionPreview = () => {
-    const name = saveFormNameMode === 'new' ? saveFormNameNew : saveFormName
-    if (!name?.trim()) return null
+    const name = (saveFormNameMode === 'new' ? saveFormNameNew : saveFormName)?.trim()
+    if (!name) return null
+
+    // Editing an existing form: it keeps its history whether or not the name
+    // changes, so a rename is just the next version of the same form.
+    const lineage = loadedLineageId
+      ? allFormsData.filter((f) => f.lineageId === loadedLineageId)
+      : []
+    if (lineage.length > 0 && saveSelectedFormId) {
+      const current = lineage.find((f) => f.id === saveSelectedFormId) || lineage[0]
+      const taken = allFormsData.some(
+        (f) => f.name === name && f.pdfFile === pdfFile && f.lineageId !== loadedLineageId,
+      )
+      if (taken) {
+        return {
+          text: `Another form already uses the name “${name}” with this PDF. Choose a different name.`,
+          type: 'new',
+        }
+      }
+      const next = nextVersionFor(lineage)
+      return {
+        text:
+          current.name !== name
+            ? `Renames “${current.name}” to “${name}” and saves it as Version ${next}. Its version history is kept.`
+            : `This form already exists. Next version will be: Version ${next}`,
+        type: 'existing',
+      }
+    }
+
     const matching = allFormsData.filter((f) => f.name === name && f.pdfFile === pdfFile)
     if (matching.length === 0) {
       return { text: 'This will create a new form (Version 1)', type: 'new' }
     }
-    const maxVersion = Math.max(...matching.map((f) => f.version || 1))
     return {
-      text: `This form already exists. Next version will be: Version ${maxVersion + 1}`,
+      text: `This form already exists. Next version will be: Version ${nextVersionFor(matching)}`,
       type: 'existing',
     }
   }
@@ -2959,13 +2996,20 @@ export default function FormBuilder() {
 
   // -- Grouped forms for selection modal --
 
+  // One entry per form (its versions together), headed by the current name —
+  // a renamed form stays one entry instead of appearing under both names.
   const groupedAvailableForms = useMemo(() => {
-    const grouped = {}
+    const byLineage = {}
     availableForms.forEach((f) => {
-      if (!grouped[f.name]) grouped[f.name] = []
-      grouped[f.name].push(f)
+      const key = f.lineageId || f.name
+      if (!byLineage[key]) byLineage[key] = []
+      byLineage[key].push(f)
     })
-    Object.values(grouped).forEach((arr) => arr.sort((a, b) => (b.version || 1) - (a.version || 1)))
+    const grouped = {}
+    Object.values(byLineage).forEach((arr) => {
+      arr.sort((a, b) => (b.version || 1) - (a.version || 1))
+      grouped[arr[0].name] = arr
+    })
     return grouped
   }, [availableForms])
 

@@ -213,3 +213,25 @@ ALTER TABLE ebr_batch_records ADD COLUMN IF NOT EXISTS completed_sign_off_user_i
 -- (another collaborator at a shared machine); 'session' = they are the signed-in user, whose
 -- identity was already proved at login. Both attribute entries; the record keeps which it was.
 ALTER TABLE ebr_batch_presence ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'password';
+
+---STATEMENT---
+-- A form's stable identity across versions. Name and PDF are attributes, so
+-- renaming a form stays in the same lineage instead of starting a new one.
+ALTER TABLE ebr_forms ADD COLUMN IF NOT EXISTS lineage_id TEXT;
+
+---STATEMENT---
+-- Backfill: the rows that share a name and PDF are today's de-facto lineage;
+-- the earliest of them (lowest version, then oldest) names it. Idempotent —
+-- only rows without a lineage are touched.
+UPDATE ebr_forms f
+SET lineage_id = g.lineage_id
+FROM (
+    SELECT DISTINCT ON (name, pdf_file)
+           name, pdf_file, id AS lineage_id
+    FROM ebr_forms
+    ORDER BY name, pdf_file, version ASC, created_at ASC
+) g
+WHERE f.name = g.name AND f.pdf_file = g.pdf_file AND f.lineage_id IS NULL;
+
+---STATEMENT---
+CREATE INDEX IF NOT EXISTS idx_ebr_forms_lineage ON ebr_forms (lineage_id);

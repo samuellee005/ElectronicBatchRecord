@@ -8,6 +8,7 @@ const EVENT_TYPE_LABELS = {
   component_modified: 'Field updated',
   stage_modified: 'Stage updated',
   access_changed: 'Access updated',
+  form_renamed: 'Form renamed',
   pdf_changed: 'PDF changed',
   version_updated: 'Version saved',
 }
@@ -163,6 +164,14 @@ export function formatAuditEntryBlock(entry) {
       ...base,
       headline: 'Form access updated',
       bodyLines: changes.map((c) => (c && typeof c === 'object' ? describeAccessChange(c) : String(c))),
+    }
+  }
+
+  if (type === 'form_renamed') {
+    return {
+      ...base,
+      headline: `Form renamed: "${entry.oldName || '—'}" → "${entry.newName || '—'}"`,
+      bodyLines: [],
     }
   }
 

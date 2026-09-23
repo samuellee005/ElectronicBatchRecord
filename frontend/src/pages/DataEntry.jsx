@@ -2110,7 +2110,9 @@ export default function DataEntry() {
       setFormConfig(res.form)
 
       mergePrefs((prev) => {
-        const key = `${res.form.name || ''}|${res.form.pdfFile || ''}`
+        // Keyed on the form, not its name, so renaming it does not look like a
+        // different form on the dashboard (see formGroupKey in Dashboard.jsx).
+        const key = res.form.lineageId || `${res.form.name || ''}|${res.form.pdfFile || ''}`
         const ver = res.form.version || 1
         const lastSeen =
           prev.ebrFormLastSeen && typeof prev.ebrFormLastSeen === 'object' && !Array.isArray(prev.ebrFormLastSeen)

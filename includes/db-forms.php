@@ -83,6 +83,10 @@ function ebr_db_form_row_to_api(array $row): array
 
     return [
         'id' => $row['id'],
+        // The form this row is a version of; older rows predate the column.
+        'lineageId' => isset($row['lineage_id']) && $row['lineage_id'] !== null && $row['lineage_id'] !== ''
+            ? (string) $row['lineage_id']
+            : (string) $row['id'],
         'name' => $row['name'],
         'description' => $row['description'] ?? '',
         'pdfFile' => $row['pdf_file'],
@@ -148,6 +152,10 @@ function ebr_db_forms_ensure_category_columns(): void
     $pdo->exec("ALTER TABLE ebr_forms ADD COLUMN IF NOT EXISTS department TEXT NOT NULL DEFAULT ''");
     $pdo->exec("ALTER TABLE ebr_forms ADD COLUMN IF NOT EXISTS program TEXT NOT NULL DEFAULT ''");
     $pdo->exec("ALTER TABLE ebr_forms ADD COLUMN IF NOT EXISTS form_type TEXT NOT NULL DEFAULT ''");
+    // Lineage: see database/schema.sql. Reads tolerate a missing/NULL value by
+    // falling back to the row's own id, so a database that has not had the
+    // schema re-applied keeps working until the first save adds the column.
+    $pdo->exec('ALTER TABLE ebr_forms ADD COLUMN IF NOT EXISTS lineage_id TEXT');
     $done = true;
 }
 
@@ -164,13 +172,13 @@ INSERT INTO ebr_forms (
     source_form_ids, is_combined, audit_trail,
     created_at, updated_at, created_by, updated_by, storage_filename,
     collaborators, created_by_user_id, updated_by_user_id,
-    department, program, form_type
+    department, program, form_type, lineage_id
 ) VALUES (
     :id, :name, :description, :pdf_file, CAST(:fields AS jsonb), :version, :is_latest,
     CAST(:source_form_ids AS jsonb), :is_combined, CAST(:audit_trail AS jsonb),
     :created_at, :updated_at, :created_by, :updated_by, :storage_filename,
     CAST(:collaborators AS jsonb), :created_by_user_id, :updated_by_user_id,
-    :department, :program, :form_type
+    :department, :program, :form_type, :lineage_id
 )
 SQL;
     $st = $pdo->prepare($sql);
@@ -196,6 +204,10 @@ SQL;
         'department' => (string) ($form['department'] ?? ''),
         'program' => (string) ($form['program'] ?? ''),
         'form_type' => (string) ($form['formType'] ?? ''),
+        // A row is its own lineage when none was passed (a brand-new form).
+        'lineage_id' => (string) ($form['lineageId'] ?? '') !== ''
+            ? (string) $form['lineageId']
+            : (string) $form['id'],
     ]);
 }
 
@@ -229,7 +241,8 @@ UPDATE ebr_forms SET
     updated_by_user_id = :updated_by_user_id,
     department = :department,
     program = :program,
-    form_type = :form_type
+    form_type = :form_type,
+    lineage_id = :lineage_id
 WHERE id = :id
 SQL;
     $st = $pdo->prepare($sql);
@@ -255,30 +268,61 @@ SQL;
         'department' => (string) ($form['department'] ?? ''),
         'program' => (string) ($form['program'] ?? ''),
         'form_type' => (string) ($form['formType'] ?? ''),
+        // A row is its own lineage when none was passed (a brand-new form).
+        'lineage_id' => (string) ($form['lineageId'] ?? '') !== ''
+            ? (string) $form['lineageId']
+            : (string) $form['id'],
     ]);
+}
+
+/**
+ * Every version of one form, oldest first. `lineage_id` is NULL on rows saved
+ * before the column existed, so a row whose id is the lineage is included too.
+ *
+ * @return list<array<string, mixed>>
+ */
+function ebr_db_forms_lineage_rows(string $lineageId): array
+{
+    $pdo = ebr_pg_pdo();
+    $st = $pdo->prepare(
+        'SELECT * FROM ebr_forms WHERE lineage_id = :l OR (lineage_id IS NULL AND id = :l)
+         ORDER BY version ASC, created_at ASC'
+    );
+    $st->execute(['l' => $lineageId]);
+
+    $out = [];
+    while ($row = $st->fetch(PDO::FETCH_ASSOC)) {
+        $out[] = ebr_db_form_row_to_api($row);
+    }
+
+    return $out;
+}
+
+/** The newest version of a form, or null when the lineage has no rows. */
+function ebr_db_forms_lineage_latest(string $lineageId): ?array
+{
+    $rows = ebr_db_forms_lineage_rows($lineageId);
+
+    return $rows === [] ? null : $rows[count($rows) - 1];
 }
 
 /**
  * Write the access roster onto every version of a form.
  *
  * Access belongs to the form, not to one saved version, but the roster is a
- * column on each row — so every row sharing (name, pdf_file), the same grouping
- * ebr_db_forms_mark_not_latest_same_name_pdf uses for versions, is updated
- * together. Returns the number of rows written.
+ * column on each row, so the whole lineage is written together. Returns the
+ * number of rows written.
  *
  * @param list<array<string, mixed>> $collaborators
  */
-function ebr_db_forms_set_collaborators_same_name_pdf(string $name, string $pdfFile, array $collaborators): int
+function ebr_db_forms_set_collaborators_in_lineage(string $lineageId, array $collaborators): int
 {
     $pdo = ebr_pg_pdo();
     $st = $pdo->prepare(
-        'UPDATE ebr_forms SET collaborators = CAST(:c AS JSONB) WHERE name = :n AND pdf_file = :p'
+        'UPDATE ebr_forms SET collaborators = CAST(:c AS JSONB)
+         WHERE lineage_id = :l OR (lineage_id IS NULL AND id = :l)'
     );
-    $st->execute([
-        'c' => ebr_db_forms_json_enc($collaborators),
-        'n' => $name,
-        'p' => $pdfFile,
-    ]);
+    $st->execute(['c' => ebr_db_forms_json_enc($collaborators), 'l' => $lineageId]);
 
     return $st->rowCount();
 }
@@ -296,14 +340,19 @@ function ebr_db_forms_set_audit_trail(string $formId, array $auditTrail): void
     $st->execute(['a' => ebr_db_forms_json_enc($auditTrail), 'i' => $formId]);
 }
 
-function ebr_db_forms_mark_not_latest_same_name_pdf(string $name, string $pdfFile, ?string $exceptId): void
+/**
+ * Clear `is_latest` on every version of a form except `$exceptId`, so exactly
+ * one row in a lineage is current.
+ */
+function ebr_db_forms_mark_not_latest_in_lineage(string $lineageId, ?string $exceptId): void
 {
     $pdo = ebr_pg_pdo();
+    $where = 'WHERE (lineage_id = :l OR (lineage_id IS NULL AND id = :l))';
+    $params = ['l' => $lineageId];
     if ($exceptId !== null && $exceptId !== '') {
-        $st = $pdo->prepare('UPDATE ebr_forms SET is_latest = FALSE WHERE name = :n AND pdf_file = :p AND id <> :exc');
-        $st->execute(['n' => $name, 'p' => $pdfFile, 'exc' => $exceptId]);
-    } else {
-        $st = $pdo->prepare('UPDATE ebr_forms SET is_latest = FALSE WHERE name = :n AND pdf_file = :p');
-        $st->execute(['n' => $name, 'p' => $pdfFile]);
+        $where .= ' AND id <> :exc';
+        $params['exc'] = $exceptId;
     }
+    $st = $pdo->prepare('UPDATE ebr_forms SET is_latest = FALSE ' . $where);
+    $st->execute($params);
 }
