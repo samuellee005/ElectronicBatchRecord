@@ -1,0 +1,186 @@
+/* Stages panel → List view: every field as one editable row. */
+.fb-list-view {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fb-list-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.fb-list-search {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.78rem;
+  padding: 4px 8px;
+  border: 1px solid #c5c9d6;
+  border-radius: 6px;
+  background: #fff;
+  color: #1e293b;
+}
+
+.fb-list-search:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+.fb-list-count {
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #8a93a3;
+  white-space: nowrap;
+}
+
+.fb-list-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid #e0e4ef;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.fb-list-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 0.76rem;
+}
+
+.fb-list-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  text-align: left;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #6b7280;
+  background: #eef1f6;
+  padding: 6px 8px;
+  border-bottom: 1px solid #dde1ec;
+  white-space: nowrap;
+}
+
+.fb-list-th-num,
+.fb-list-th-req,
+.fb-list-th-page {
+  width: 1%;
+}
+
+.fb-list-th-req,
+.fb-list-th-page {
+  text-align: center;
+}
+
+.fb-list-th-stage {
+  width: 26%;
+}
+
+.fb-list-table td {
+  padding: 3px 6px;
+  border-bottom: 1px solid #f0f2f6;
+  vertical-align: middle;
+}
+
+.fb-list-row {
+  cursor: pointer;
+}
+
+.fb-list-row:hover td {
+  background: #f8f9ff;
+}
+
+.fb-list-row.is-selected td {
+  background: #eef1ff;
+}
+
+.fb-list-row.is-selected .fb-list-cell-name {
+  box-shadow: inset 3px 0 0 #667eea;
+}
+
+.fb-list-cell-name {
+  min-width: 140px;
+}
+
+.fb-list-input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  font: inherit;
+  padding: 3px 5px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: #1e293b;
+}
+
+.fb-list-input:hover:not(:disabled) {
+  border-color: #d5d9e4;
+  background: #fff;
+}
+
+.fb-list-input:focus {
+  outline: none;
+  border-color: #667eea;
+  background: #fff;
+}
+
+.fb-list-input:disabled {
+  color: #6b7280;
+  cursor: not-allowed;
+}
+
+.fb-list-input-name {
+  font-weight: 600;
+}
+
+.fb-list-input-num {
+  width: 3.6rem;
+  text-align: center;
+}
+
+/* Muted type name under the field name, so a row is identifiable when the
+   name is blank or ambiguous. */
+.fb-list-type {
+  display: block;
+  padding-left: 6px;
+  font-size: 0.66rem;
+  color: #9099a8;
+}
+
+.fb-list-cell-req,
+.fb-list-cell-page {
+  text-align: center;
+}
+
+.fb-list-cell-page {
+  font-variant-numeric: tabular-nums;
+  color: #8a93a3;
+}
+
+.fb-list-check {
+  accent-color: #667eea;
+  cursor: pointer;
+}
+
+.fb-list-dash {
+  display: block;
+  text-align: center;
+  color: #c0c6d2;
+}
+
+.fb-list-empty {
+  padding: 18px 10px;
+  text-align: center;
+  color: #8a93a3;
+  font-style: italic;
+}

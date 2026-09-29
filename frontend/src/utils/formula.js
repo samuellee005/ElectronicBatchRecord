@@ -2,20 +2,67 @@
  * Safe arithmetic evaluator for calculated number fields.
  *
  * Supports numbers (with decimals), the operators + - * /, parentheses, unary
- * +/-, and a small set of functions (min, max, round, abs, sqrt). Named
+ * +/-, and the functions listed in FORMULA_FUNCTIONS below. Named
  * identifiers are references (tokens) whose values are supplied in `values`.
  * There is no use of eval/Function — a tiny tokenizer + recursive-descent
  * parser evaluates the expression, so a form's formula can never run arbitrary
  * code.
  */
 
-const FUNCS = {
-  min: Math.min,
-  max: Math.max,
-  round: Math.round,
-  abs: Math.abs,
-  sqrt: Math.sqrt,
-}
+/**
+ * The functions a formula may call, with the copy the builder's formula help
+ * shows. This list is the single source of truth: the evaluator's lookup table
+ * is derived from it, so a function added here is documented automatically.
+ * Names are matched case-insensitively.
+ */
+export const FORMULA_FUNCTIONS = [
+  {
+    name: 'min',
+    signature: 'min(a, b, ...)',
+    summary: 'The smallest of the values given.',
+    example: 'min(A, B)',
+    fn: Math.min,
+  },
+  {
+    name: 'max',
+    signature: 'max(a, b, ...)',
+    summary: 'The largest of the values given.',
+    example: 'max(A, B, 0)',
+    fn: Math.max,
+  },
+  {
+    name: 'round',
+    signature: 'round(a)',
+    summary: 'Rounds to the nearest whole number (.5 rounds up).',
+    example: 'round(A / B)',
+    fn: Math.round,
+  },
+  {
+    name: 'abs',
+    signature: 'abs(a)',
+    summary: 'Drops the sign, so the result is never negative.',
+    example: 'abs(A - B)',
+    fn: Math.abs,
+  },
+  {
+    name: 'sqrt',
+    signature: 'sqrt(a)',
+    summary: 'Square root of the value.',
+    example: 'sqrt(A)',
+    fn: Math.sqrt,
+  },
+]
+
+/** The operators a formula may use, in precedence order, for the help panel. */
+export const FORMULA_OPERATORS = [
+  { symbol: '+', summary: 'Add', example: 'A + B' },
+  { symbol: '-', summary: 'Subtract, or negate a single value', example: 'A - B' },
+  { symbol: '*', summary: 'Multiply', example: 'A * 1.05' },
+  { symbol: '/', summary: 'Divide (dividing by zero is an error)', example: 'A / B' },
+  { symbol: '( )', summary: 'Group, to run a step first', example: '(A + B) / 2' },
+]
+
+const FUNCS = Object.fromEntries(FORMULA_FUNCTIONS.map((f) => [f.name, f.fn]))
 
 function lex(src) {
   const s = String(src ?? '')
@@ -180,6 +227,124 @@ export function validateFormula(formula, allowedTokens) {
   } catch (e) {
     return { ok: false, error: e.message || 'Invalid formula.' }
   }
+}
+
+/* ---------------- date / time references ---------------- */
+
+/**
+ * Field types a calculation may read. A date or time field has no number of its
+ * own, so its reference also carries a `unit` (see CALC_UNITS) saying what the
+ * formula sees.
+ */
+export const CALC_REF_TYPES = ['number', 'date', 'time']
+
+/** The kind of value a field contributes to a formula, or null if it cannot. */
+export function calcRefKind(field) {
+  const t = field?.type
+  return CALC_REF_TYPES.includes(t) ? t : null
+}
+
+/**
+ * Units a date/time reference can resolve into. `ms` is what the instant is
+ * divided by, so a difference between two references of the same unit reads
+ * directly in that unit.
+ */
+export const CALC_UNITS = [
+  { key: 'days', label: 'days', ms: 86400000 },
+  { key: 'hours', label: 'hours', ms: 3600000 },
+  { key: 'minutes', label: 'minutes', ms: 60000 },
+]
+
+/** Unit a new date/time reference starts on: whole days for a date, hours for a clock time. */
+export function defaultCalcUnit(kind) {
+  return kind === 'date' ? 'days' : 'hours'
+}
+
+function unitMs(unit) {
+  return (CALC_UNITS.find((u) => u.key === unit) || CALC_UNITS[1]).ms
+}
+
+/**
+ * `YYYY-MM-DD` (what a date field stores) -> milliseconds at UTC midnight, or
+ * null if it is missing or not a real calendar date.
+ *
+ * UTC deliberately: the value carries no zone, and anchoring it to UTC keeps the
+ * difference between two dates an exact whole number of days. Local midnight
+ * would lose or gain an hour across a DST boundary, so "days between" could
+ * come out as 6.958 instead of 7.
+ */
+export function parseDateValue(raw) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(raw ?? '').trim())
+  if (!m) return null
+  const y = Number(m[1])
+  const mo = Number(m[2])
+  const d = Number(m[3])
+  const ms = Date.UTC(y, mo - 1, d)
+  const back = new Date(ms)
+  // Rejects 2026-02-31 and friends, which Date.UTC would silently roll over.
+  if (back.getUTCFullYear() !== y || back.getUTCMonth() !== mo - 1 || back.getUTCDate() !== d) {
+    return null
+  }
+  return ms
+}
+
+/** `HH:MM` or `HH:MM:SS` -> milliseconds since midnight, or null if unusable. */
+export function parseTimeValue(raw) {
+  const m = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(String(raw ?? '').trim())
+  if (!m) return null
+  const h = Number(m[1])
+  const min = Number(m[2])
+  const sec = m[3] === undefined ? 0 : Number(m[3])
+  if (h > 23 || min > 59 || sec > 59) return null
+  return ((h * 60 + min) * 60 + sec) * 1000
+}
+
+/**
+ * The number a date/time reference puts into a formula: the instant it names,
+ * measured in `unit`.
+ *
+ * A date alone is that date's midnight, so two of them differ by whole days. A
+ * time alone is measured from midnight, so two of them differ by the time of
+ * day elapsed — which goes negative across midnight, and is why a date can be
+ * paired with a time (`paired`) to name a real instant instead.
+ *
+ * Returns `{ value }`, or `{ bad: 'date' | 'time' }` naming which half could not
+ * be read — a paired reference reads two fields, so the caller needs to know
+ * which one to blame. The caller also decides whether an unreadable value means
+ * "awaiting entry" or an error.
+ */
+export function calcDateTimeValue({ kind, unit, dateRaw, timeRaw, paired }) {
+  const per = unitMs(unit)
+  if (kind === 'time') {
+    const t = parseTimeValue(timeRaw ?? dateRaw)
+    return t == null ? { bad: 'time' } : { value: t / per }
+  }
+  if (kind !== 'date') return { bad: 'date' }
+  const d = parseDateValue(dateRaw)
+  if (d == null) return { bad: 'date' }
+  if (!paired) return { value: d / per }
+  const t = parseTimeValue(timeRaw)
+  if (t == null) return { bad: 'time' }
+  return { value: (d + t) / per }
+}
+
+/**
+ * Whether a reference is configured enough to evaluate: a field is chosen, a
+ * date/time reference has a known unit, and a date paired with a time points at
+ * a time field that still exists.
+ */
+export function calcRefComplete(ref, fields) {
+  if (!ref?.fieldId) return false
+  const field = (fields || []).find((f) => f.id === ref.fieldId)
+  const kind = calcRefKind(field)
+  if (!kind) return false
+  if (kind === 'number') return true
+  if (!CALC_UNITS.some((u) => u.key === ref.unit)) return false
+  if (kind === 'date' && ref.timeFieldId) {
+    const paired = (fields || []).find((f) => f.id === ref.timeFieldId)
+    return paired?.type === 'time'
+  }
+  return true
 }
 
 /* ---------------- calculated-field dependency graph ---------------- */

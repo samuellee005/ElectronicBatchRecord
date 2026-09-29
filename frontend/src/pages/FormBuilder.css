@@ -1903,6 +1903,7 @@
   list-style: none;
   grid-column: 1 / -1;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 6px;
@@ -1923,6 +1924,66 @@
 .fb-stage-page-sep-count {
   font-weight: 600;
   color: #9099a8;
+}
+
+/* A page group is a stage you have not committed to: its header is clickable and
+   naming it promotes the page's fields into a real stage. */
+.fb-stage-page-sep-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.fb-stage-page-sep-name:hover,
+.fb-stage-page-sep-name:focus-visible {
+  color: #4c5fb1;
+}
+
+.fb-stage-page-sep-hint {
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: #9099a8;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.fb-stage-page-sep-name:hover .fb-stage-page-sep-hint,
+.fb-stage-page-sep-name:focus-visible .fb-stage-page-sep-hint {
+  opacity: 1;
+}
+
+.fb-stage-page-sep-error {
+  flex-basis: 100%;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: #c93b40;
+}
+
+/* The sep label is uppercase and letter-spaced; what the user types is not. */
+.fb-stage-page-sep .fb-stage-title-input {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 0.78rem;
+}
+
+.fb-stage-page-note {
+  margin: 6px 10px 0;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: #8a93a3;
 }
 
 /* Small page badge on each Unassigned pill */
@@ -2410,4 +2471,85 @@
 .fb-stage-bulk-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* Formula help ("? Help" beside the Formula box in the calculated-field editor) */
+.fb-calc-formula-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.fb-calc-help { border: 1px solid #c5c9d6; background: #fff; border-radius: 6px; padding: 2px 8px; font-size: 0.75rem; font-weight: 700; color: #4c5fb1; cursor: pointer; }
+.fb-calc-help:hover { border-color: #667eea; background: #f2f4ff; }
+.fb-calc-help-link { border: none; background: none; padding: 0; font: inherit; color: #4c5fb1; font-weight: 600; text-decoration: underline; cursor: pointer; }
+.fb-calc-help-link:hover { color: #3c4c9b; }
+
+.fb-formula-help { max-width: 760px; padding: 28px 32px; text-align: left; }
+.fb-formula-help h4 { margin: 22px 0 8px; font-size: 0.9rem; color: #333; text-transform: uppercase; letter-spacing: 0.04em; }
+.fb-formula-help code {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  background: #f1f2f8;
+  border-radius: 4px;
+  padding: 1px 5px;
+  white-space: nowrap;
+}
+.fb-fh-steps { margin: 0; padding-left: 20px; font-size: 0.88rem; color: #444; line-height: 1.55; }
+.fb-fh-steps li + li { margin-top: 6px; }
+.fb-fh-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; color: #444; }
+.fb-fh-table td { padding: 6px 10px 6px 0; border-top: 1px solid #eee; vertical-align: top; line-height: 1.45; }
+.fb-fh-table tr:first-child td { border-top: none; }
+.fb-fh-table .fb-fh-name { white-space: nowrap; font-weight: 600; color: #333; width: 1%; }
+.fb-fh-table .fb-fh-eg { white-space: nowrap; width: 1%; }
+.fb-fh-examples .fb-fh-name { white-space: normal; min-width: 150px; }
+.fb-fh-note { margin: 8px 0 0; font-size: 0.82rem; color: #777; line-height: 1.5; }
+.fb-fh-notes { margin: 0; padding-left: 20px; font-size: 0.85rem; color: #444; line-height: 1.55; }
+.fb-fh-notes li + li { margin-top: 6px; }
+
+@media (max-width: 720px) {
+  .fb-formula-help { padding: 24px 18px; }
+  .fb-fh-table .fb-fh-eg { white-space: normal; }
+}
+
+/* A date/time reference carries a unit (and optionally a paired time field) on a
+   second line under the field picker. */
+.fb-calc-ref-row-group { display: flex; flex-direction: column; gap: 4px; }
+.fb-calc-token--time { background: #7c5cc4; }
+.fb-calc-ref-unit-row { display: flex; flex-wrap: wrap; gap: 6px 10px; padding-left: 32px; }
+.fb-calc-ref-opt { display: flex; align-items: center; gap: 5px; font-size: 0.76rem; color: #666; min-width: 0; }
+.fb-calc-ref-opt span { white-space: nowrap; }
+.fb-calc-ref-opt select { flex: 1; min-width: 0; font-size: 0.78rem; padding: 2px 4px; }
+.fb-fh-lede { margin: 0 0 8px; font-size: 0.86rem; color: #444; line-height: 1.55; }
+
+/* Left panel view tabs: Stages (blocks, drag to organize) / List (editable rows) */
+.fb-panel-views {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background: #eef1f6;
+  border-radius: 7px;
+}
+
+.fb-panel-view-tab {
+  border: none;
+  background: none;
+  border-radius: 5px;
+  padding: 3px 10px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #6b7280;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.fb-panel-view-tab:hover:not(.is-active) {
+  color: #4c5fb1;
+}
+
+.fb-panel-view-tab.is-active {
+  background: #fff;
+  color: #2d3250;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+/* The table earns more of the panel than the stage blocks need. */
+.fb-stages-section--list {
+  flex: 6 1 0;
+  min-height: 220px;
 }

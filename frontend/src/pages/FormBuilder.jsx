@@ -36,8 +36,19 @@ import {
 import { useUserPrefs } from '../context/UserPrefsContext'
 import { useAuth } from '../context/AuthContext'
 import ManageFormAccess from '../components/ManageFormAccess'
+import FieldListTable from '../components/forms/FieldListTable'
 import { pageDesignSize } from '../utils/pdfDesignCoords'
-import { validateFormula, calcIneligibleRefs } from '../utils/formula'
+import {
+  validateFormula,
+  calcIneligibleRefs,
+  calcRefKind,
+  calcRefComplete,
+  defaultCalcUnit,
+  CALC_REF_TYPES,
+  CALC_UNITS,
+  FORMULA_FUNCTIONS,
+  FORMULA_OPERATORS,
+} from '../utils/formula'
 import { isStageGate, stageRequiredForJoin } from '../utils/stageSettings'
 import { buildTableMergeLayout, tableCellKey } from '../utils/tableMergeLayout'
 import { DEFAULT_TABLE_COL_WIDTH, DEFAULT_TABLE_ROW_HEIGHT, tableColWidthPx, tableRowHeightPx } from '../utils/tableFieldDims'
@@ -261,6 +272,25 @@ function groupFieldsByPage(list) {
   return [...byPage.entries()]
     .sort((a, b) => a[0] - b[0])
     .map(([page, items]) => ({ page, items }))
+}
+
+/** The placeholder name a page group shows until it is given a real one. */
+function pageGroupName(page) {
+  return `Page ${page}`
+}
+
+/**
+ * Why `name` cannot become a stage name for a page group, or '' if it can.
+ *
+ * Rejecting "Page 7" is deliberate: a named page becomes a stage, and a stage
+ * called "Page 7" would be indistinguishable in the list from a page that is
+ * still just a page.
+ */
+function pageNameProblem(name) {
+  const n = String(name || '').trim()
+  if (n === '') return ''
+  if (/^page\s*\d+$/i.test(n)) return `Give it a real stage name — "${n}" keeps it a page.`
+  return ''
 }
 
 /**
@@ -1044,9 +1074,17 @@ export default function FormBuilder() {
   const [unassignedCollapsed, setUnassignedCollapsed] = useState(false)
   // Widen the stages/components sidebar for easier organizing.
   const [stagesExpanded, setStagesExpanded] = useState(false)
+  // Left panel view: 'stages' (grouped blocks, drag to organize) or 'list' (one
+  // editable row per field).
+  const [panelView, setPanelView] = useState('stages')
   // Inline rename of a stage name in the sidebar (double-click the title).
   const [editingStageName, setEditingStageName] = useState(null)
   const [stageNameDraft, setStageNameDraft] = useState('')
+  // Page group being named in the Unassigned list (click its header). Naming a
+  // page is what turns it into a stage — see promotePageToStage.
+  const [namingPage, setNamingPage] = useState(null)
+  const [pageNameDraft, setPageNameDraft] = useState('')
+  const [pageNameError, setPageNameError] = useState('')
   // Stage whose properties are open in the right panel (click a stage header).
   // Mutually exclusive with a field selection.
   const [selectedStageName, setSelectedStageName] = useState(null)
@@ -2601,11 +2639,33 @@ export default function FormBuilder() {
   useEffect(() => {
     if (selectedStageName && !existingStages.includes(selectedStageName)) setSelectedStageName(null)
   }, [existingStages, selectedStageName])
+  // A page being named that no longer holds unassigned fields (it was just
+  // promoted, or an undo moved them) has nothing left to name.
+  useEffect(() => {
+    if (namingPage == null) return
+    if (!unassignedFields.some((f) => (Number(f.page) || 1) === namingPage)) setNamingPage(null)
+  }, [namingPage, unassignedFields])
 
   const selectStage = useCallback((stageName) => {
     setSelectedFieldIds(new Set())
     setSelectedPillIds(new Set())
     setSelectedStageName(stageName)
+  }, [])
+
+  // Move a field to 1-based `position` within its own group (its stage, or
+  // Unassigned) — the List view's "In list" column, and the typed equivalent of
+  // dragging a pill in the Stages view.
+  const moveFieldToGroupPosition = useCallback((fieldId, position) => {
+    setFields((prev) => {
+      const f0 = prev.find((f) => f.id === fieldId)
+      if (!f0) return prev
+      const key = stageKey(f0)
+      const ids = sortFieldIdsInGroup(prev, key)
+      const from = ids.indexOf(fieldId)
+      const to = Math.min(Math.max(1, Math.round(Number(position)) || 1), ids.length) - 1
+      if (from < 0 || from === to) return prev
+      return applyFieldGroupPlacement(prev, fieldId, key, reorderStringArray(ids, from, to), key, null)
+    })
   }, [])
 
   // Move a stage to 1-based position `position` in the completion order.
@@ -2653,13 +2713,29 @@ export default function FormBuilder() {
   }, [fields])
   const duplicateLabelIdsRef = useRef(duplicateLabelIds)
   duplicateLabelIdsRef.current = duplicateLabelIds
-  // Above this many, show the Unassigned list grouped by page so a large batch
-  // record's fields are navigable instead of one long wall.
-  const groupUnassignedByPage = unassignedFields.length > 10
-  const unassignedByPage = useMemo(
-    () => (groupUnassignedByPage ? groupFieldsByPage(unassignedFields) : null),
-    [groupUnassignedByPage, unassignedFields],
-  )
+  // Unassigned fields are always grouped by page. A page group doubles as a
+  // provisional stage: it can be named, and naming it is what makes it a real
+  // stage (promotePageToStage). Left alone it stays just a grouping.
+  const unassignedByPage = useMemo(() => groupFieldsByPage(unassignedFields), [unassignedFields])
+
+  // List view rows: the same top-to-bottom order the Stages view shows (each
+  // stage in completion order, then Unassigned), so switching views does not
+  // shuffle anything.
+  const listRows = useMemo(() => {
+    const out = []
+    for (const st of existingStages) out.push(...sortFieldsInGroupList(fields, st))
+    out.push(...unassignedFields)
+    return out
+  }, [existingStages, fields, unassignedFields])
+  // Fields per group, for the "In list" column's 1–N range.
+  const stageSizes = useMemo(() => {
+    const m = new Map()
+    for (const f of fields) {
+      const k = stageKey(f)
+      m.set(k, (m.get(k) || 0) + 1)
+    }
+    return m
+  }, [fields])
 
   const dragFieldIdRef = useRef(null)
   const dragStageNameRef = useRef(null)
@@ -2746,6 +2822,51 @@ export default function FormBuilder() {
     },
     [renameStage, stageNameDraft],
   )
+
+  // ── Pages as provisional stages ────────────────────────────────────────────
+  //
+  // The Unassigned list is grouped by page, and a page group behaves like a
+  // stage you have not committed to: you can name it, and naming it is the one
+  // thing that turns it into a real stage. A page nobody names stays a grouping,
+  // so importing a 40-page batch record does not silently invent 40 stages.
+
+  /**
+   * Name a page group, which moves every unassigned field on that page into a
+   * stage of that name (joining an existing stage of the same name if there is
+   * one). An empty or page-shaped name changes nothing — the page stays a page.
+   */
+  const promotePageToStage = useCallback(
+    (page, name) => {
+      const n = String(name || '').trim()
+      const problem = pageNameProblem(n)
+      if (problem) {
+        setPageNameError(problem)
+        return false
+      }
+      setPageNameError('')
+      setNamingPage(null)
+      if (n === '') return false
+      const ids = fields.filter((f) => stageKey(f) === '' && (Number(f.page) || 1) === page).map((f) => f.id)
+      if (ids.length === 0) return false
+      moveFieldsToStage(ids, n)
+      setSelectedFieldIds(new Set())
+      setSelectedPillIds(new Set())
+      setSelectedStageName(n)
+      return true
+    },
+    [fields, moveFieldsToStage],
+  )
+
+  const startNamingPage = useCallback((page) => {
+    setNamingPage(page)
+    setPageNameDraft('')
+    setPageNameError('')
+  }, [])
+
+  const cancelNamingPage = useCallback(() => {
+    setNamingPage(null)
+    setPageNameError('')
+  }, [])
 
   // One click that does both: renumber every group's fields into reading order
   // (top→bottom, left→right) from their positions on the PDF, then give fields
@@ -3168,9 +3289,37 @@ export default function FormBuilder() {
             <div className="fb-components-panel-content">
               <div className="fb-components-panel-inner">
                 {showStagesSection && (
-                  <section className="fb-stages-section" aria-label="Form stages">
+                  <section
+                    className={`fb-stages-section${panelView === 'list' ? ' fb-stages-section--list' : ''}`}
+                    aria-label={panelView === 'list' ? 'All fields' : 'Form stages'}
+                  >
                     <div className="fb-stages-section-head">
-                      <h2 className="fb-components-section-title">Stages</h2>
+                      <div className="fb-panel-views" role="tablist" aria-label="Panel view">
+                        <button
+                          type="button"
+                          role="tab"
+                          aria-selected={panelView === 'stages'}
+                          className={`fb-panel-view-tab${panelView === 'stages' ? ' is-active' : ''}`}
+                          onClick={() => setPanelView('stages')}
+                          title="Stages as blocks — drag to organize"
+                        >
+                          Stages
+                        </button>
+                        <button
+                          type="button"
+                          role="tab"
+                          aria-selected={panelView === 'list'}
+                          className={`fb-panel-view-tab${panelView === 'list' ? ' is-active' : ''}`}
+                          onClick={() => {
+                            setPanelView('list')
+                            // The table needs the room; the user can still collapse.
+                            setStagesExpanded(true)
+                          }}
+                          title="Every field as one editable row — click a row to find it on the document"
+                        >
+                          List
+                        </button>
+                      </div>
                       <div className="fb-stages-actions">
                         <button
                           type="button"
@@ -3196,7 +3345,7 @@ export default function FormBuilder() {
                           <span>{stagesExpanded ? 'Collapse' : 'Expand'}</span>
                         </button>
                       </div>
-                      {selectedPillIds.size > 0 && (
+                      {panelView === 'stages' && selectedPillIds.size > 0 && (
                         <div className="fb-stage-select-bar">
                           <span className="fb-stage-select-count">{selectedPillIds.size} selected</span>
                           <button
@@ -3223,108 +3372,178 @@ export default function FormBuilder() {
                         </div>
                       )}
                     </div>
-                    <div
-                      className="fb-stages-section-scroll"
-                      ref={stagesScrollRef}
-                      onMouseDown={handleMarqueeStart}
-                    >
-                      {existingStages.map((stageName) => {
-                        const inStage = sortFieldsInGroupList(fields, stageName)
-                        return (
-                          <div
-                            key={stageName}
-                            className="fb-stage-block"
-                            data-stage={stageName}
-                            onDragOver={(e) => {
-                              e.preventDefault()
-                              e.dataTransfer.dropEffect = 'move'
-                            }}
-                            onDrop={(e) => {
-                              e.preventDefault()
-                              const ids = draggedPillIdsRef.current
-                              if (ids && ids.length) {
-                                moveFieldsToStage(ids, stageName)
-                                clearPanelDragRefs()
-                                return
-                              }
-                              const src = dragStageNameRef.current
-                              if (src && src !== stageName) {
-                                reorderStagesByName(src, stageName)
-                                clearPanelDragRefs()
-                              }
-                            }}
-                          >
+                    {panelView === 'stages' ? (
+                      <div
+                        className="fb-stages-section-scroll"
+                        ref={stagesScrollRef}
+                        onMouseDown={handleMarqueeStart}
+                      >
+                        {existingStages.map((stageName) => {
+                          const inStage = sortFieldsInGroupList(fields, stageName)
+                          return (
                             <div
-                              className={`fb-stage-block-header fb-stage-block-header--selectable${
-                                selectedStageName === stageName ? ' is-selected' : ''
-                              }`}
-                              role="button"
-                              tabIndex={0}
-                              aria-pressed={selectedStageName === stageName}
-                              title="Click for stage properties · double-click the name to rename · drag to reorder"
-                              onClick={() => {
-                                if (editingStageName !== stageName) selectStage(stageName)
+                              key={stageName}
+                              className="fb-stage-block"
+                              data-stage={stageName}
+                              onDragOver={(e) => {
+                                e.preventDefault()
+                                e.dataTransfer.dropEffect = 'move'
                               }}
-                              onKeyDown={(e) => {
-                                if (e.target !== e.currentTarget) return
-                                if (e.key === 'Enter' || e.key === ' ') {
-                                  e.preventDefault()
-                                  selectStage(stageName)
+                              onDrop={(e) => {
+                                e.preventDefault()
+                                const ids = draggedPillIdsRef.current
+                                if (ids && ids.length) {
+                                  moveFieldsToStage(ids, stageName)
+                                  clearPanelDragRefs()
+                                  return
+                                }
+                                const src = dragStageNameRef.current
+                                if (src && src !== stageName) {
+                                  reorderStagesByName(src, stageName)
+                                  clearPanelDragRefs()
                                 }
                               }}
-                              draggable={editingStageName !== stageName}
-                              onDragStart={(e) => {
-                                e.stopPropagation()
-                                dragStageNameRef.current = stageName
-                                e.dataTransfer.effectAllowed = 'move'
-                                e.dataTransfer.setData('text/plain', `stage:${stageName}`)
-                              }}
-                              onDragEnd={clearPanelDragRefs}
                             >
-                              <Bars3Icon className="fb-stage-grip" aria-hidden />
-                              {editingStageName === stageName ? (
-                                <input
-                                  className="fb-stage-title-input"
-                                  value={stageNameDraft}
-                                  autoFocus
-                                  onChange={(e) => setStageNameDraft(e.target.value)}
-                                  onBlur={() => commitStageRename(stageName)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter') {
-                                      e.preventDefault()
-                                      commitStageRename(stageName)
-                                    } else if (e.key === 'Escape') {
-                                      e.preventDefault()
-                                      setEditingStageName(null)
-                                    }
-                                  }}
-                                  onClick={(e) => e.stopPropagation()}
-                                  onMouseDown={(e) => e.stopPropagation()}
-                                  onDragStart={(e) => e.preventDefault()}
-                                />
-                              ) : (
-                                <span
-                                  className="fb-stage-block-title"
-                                  title="Click for stage properties · double-click to rename (updates every field in it)"
-                                  onDoubleClick={(e) => {
-                                    e.stopPropagation()
-                                    setEditingStageName(stageName)
-                                    setStageNameDraft(stageName)
-                                  }}
-                                >
-                                  {stageName}
-                                </span>
-                              )}
-                              {isStageGate(inStage) && (
-                                <span
-                                  className="fb-stage-block-gate"
-                                  title="Must be completed before later stages"
-                                >
-                                  Required
-                                </span>
-                              )}
-                              <span className="fb-stage-block-count">{inStage.length}</span>
+                              <div
+                                className={`fb-stage-block-header fb-stage-block-header--selectable${
+                                  selectedStageName === stageName ? ' is-selected' : ''
+                                }`}
+                                role="button"
+                                tabIndex={0}
+                                aria-pressed={selectedStageName === stageName}
+                                title="Click for stage properties · double-click the name to rename · drag to reorder"
+                                onClick={() => {
+                                  if (editingStageName !== stageName) selectStage(stageName)
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.target !== e.currentTarget) return
+                                  if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault()
+                                    selectStage(stageName)
+                                  }
+                                }}
+                                draggable={editingStageName !== stageName}
+                                onDragStart={(e) => {
+                                  e.stopPropagation()
+                                  dragStageNameRef.current = stageName
+                                  e.dataTransfer.effectAllowed = 'move'
+                                  e.dataTransfer.setData('text/plain', `stage:${stageName}`)
+                                }}
+                                onDragEnd={clearPanelDragRefs}
+                              >
+                                <Bars3Icon className="fb-stage-grip" aria-hidden />
+                                {editingStageName === stageName ? (
+                                  <input
+                                    className="fb-stage-title-input"
+                                    value={stageNameDraft}
+                                    autoFocus
+                                    onChange={(e) => setStageNameDraft(e.target.value)}
+                                    onBlur={() => commitStageRename(stageName)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault()
+                                        commitStageRename(stageName)
+                                      } else if (e.key === 'Escape') {
+                                        e.preventDefault()
+                                        setEditingStageName(null)
+                                      }
+                                    }}
+                                    onClick={(e) => e.stopPropagation()}
+                                    onMouseDown={(e) => e.stopPropagation()}
+                                    onDragStart={(e) => e.preventDefault()}
+                                  />
+                                ) : (
+                                  <span
+                                    className="fb-stage-block-title"
+                                    title="Click for stage properties · double-click to rename (updates every field in it)"
+                                    onDoubleClick={(e) => {
+                                      e.stopPropagation()
+                                      setEditingStageName(stageName)
+                                      setStageNameDraft(stageName)
+                                    }}
+                                  >
+                                    {stageName}
+                                  </span>
+                                )}
+                                {isStageGate(inStage) && (
+                                  <span
+                                    className="fb-stage-block-gate"
+                                    title="Must be completed before later stages"
+                                  >
+                                    Required
+                                  </span>
+                                )}
+                                <span className="fb-stage-block-count">{inStage.length}</span>
+                              </div>
+                              <ul
+                                className="fb-stage-field-list"
+                                onDragOver={(e) => {
+                                  e.preventDefault()
+                                  e.dataTransfer.dropEffect = 'move'
+                                }}
+                                onDrop={(e) => {
+                                  if (e.target !== e.currentTarget) return
+                                  e.preventDefault()
+                                  e.stopPropagation()
+                                  const ids = draggedPillIdsRef.current
+                                  if (ids && ids.length) {
+                                    moveFieldsToStage(ids, stageName)
+                                    clearPanelDragRefs()
+                                  }
+                                }}
+                              >
+                                {inStage.map((f) => renderStagePill(f, stageName))}
+                              </ul>
                             </div>
+                          )
+                        })}
+
+                        <div
+                          className="fb-stage-block"
+                          data-stage=""
+                          onDragOver={(e) => {
+                            e.preventDefault()
+                            e.dataTransfer.dropEffect = 'move'
+                          }}
+                          onDrop={(e) => {
+                            e.preventDefault()
+                            const ids = draggedPillIdsRef.current
+                            if (ids && ids.length) {
+                              moveFieldsToStage(ids, '')
+                              clearPanelDragRefs()
+                            }
+                          }}
+                        >
+                          <button
+                            type="button"
+                            className="fb-stage-block-header fb-stage-block-header--toggle"
+                            onClick={() => setUnassignedCollapsed((v) => !v)}
+                            aria-expanded={!unassignedCollapsed}
+                            title={unassignedCollapsed ? 'Show unassigned fields' : 'Hide unassigned fields'}
+                          >
+                            <ChevronDoubleRightIcon
+                              className={`fb-stage-block-chevron${unassignedCollapsed ? '' : ' fb-stage-block-chevron--open'}`}
+                              aria-hidden
+                            />
+                            <span className="fb-stage-block-title">Unassigned</span>
+                            <span className="fb-stage-block-count">{unassignedFields.length}</span>
+                          </button>
+                          {!unassignedCollapsed && unassignedFields.length > 0 && (
+                            <p className="fb-stage-page-note">
+                              Grouped by page. Name a page to turn it into a stage.
+                            </p>
+                          )}
+                          {unassignedCollapsed ? null : unassignedFields.length === 0 ? (
+                            <p
+                              className="fb-stage-block-empty"
+                              onDragOver={(e) => {
+                                e.preventDefault()
+                                e.dataTransfer.dropEffect = 'move'
+                              }}
+                            >
+                              Drop a field here to clear its stage.
+                            </p>
+                          ) : (
                             <ul
                               className="fb-stage-field-list"
                               onDragOver={(e) => {
@@ -3337,93 +3556,92 @@ export default function FormBuilder() {
                                 e.stopPropagation()
                                 const ids = draggedPillIdsRef.current
                                 if (ids && ids.length) {
-                                  moveFieldsToStage(ids, stageName)
+                                  moveFieldsToStage(ids, '')
                                   clearPanelDragRefs()
                                 }
                               }}
                             >
-                              {inStage.map((f) => renderStagePill(f, stageName))}
+                              {unassignedByPage.flatMap((grp) => [
+                                <li key={`pg-${grp.page}`} className="fb-stage-page-sep">
+                                  {namingPage === grp.page ? (
+                                    <>
+                                      <input
+                                        className="fb-stage-title-input"
+                                        value={pageNameDraft}
+                                        autoFocus
+                                        placeholder={`Name page ${grp.page} to make it a stage`}
+                                        aria-label={`Name page ${grp.page}`}
+                                        aria-invalid={pageNameError ? true : undefined}
+                                        onChange={(e) => {
+                                          setPageNameDraft(e.target.value)
+                                          if (pageNameError) setPageNameError('')
+                                        }}
+                                        // Blur commits, like a stage rename does. A
+                                        // rejected name keeps the box open so the
+                                        // typing is not silently thrown away.
+                                        onBlur={() => {
+                                          if (!pageNameProblem(pageNameDraft)) {
+                                            promotePageToStage(grp.page, pageNameDraft)
+                                          }
+                                        }}
+                                        onKeyDown={(e) => {
+                                          if (e.key === 'Enter') {
+                                            e.preventDefault()
+                                            promotePageToStage(grp.page, pageNameDraft)
+                                          } else if (e.key === 'Escape') {
+                                            e.preventDefault()
+                                            cancelNamingPage()
+                                          }
+                                        }}
+                                        onClick={(e) => e.stopPropagation()}
+                                        onMouseDown={(e) => e.stopPropagation()}
+                                      />
+                                      {pageNameError && (
+                                        <span className="fb-stage-page-sep-error" role="alert">
+                                          {pageNameError}
+                                        </span>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <>
+                                      <button
+                                        type="button"
+                                        className="fb-stage-page-sep-name"
+                                        onClick={() => startNamingPage(grp.page)}
+                                        title={`Click to name page ${grp.page} — naming it moves ${grp.items.length === 1 ? 'this field' : `these ${grp.items.length} fields`} into a stage`}
+                                      >
+                                        {pageGroupName(grp.page)}
+                                        <span className="fb-stage-page-sep-hint" aria-hidden>
+                                          name it
+                                        </span>
+                                      </button>
+                                      <span className="fb-stage-page-sep-count">
+                                        {grp.items.length}
+                                      </span>
+                                    </>
+                                  )}
+                                </li>,
+                                ...grp.items.map((f) => renderStagePill(f, '')),
+                              ])}
                             </ul>
-                          </div>
-                        )
-                      })}
+                          )}
+                        </div>
 
-                      <div
-                        className="fb-stage-block"
-                        data-stage=""
-                        onDragOver={(e) => {
-                          e.preventDefault()
-                          e.dataTransfer.dropEffect = 'move'
-                        }}
-                        onDrop={(e) => {
-                          e.preventDefault()
-                          const ids = draggedPillIdsRef.current
-                          if (ids && ids.length) {
-                            moveFieldsToStage(ids, '')
-                            clearPanelDragRefs()
-                          }
-                        }}
-                      >
-                        <button
-                          type="button"
-                          className="fb-stage-block-header fb-stage-block-header--toggle"
-                          onClick={() => setUnassignedCollapsed((v) => !v)}
-                          aria-expanded={!unassignedCollapsed}
-                          title={unassignedCollapsed ? 'Show unassigned fields' : 'Hide unassigned fields'}
-                        >
-                          <ChevronDoubleRightIcon
-                            className={`fb-stage-block-chevron${unassignedCollapsed ? '' : ' fb-stage-block-chevron--open'}`}
-                            aria-hidden
-                          />
-                          <span className="fb-stage-block-title">Unassigned</span>
-                          <span className="fb-stage-block-count">{unassignedFields.length}</span>
-                        </button>
-                        {unassignedCollapsed ? null : unassignedFields.length === 0 ? (
-                          <p
-                            className="fb-stage-block-empty"
-                            onDragOver={(e) => {
-                              e.preventDefault()
-                              e.dataTransfer.dropEffect = 'move'
-                            }}
-                          >
-                            Drop a field here to clear its stage.
-                          </p>
-                        ) : (
-                          <ul
-                            className="fb-stage-field-list"
-                            onDragOver={(e) => {
-                              e.preventDefault()
-                              e.dataTransfer.dropEffect = 'move'
-                            }}
-                            onDrop={(e) => {
-                              if (e.target !== e.currentTarget) return
-                              e.preventDefault()
-                              e.stopPropagation()
-                              const ids = draggedPillIdsRef.current
-                              if (ids && ids.length) {
-                                moveFieldsToStage(ids, '')
-                                clearPanelDragRefs()
-                              }
-                            }}
-                          >
-                            {groupUnassignedByPage
-                              ? unassignedByPage.flatMap((grp) => [
-                                  <li
-                                    key={`pg-${grp.page}`}
-                                    className="fb-stage-page-sep"
-                                    aria-hidden
-                                  >
-                                    <span>Page {grp.page}</span>
-                                    <span className="fb-stage-page-sep-count">{grp.items.length}</span>
-                                  </li>,
-                                  ...grp.items.map((f) => renderStagePill(f, '')),
-                                ])
-                              : unassignedFields.map((f) => renderStagePill(f, ''))}
-                          </ul>
-                        )}
                       </div>
-
-                    </div>
+                    ) : (
+                      <FieldListTable
+                        rows={listRows}
+                        existingStages={existingStages}
+                        selectedFieldIds={selectedFieldIds}
+                        stageSizes={stageSizes}
+                        typeLabelOf={getComponentTypeLabel}
+                        onFocusField={focusFieldOnCanvas}
+                        onUpdateField={updateField}
+                        onMoveStage={moveStageToPosition}
+                        onMoveFieldInGroup={moveFieldToGroupPosition}
+                        canEdit={canEditForm}
+                      />
+                    )}
                   </section>
                 )}
 
@@ -4519,6 +4737,245 @@ function OptionsEditor({ field, onUpdate }) {
   )
 }
 
+/**
+ * Reference guide for the calculation editor, opened from the "?" beside the
+ * Formula box. Operators and functions are rendered from FORMULA_OPERATORS /
+ * FORMULA_FUNCTIONS so the guide cannot drift from what the evaluator accepts.
+ * Worked examples use the field's own tokens when it has some, so they can be
+ * read (or copied) as-is.
+ */
+function FormulaHelp({ tokens, numberTokens = [], timeTokens = [], onClose }) {
+  const closeRef = useRef(null)
+
+  // Escape closes; focus starts on the close button so the guide is keyboard-usable.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', onKey)
+    closeRef.current?.focus()
+    return () => document.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  // Examples read best with this field's own tokens, and each kind's examples
+  // want tokens of that kind — a percent yield written over two date tokens is
+  // nonsense. Fall back to the generic A/B/C when the field has none yet.
+  const pick = (preferred, i, fallback) => preferred[i] || tokens[i] || fallback
+  const a = pick(numberTokens, 0, 'A')
+  const b = pick(numberTokens, 1, 'B')
+  const c = pick(numberTokens, 2, 'C')
+  const d1 = pick(timeTokens, 0, 'A')
+  const d2 = pick(timeTokens, 1, 'B')
+
+  const examples = [
+    {
+      goal: 'Percent yield',
+      formula: `${a} / ${b} * 100`,
+      note: `${a} actual, ${b} theoretical.`,
+    },
+    {
+      goal: 'Percent difference from target',
+      formula: `(${a} - ${b}) / ${b} * 100`,
+      note: 'Parentheses force the subtraction first.',
+    },
+    {
+      goal: 'Net weight',
+      formula: `${a} - ${b}`,
+      note: `${a} gross, ${b} tare.`,
+    },
+    {
+      goal: 'Average of three readings',
+      formula: `(${a} + ${b} + ${c}) / 3`,
+      note: 'Divide the group, not just the last term.',
+    },
+    {
+      goal: 'Absolute deviation',
+      formula: `abs(${a} - ${b})`,
+      note: 'Never negative, whichever reading is higher.',
+    },
+    {
+      goal: 'Round to a whole count',
+      formula: `round(${a} / ${b})`,
+      note: 'Vials per box, containers per batch, and so on.',
+    },
+    {
+      goal: 'Hold time',
+      formula: `${d2} - ${d1}`,
+      note: `Two date + time references, both measured in hours.`,
+    },
+    {
+      goal: 'Days between two dates',
+      formula: `${d2} - ${d1}`,
+      note: 'Two date references measured in days.',
+    },
+    {
+      goal: 'Hold time within limit',
+      formula: `max(${d2} - ${d1}, 0)`,
+      note: 'Clamps a mis-keyed end-before-start to 0 instead of a negative.',
+    },
+  ]
+
+  return (
+    <div className="fb-modal-backdrop" onClick={onClose}>
+      <div
+        className="fb-save-modal fb-formula-help"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="fb-formula-help-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button ref={closeRef} className="fb-modal-close" onClick={onClose} title="Close">
+          &times;
+        </button>
+        <h3 id="fb-formula-help-title">Writing a calculation</h3>
+
+        <ol className="fb-fh-steps">
+          <li>
+            <strong>Add a reference</strong> for every field the calculation reads — a
+            number, a date or a time. Each one gets a short token — <code>A</code>,{' '}
+            <code>B</code>, <code>C</code> — shown beside it.
+          </li>
+          <li>
+            <strong>Write the formula</strong> using those tokens, plain numbers and the
+            operators below. <code>A / B * 100</code> means “A divided by B, times 100”.
+          </li>
+          <li>
+            <strong>Watch the check line.</strong> It turns green once the formula produces
+            a value, and names the problem when it does not.
+          </li>
+        </ol>
+
+        <h4>Operators</h4>
+        <table className="fb-fh-table">
+          <tbody>
+            {FORMULA_OPERATORS.map((op) => (
+              <tr key={op.symbol}>
+                <td className="fb-fh-name">
+                  <code>{op.symbol}</code>
+                </td>
+                <td>{op.summary}</td>
+                <td className="fb-fh-eg">
+                  <code>{op.example}</code>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p className="fb-fh-note">
+          <code>*</code> and <code>/</code> run before <code>+</code> and <code>-</code>,
+          so <code>A + B / 2</code> halves B only. Use parentheses when you mean the whole
+          sum: <code>(A + B) / 2</code>.
+        </p>
+
+        <h4>Functions</h4>
+        <table className="fb-fh-table">
+          <tbody>
+            {FORMULA_FUNCTIONS.map((fn) => (
+              <tr key={fn.name}>
+                <td className="fb-fh-name">
+                  <code>{fn.signature}</code>
+                </td>
+                <td>{fn.summary}</td>
+                <td className="fb-fh-eg">
+                  <code>{fn.example}</code>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        <h4>Dates and times</h4>
+        <p className="fb-fh-lede">
+          A date or time field holds no number, so its reference is read as a quantity in
+          the unit you choose beside it. Subtract two references measured in the same unit
+          and you get an elapsed time in that unit.
+        </p>
+        <table className="fb-fh-table">
+          <tbody>
+            <tr>
+              <td className="fb-fh-name">A date</td>
+              <td>
+                Counts from 1 Jan 1970 at midnight, so <code>{d2} - {d1}</code> is the
+                number of whole days between two dates.
+              </td>
+            </tr>
+            <tr>
+              <td className="fb-fh-name">A time</td>
+              <td>
+                Counts from midnight, so <code>{d2} - {d1}</code> is the time of day
+                elapsed. Set <em>measured in</em> to minutes or hours to suit.
+              </td>
+            </tr>
+            <tr>
+              <td className="fb-fh-name">A date + a time</td>
+              <td>
+                Set <em>with time</em> on a date reference and the pair names one instant.
+                Use this for anything that can run past midnight — it is the only form
+                that stays correct across a day boundary.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p className="fb-fh-note">
+          Two <em>times</em> alone go negative across midnight: 06:00 minus 22:00 is
+          −16 hours, not 8. Pair each time with its date instead. Dates are counted in
+          UTC, so a difference is never bent by daylight saving.
+        </p>
+
+        <h4>Worked examples</h4>
+        <table className="fb-fh-table fb-fh-examples">
+          <tbody>
+            {examples.map((ex) => (
+              <tr key={ex.goal}>
+                <td className="fb-fh-name">{ex.goal}</td>
+                <td className="fb-fh-eg">
+                  <code>{ex.formula}</code>
+                </td>
+                <td>{ex.note}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        <h4>Good to know</h4>
+        <ul className="fb-fh-notes">
+          <li>
+            The cell is read-only during data entry. It shows{' '}
+            <em>Awaiting inputs</em> until every referenced field has been filled in and
+            submitted, then fills itself and records the value as auto-calculated.
+          </li>
+          <li>
+            A reference may be another calculated field. Those resolve first, so you can
+            build a total out of subtotals. References that would create a loop are left
+            out of the picker. The result is always a number — a calculation cannot fill
+            in a date or a time field.
+          </li>
+          <li>
+            Tokens are case-sensitive (<code>{a}</code>, not <code>{a.toLowerCase()}</code>
+            ); function names are not (<code>ROUND</code> works).
+          </li>
+          <li>
+            Results are rounded to six decimal places. A chain reads the value the source
+            cell displays, so what you see and what is stored agree.
+          </li>
+          <li>
+            Dividing by zero is an error, not a zero result: the cell writes nothing and
+            keeps showing <em>Awaiting inputs</em>. If a divisor can legitimately be zero,
+            guard it — <code>{a} / max({b}, 0.0001)</code>.
+          </li>
+          <li>
+            Arithmetic only: there are no comparisons, conditions or text calculations. A
+            number field's unit is a label, not part of the maths — convert with a
+            multiplier (<code>{a} * 1000</code>) when references are in different units.
+            The <em>measured in</em> setting on a date or time reference does convert, so
+            set both ends of an interval to the same unit.
+          </li>
+        </ul>
+      </div>
+    </div>
+  )
+}
+
 /** Token (A, B, … Z, A1, …) for a reference slot; stable per ref once assigned. */
 function calcTokenForIndex(i) {
   const letter = String.fromCharCode(65 + (i % 26))
@@ -4527,27 +4984,45 @@ function calcTokenForIndex(i) {
 }
 
 /**
- * Calculated-number config: pick source number fields (each gets a token) and
- * write a formula referencing those tokens. Live-validates that the formula
- * yields a number. Stored on `field.calc = { enabled, refs:[{fieldId, token}], formula }`.
+ * Calculated-number config: pick source fields (each gets a token) and write a
+ * formula referencing those tokens. Live-validates that the formula yields a
+ * number. Stored on
+ * `field.calc = { enabled, refs:[{fieldId, token, unit?, timeFieldId?}], formula }`.
+ *
+ * A reference may read a number, a date or a time. Date and time fields have no
+ * number of their own, so those references also carry a `unit` (days / hours /
+ * minutes) saying what the formula sees, and a date may be paired with a time
+ * field (`timeFieldId`) so the pair names one instant — which is what makes an
+ * elapsed time that crosses midnight come out right.
  */
 function NumberCalcEditor({ field, fields, onUpdate }) {
+  const [showHelp, setShowHelp] = useState(false)
   const calc = field.calc || { enabled: false, refs: [], formula: '' }
   const refs = Array.isArray(calc.refs) ? calc.refs : []
-  // A calculated field may read other calculated fields, so the only number
-  // fields kept out of the picker are this one and anything that already
-  // depends on it — those would close a cycle.
+  // A calculated field may read other calculated fields, so the only fields
+  // kept out of the picker are this one and anything that already depends on it
+  // — those would close a cycle. Date and time fields are never calculated, so
+  // they can never be part of one.
   const ineligible = calcIneligibleRefs(field.id, fields)
-  const numberFields = fields.filter((f) => f.type === 'number' && !ineligible.has(f.id))
+  const sourceFields = fields.filter(
+    (f) => calcRefKind(f) !== null && !ineligible.has(f.id)
+  )
+  const timeFields = fields.filter((f) => f.type === 'time')
   const setCalc = (patch) => onUpdate({ calc: { ...calc, ...patch } })
 
+  const fieldById = (id) => fields.find((x) => x.id === id)
   const labelForField = (id) => {
-    const f = fields.find((x) => x.id === id)
+    const f = fieldById(id)
     if (!f) return '(deleted field)'
     const st = (f.stageInProcess || '').trim()
     const calcMark = f.calc?.enabled ? ' (calculated)' : ''
     return (f.label || 'Field') + calcMark + (st ? ` — ${st}` : '')
   }
+  const groupedSources = CALC_REF_TYPES.map((kind) => ({
+    kind,
+    label: { number: 'Number fields', date: 'Date fields', time: 'Time fields' }[kind],
+    items: sourceFields.filter((f) => f.type === kind),
+  })).filter((g) => g.items.length > 0)
 
   const addRef = () => {
     const used = new Set(refs.map((r) => r.token))
@@ -4561,13 +5036,32 @@ function NumberCalcEditor({ field, fields, onUpdate }) {
     }
     setCalc({ refs: [...refs, { fieldId: '', token }] })
   }
-  const updateRef = (i, fieldId) =>
-    setCalc({ refs: refs.map((r, idx) => (idx === i ? { ...r, fieldId } : r)) })
+  // Picking a field resets the unit and pairing, so a reference never keeps a
+  // unit that makes no sense for its new type (or a stale paired time field).
+  const pickRefField = (i, fieldId) => {
+    const kind = calcRefKind(fieldById(fieldId))
+    setCalc({
+      refs: refs.map((r, idx) => {
+        if (idx !== i) return r
+        const next = { fieldId, token: r.token }
+        if (kind === 'date' || kind === 'time') next.unit = defaultCalcUnit(kind)
+        return next
+      }),
+    })
+  }
+  const patchRef = (i, patch) =>
+    setCalc({ refs: refs.map((r, idx) => (idx === i ? { ...r, ...patch } : r)) })
   const removeRef = (i) => setCalc({ refs: refs.filter((_, idx) => idx !== i) })
 
   const tokens = refs.map((r) => r.token)
   const validation = validateFormula(calc.formula || '', tokens)
-  const refsComplete = refs.length > 0 && refs.every((r) => r.fieldId)
+  const refsComplete = refs.length > 0 && refs.every((r) => calcRefComplete(r, fields))
+  // Tokens the help guide uses in its examples, split by kind so each example
+  // reads as this field's own formula rather than a generic one.
+  const tokensOfKind = (match) =>
+    refs.filter((r) => match(calcRefKind(fieldById(r.fieldId)))).map((r) => r.token)
+  const numberTokens = tokensOfKind((k) => k === 'number')
+  const timeTokens = tokensOfKind((k) => k === 'date' || k === 'time')
 
   return (
     <div className="fb-form-group fb-calc-editor">
@@ -4583,40 +5077,102 @@ function NumberCalcEditor({ field, fields, onUpdate }) {
       {calc.enabled && (
         <div className="fb-calc-body">
           <div className="fb-calc-refs-head">
-            <span>References (number fields)</span>
+            <span>References (number, date or time fields)</span>
             <button type="button" className="fb-calc-add" onClick={addRef}>
               + Add reference
             </button>
           </div>
           {refs.length === 0 && (
             <p className="fb-calc-hint">
-              Add the number fields this cell calculates from. Other calculated
-              fields are allowed — they resolve first.
+              Add the fields this cell calculates from. Numbers are read as-is; a
+              date or time is read as a quantity in the unit you pick. Other
+              calculated fields are allowed — they resolve first.
             </p>
           )}
-          {refs.map((r, i) => (
-            <div key={i} className="fb-calc-ref-row">
-              <span className="fb-calc-token">{r.token}</span>
-              <select value={r.fieldId || ''} onChange={(e) => updateRef(i, e.target.value)}>
-                <option value="">— Select a number field —</option>
-                {numberFields.map((f) => (
-                  <option key={f.id} value={f.id}>
-                    {labelForField(f.id)}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                className="fb-calc-remove"
-                onClick={() => removeRef(i)}
-                aria-label={`Remove reference ${r.token}`}
-              >
-                ×
-              </button>
-            </div>
-          ))}
+          {refs.map((r, i) => {
+            const kind = calcRefKind(fieldById(r.fieldId))
+            const isDateTime = kind === 'date' || kind === 'time'
+            return (
+              <div key={i} className="fb-calc-ref-row-group">
+                <div className="fb-calc-ref-row">
+                  <span className={`fb-calc-token${isDateTime ? ' fb-calc-token--time' : ''}`}>
+                    {r.token}
+                  </span>
+                  <select value={r.fieldId || ''} onChange={(e) => pickRefField(i, e.target.value)}>
+                    <option value="">— Select a field —</option>
+                    {groupedSources.map((g) => (
+                      <optgroup key={g.kind} label={g.label}>
+                        {g.items.map((f) => (
+                          <option key={f.id} value={f.id}>
+                            {labelForField(f.id)}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className="fb-calc-remove"
+                    onClick={() => removeRef(i)}
+                    aria-label={`Remove reference ${r.token}`}
+                  >
+                    ×
+                  </button>
+                </div>
+                {isDateTime && (
+                  <div className="fb-calc-ref-unit-row">
+                    {kind === 'date' && (
+                      <label className="fb-calc-ref-opt">
+                        <span>with time</span>
+                        <select
+                          value={r.timeFieldId || ''}
+                          onChange={(e) =>
+                            patchRef(i, { timeFieldId: e.target.value || undefined })
+                          }
+                          disabled={timeFields.length === 0}
+                        >
+                          <option value="">
+                            {timeFields.length === 0 ? 'no time fields' : 'midnight'}
+                          </option>
+                          {timeFields.map((f) => (
+                            <option key={f.id} value={f.id}>
+                              {labelForField(f.id)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+                    <label className="fb-calc-ref-opt">
+                      <span>measured in</span>
+                      <select
+                        value={r.unit || defaultCalcUnit(kind)}
+                        onChange={(e) => patchRef(i, { unit: e.target.value })}
+                      >
+                        {CALC_UNITS.map((u) => (
+                          <option key={u.key} value={u.key}>
+                            {u.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                )}
+              </div>
+            )
+          })}
 
-          <label className="fb-calc-formula-label">Formula</label>
+          <div className="fb-calc-formula-head">
+            <label className="fb-calc-formula-label">Formula</label>
+            <button
+              type="button"
+              className="fb-calc-help"
+              onClick={() => setShowHelp(true)}
+              title="What can I use in a formula?"
+              aria-label="Formula help"
+            >
+              ? Help
+            </button>
+          </div>
           <input
             type="text"
             className="fb-calc-formula"
@@ -4625,7 +5181,11 @@ function NumberCalcEditor({ field, fields, onUpdate }) {
             placeholder={refs.length ? `e.g. (${tokens[0]} - ${tokens[1] || tokens[0]}) / ${tokens[0]} * 100` : 'Add references first'}
           />
           <small className="fb-hint">
-            Use the tokens above with + − * / ( ) and min, max, round, abs, sqrt.
+            Use the tokens above with + − * / ( ) and{' '}
+            {FORMULA_FUNCTIONS.map((f) => f.name).join(', ')}.{' '}
+            <button type="button" className="fb-calc-help-link" onClick={() => setShowHelp(true)}>
+              See what you can use
+            </button>
           </small>
           {(calc.formula || '').trim() !== '' && (
             <div className={`fb-calc-status ${validation.ok ? 'ok' : 'err'}`}>
@@ -4633,9 +5193,20 @@ function NumberCalcEditor({ field, fields, onUpdate }) {
             </div>
           )}
           {!refsComplete && (
-            <div className="fb-calc-status err">✕ Every reference must point to a number field.</div>
+            <div className="fb-calc-status err">
+              ✕ Every reference needs a field, and a date or time needs a unit.
+            </div>
           )}
         </div>
+      )}
+
+      {showHelp && (
+        <FormulaHelp
+          tokens={tokens}
+          numberTokens={numberTokens}
+          timeTokens={timeTokens}
+          onClose={() => setShowHelp(false)}
+        />
       )}
     </div>
   )
@@ -4996,6 +5567,9 @@ function PropertiesForm({ field, existingStages, fields, onRenameStage, onOpenSt
         ) : (
           <small className="fb-hint">Set by the stage. Choose a stage above to give this field one.</small>
         )}
+        {inExistingStage && (
+          <small className="fb-hint">Or set it for any field at once in the panel&rsquo;s List view.</small>
+        )}
       </div>
 
       <div className="fb-form-group">
@@ -5008,7 +5582,7 @@ function PropertiesForm({ field, existingStages, fields, onRenameStage, onOpenSt
         />
         <small className="fb-hint">
           Row-major order in the Stages panel: 1 = top-left, then left to right; the next row continues
-          the sequence (1, 2, 3…). Reorder by dragging.
+          the sequence (1, 2, 3…). Reorder by dragging, or type a position in the panel&rsquo;s List view.
         </small>
       </div>
 

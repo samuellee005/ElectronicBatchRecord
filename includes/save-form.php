@@ -203,7 +203,14 @@ function normalizeCalc($field)
     }
     $refs = [];
     foreach (($calc['refs'] ?? []) as $r) {
-        $refs[] = [(string)($r['token'] ?? ''), (string)($r['fieldId'] ?? '')];
+        $refs[] = [
+            (string)($r['token'] ?? ''),
+            (string)($r['fieldId'] ?? ''),
+            // A date/time reference's unit and paired time field change what the
+            // formula computes, so they have to count as a change too.
+            (string)($r['unit'] ?? ''),
+            (string)($r['timeFieldId'] ?? ''),
+        ];
     }
     return ['formula' => trim((string)($calc['formula'] ?? '')), 'refs' => $refs];
 }
@@ -211,7 +218,8 @@ function normalizeCalc($field)
 /**
  * Readable summary of a field's calc config for the audit trail, with each
  * reference named by the label it had in the same form version:
- * "A + B (A = Mass, B = Volume)", or "Off".
+ * "A + B (A = Mass, B = Volume)", or "Off". A date/time reference also names its
+ * paired time field and unit: "A = Start date + Start time in hours".
  */
 function describeCalc($field, $fieldsMap)
 {
@@ -220,8 +228,14 @@ function describeCalc($field, $fieldsMap)
         return 'Off';
     }
     $names = [];
-    foreach ($calc['refs'] as [$token, $fieldId]) {
+    foreach ($calc['refs'] as [$token, $fieldId, $unit, $timeFieldId]) {
         $label = $fieldId === '' ? '(unset)' : ($fieldsMap[$fieldId]['label'] ?? '(deleted field)');
+        if ($timeFieldId !== '') {
+            $label .= ' + ' . ($fieldsMap[$timeFieldId]['label'] ?? '(deleted field)');
+        }
+        if ($unit !== '') {
+            $label .= ' in ' . $unit;
+        }
         $names[] = $token . ' = ' . $label;
     }
     $formula = $calc['formula'] !== '' ? $calc['formula'] : '(no formula)';

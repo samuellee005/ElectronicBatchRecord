@@ -18,7 +18,7 @@ import {
   endCollabPresence,
 } from '../api/client'
 import { useUserPrefs } from '../context/UserPrefsContext'
-import { evaluateFormula } from '../utils/formula'
+import { evaluateFormula, calcRefKind, calcDateTimeValue } from '../utils/formula'
 import './DataEntry.css'
 import { buildTableMergeLayout, tableCellKey } from '../utils/tableMergeLayout'
 import { tableColWidthPx, tableRowHeightPx } from '../utils/tableFieldDims'
@@ -105,14 +105,27 @@ function isCalcField(field) {
   return field?.type === 'number' && field?.calc?.enabled === true
 }
 
+/** Submitted (locked) value of a field entry, or undefined if it is not ready. */
+function lockedRawValue(formData, fieldId) {
+  const entry = formData[fieldId]
+  if (!isFieldEntryLocked(entry)) return undefined
+  const raw = getEffectiveValue(entry)
+  return raw === '' || raw == null ? undefined : raw
+}
+
 /**
  * Compute a calculated number field from the current entries.
  *
- * A manually entered reference must be *submitted* (locked) and numeric before
+ * A manually entered reference must be *submitted* (locked) and usable before
  * the cell takes a value. A reference that is itself calculated is never locked
  * — it auto-fills — so it is resolved recursively instead, and counts as ready
  * once it computes. The value used downstream is the rounded one the source
  * cell displays, so a chain always reconciles with what is on screen.
+ *
+ * A date or time reference has no number of its own: it resolves to the instant
+ * it names, measured in the reference's `unit`. A date paired with a time
+ * (`timeFieldId`) needs both submitted, and both are folded into one instant so
+ * an interval that crosses midnight still subtracts correctly.
  *
  * `seen` guards against a cyclic form (the builder cannot create one, but an
  * imported or hand-edited definition could).
@@ -130,18 +143,46 @@ function computeCalcField(field, allFields, formData, seen) {
   for (const r of refs) {
     if (!r.fieldId) return { status: 'unconfigured' }
     const refField = (allFields || []).find((f) => f.id === r.fieldId)
+    const kind = calcRefKind(refField)
+    if (kind === null) return { status: 'unconfigured' }
     let num
-    if (isCalcField(refField)) {
+    if (kind === 'date' || kind === 'time') {
+      const paired = kind === 'date' && !!r.timeFieldId
+      if (paired && !(allFields || []).some((f) => f.id === r.timeFieldId && f.type === 'time')) {
+        return { status: 'unconfigured' }
+      }
+      const dateRaw = lockedRawValue(formData, r.fieldId)
+      if (dateRaw === undefined) return { status: 'awaiting' }
+      let timeRaw
+      if (paired) {
+        timeRaw = lockedRawValue(formData, r.timeFieldId)
+        if (timeRaw === undefined) return { status: 'awaiting' }
+      }
+      const res = calcDateTimeValue({ kind, unit: r.unit, dateRaw, timeRaw, paired })
+      if (res.bad) {
+        // Only reachable for a hand-edited or imported value, since the date and
+        // time inputs cannot produce one. Name the half that is wrong: a paired
+        // reference reads two fields.
+        const culprit =
+          res.bad === 'time' && paired
+            ? (allFields || []).find((f) => f.id === r.timeFieldId)
+            : refField
+        return {
+          status: 'error',
+          error: `"${culprit?.label || r.token}" is not a valid ${res.bad}`,
+        }
+      }
+      num = res.value
+    } else if (isCalcField(refField)) {
       const upstream = computeCalcField(refField, allFields, formData, chain)
       if (upstream.status === 'error') return upstream
       if (upstream.status !== 'ok') return { status: 'awaiting' }
       num = upstream.value
     } else {
-      const entry = formData[r.fieldId]
-      if (!isFieldEntryLocked(entry)) return { status: 'awaiting' }
-      const raw = getEffectiveValue(entry)
+      const raw = lockedRawValue(formData, r.fieldId)
+      if (raw === undefined) return { status: 'awaiting' }
       num = Number(raw)
-      if (raw === '' || raw == null || !Number.isFinite(num)) return { status: 'awaiting' }
+      if (!Number.isFinite(num)) return { status: 'awaiting' }
     }
     values[r.token] = num
   }
