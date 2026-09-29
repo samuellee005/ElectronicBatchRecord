@@ -3468,9 +3468,9 @@ export default function FormBuilder() {
                                 {isStageGate(inStage) && (
                                   <span
                                     className="fb-stage-block-gate"
-                                    title="Must be completed before later stages"
+                                    title="Required — must be completed before later stages"
                                   >
-                                    Required
+                                    Req
                                   </span>
                                 )}
                                 <span className="fb-stage-block-count">{inStage.length}</span>
