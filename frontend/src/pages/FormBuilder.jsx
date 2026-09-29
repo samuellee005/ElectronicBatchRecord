@@ -3290,7 +3290,7 @@ export default function FormBuilder() {
               <div className="fb-components-panel-inner">
                 {showStagesSection && (
                   <section
-                    className={`fb-stages-section${panelView === 'list' ? ' fb-stages-section--list' : ''}`}
+                    className="fb-stages-section"
                     aria-label={panelView === 'list' ? 'All fields' : 'Form stages'}
                   >
                     <div className="fb-stages-section-head">

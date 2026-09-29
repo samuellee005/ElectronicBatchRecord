@@ -2519,14 +2519,18 @@
 
 /* Left panel view tabs: Stages (blocks, drag to organize) / List (editable rows) */
 .fb-panel-views {
-  display: inline-flex;
+  /* A flex item in the column-direction section head, so it stretches to the
+     panel width; the tabs split it evenly rather than packing at the left. */
+  display: flex;
   gap: 2px;
   padding: 2px;
+  margin-bottom: 2px;
   background: #eef1f6;
   border-radius: 7px;
 }
 
 .fb-panel-view-tab {
+  flex: 1 1 0;          /* equal halves, like .fb-stages-actions > button */
   border: none;
   background: none;
   border-radius: 5px;
@@ -2546,10 +2550,4 @@
   background: #fff;
   color: #2d3250;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
-}
-
-/* The table earns more of the panel than the stage blocks need. */
-.fb-stages-section--list {
-  flex: 6 1 0;
-  min-height: 220px;
 }
