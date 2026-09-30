@@ -957,7 +957,7 @@ function formatDate(dateString) {
 export default function FormBuilder() {
   const { prefs, updatePrefs } = useUserPrefs()
   const { user: authUser } = useAuth()
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const pdfFile = searchParams.get('file')
   const urlFormId = searchParams.get('formId')
   const urlName = searchParams.get('name')
@@ -1067,7 +1067,10 @@ export default function FormBuilder() {
   const [saveFormType, setSaveFormType] = useState(urlFormType)
   const [saveUserName, setSaveUserName] = useState('')
   const [saveSelectedFormId, setSaveSelectedFormId] = useState('')
-  const [saveCreateNewVersion, setSaveCreateNewVersion] = useState(false)
+  // Save as a separate form of your own (Version 1, you own it) instead of the
+  // next version of the form that is open.
+  const [saveAsNewForm, setSaveAsNewForm] = useState(false)
+  const [newFormCollaborators, setNewFormCollaborators] = useState([])
   const [saving, setSaving] = useState(false)
   const [componentsPanelCollapsed, setComponentsPanelCollapsed] = useState(false)
   const [propertiesPanelCollapsed, setPropertiesPanelCollapsed] = useState(false)
@@ -1199,6 +1202,12 @@ export default function FormBuilder() {
     clearDraft()
   }, [clearDraft])
 
+  // Who the save dialog's picker adds: the new form's editors when saving as a
+  // new form, otherwise the list for a form not saved yet (a saved form changes
+  // access in Manage access instead).
+  const pickerCollaborators = saveAsNewForm ? newFormCollaborators : formCollaborators
+  const setPickerCollaborators = saveAsNewForm ? setNewFormCollaborators : setFormCollaborators
+
   // Debounced user search for the collaborator picker in the save modal.
   useEffect(() => {
     if (!showSaveModal) return undefined
@@ -1210,14 +1219,14 @@ export default function FormBuilder() {
     const t = setTimeout(() => {
       listDbUsers(q)
         .then((data) => {
-          const chosen = new Set(formCollaborators.map((c) => c.dbUserId))
+          const chosen = new Set(pickerCollaborators.map((c) => c.dbUserId))
           const users = Array.isArray(data?.users) ? data.users : []
           setCollabResults(users.filter((u) => !chosen.has(u.dbUserId)).slice(0, 8))
         })
         .catch(() => setCollabResults([]))
     }, 250)
     return () => clearTimeout(t)
-  }, [collabSearch, showSaveModal, formCollaborators])
+  }, [collabSearch, showSaveModal, pickerCollaborators])
 
   // Alignment guides (snap to other fields)
   const [guides, setGuides] = useState([])
@@ -2502,7 +2511,8 @@ export default function FormBuilder() {
     setSaveFormNameMode(loadedFormName ? 'select' : 'select')
     setSaveDescription('')
     setSaveSelectedFormId('')
-    setSaveCreateNewVersion(false)
+    // Someone who cannot edit the open form can still save it as their own.
+    chooseSaveAsNewForm(!canEditForm && !!loadedLineageId)
 
     try {
       const data = await listForms()
@@ -2528,6 +2538,24 @@ export default function FormBuilder() {
     } catch {}
   }
 
+  /**
+   * Switch the save dialog between the next version of the open form and a new
+   * form of your own. A new form needs its own name, so it starts from a typed
+   * one; switching back restores the open form's name.
+   */
+  function chooseSaveAsNewForm(on) {
+    setSaveAsNewForm(on)
+    setNewFormCollaborators([])
+    setCollabSearch('')
+    if (on) {
+      setSaveFormNameMode('new')
+      setSaveFormNameNew(loadedFormName ? `${loadedFormName} (copy)` : '')
+    } else {
+      setSaveFormNameMode('select')
+      setSaveFormName(loadedFormName || '')
+    }
+  }
+
   /** Next version within a form's own history (the server bumps by 0.1). */
   const nextVersionFor = (rows) =>
     (Math.max(...rows.map((f) => Number(f.version) || 1)) + 0.1).toFixed(1)
@@ -2535,6 +2563,21 @@ export default function FormBuilder() {
   const getVersionPreview = () => {
     const name = (saveFormNameMode === 'new' ? saveFormNameNew : saveFormName)?.trim()
     if (!name) return null
+
+    if (saveAsNewForm) {
+      if (allFormsData.some((f) => f.name === name && f.pdfFile === pdfFile)) {
+        return {
+          text: `A form already uses the name “${name}” with this PDF. Choose a different name.`,
+          type: 'new',
+        }
+      }
+      return {
+        text: loadedFormName
+          ? `Creates a new form “${name}” (Version 1) from “${loadedFormName}”. You own it, and “${loadedFormName}” is not changed.`
+          : `Creates a new form “${name}” (Version 1).`,
+        type: 'new',
+      }
+    }
 
     // Editing an existing form: it keeps its history whether or not the name
     // changes, so a rename is just the next version of the same form.
@@ -2589,10 +2632,11 @@ export default function FormBuilder() {
         formType: saveFormType.trim(),
         pdfFile,
         fields,
-        formId: saveSelectedFormId || null,
-        createNewVersion: saveCreateNewVersion && saveSelectedFormId ? true : false,
+        // With saveMode 'newForm' the id is only the form it is based on.
+        formId: (saveAsNewForm ? accessFormId : saveSelectedFormId) || null,
+        saveMode: saveAsNewForm ? 'newForm' : 'version',
         userName: saveUserName.trim(),
-        collaborators: formCollaborators,
+        collaborators: saveAsNewForm ? newFormCollaborators : formCollaborators,
         sourceFormIds: sourceFormIds.length > 0 ? sourceFormIds : undefined,
         isCombined: sourceFormIds.length > 1,
         createdAt: new Date().toISOString(),
@@ -2602,18 +2646,31 @@ export default function FormBuilder() {
       if (!result.success && result.code === 'conflict') {
         const choice = window.confirm(
           (result.message || 'This form was changed since you opened it.') +
-            '\n\nOK = save anyway as a new version (keeps both). Cancel = stop so you can reload.',
+            '\n\nOK = save yours as the newest version (theirs stays in the history). Cancel = stop so you can reload.',
         )
         if (!choice) {
           return
         }
-        result = await saveForm({ ...body, createNewVersion: true, force: true })
+        result = await saveForm({ ...body, force: true })
       }
       if (result.success) {
-        alert(saveSelectedFormId ? 'Form updated successfully!' : 'Form saved successfully!')
+        alert(
+          saveAsNewForm
+            ? `New form “${finalName}” created. You are now editing it.`
+            : saveSelectedFormId
+              ? 'Form updated successfully!'
+              : 'Form saved successfully!',
+        )
         setLoadedFormName(finalName)
         setShowSaveModal(false)
         clearDraft()
+        if (saveAsNewForm && result.formId) {
+          // Carry on in the new form: reopening it by id loads its own access
+          // and history, and a reload stays on it rather than the original.
+          const next = new URLSearchParams(searchParams)
+          next.set('formId', result.formId)
+          setSearchParams(next, { replace: true })
+        }
       } else if (result.code === 'not_a_collaborator') {
         alert(result.message || 'You are not a collaborator on this form.')
       } else {
@@ -3233,10 +3290,13 @@ export default function FormBuilder() {
           <button
             className="fb-btn fb-btn-success"
             onClick={openSaveModal}
-            disabled={!canEditForm}
-            title={canEditForm ? 'Save this form' : 'You are not a collaborator on this form (view only)'}
+            title={
+              canEditForm
+                ? 'Save this form'
+                : 'You cannot edit this form, but you can save it as a new form of your own'
+            }
           >
-            Save Form
+            {canEditForm ? 'Save Form' : 'Save as new form'}
           </button>
           <Link to="/templates" className="fb-btn fb-btn-ghost">
             &larr; Back
@@ -3259,6 +3319,7 @@ export default function FormBuilder() {
       {!canEditForm && (
         <div className="fb-readonly-banner" role="status">
           You are viewing this form read-only — only its creator and collaborators can edit it.
+          Use “Save as new form” to start your own form from it.
         </div>
       )}
 
@@ -4287,6 +4348,44 @@ export default function FormBuilder() {
             </button>
             <h3>Save Form Configuration</h3>
 
+            {loadedLineageId && (
+              <div className="fb-version-options">
+                <h4>Save as:</h4>
+                <div className="fb-version-option">
+                  <label>
+                    <input
+                      type="radio"
+                      name="saveOption"
+                      checked={!saveAsNewForm}
+                      disabled={!canEditForm}
+                      onChange={() => chooseSaveAsNewForm(false)}
+                    />
+                    Next version of “{loadedFormName}”
+                  </label>
+                  <div className="fb-version-option-desc">
+                    {canEditForm
+                      ? 'Continues this form’s version history, with an audit trail of what changed.'
+                      : 'Only this form’s creator and collaborators can save new versions of it.'}
+                  </div>
+                </div>
+                <div className="fb-version-option">
+                  <label>
+                    <input
+                      type="radio"
+                      name="saveOption"
+                      checked={saveAsNewForm}
+                      onChange={() => chooseSaveAsNewForm(true)}
+                    />
+                    A new form of my own
+                  </label>
+                  <div className="fb-version-option-desc">
+                    Starts a separate form from the same PDF and these fields, at Version 1. You own
+                    it, and the original form is not changed.
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div className="fb-form-group">
               <label>Form Name:</label>
               {saveFormNameMode === 'select' ? (
@@ -4323,15 +4422,17 @@ export default function FormBuilder() {
                     placeholder="Enter new form name"
                     autoFocus
                   />
-                  <button
-                    className="fb-link-btn"
-                    onClick={() => {
-                      setSaveFormNameMode('select')
-                      setSaveFormName(loadedFormName || '')
-                    }}
-                  >
-                    Back to list
-                  </button>
+                  {!saveAsNewForm && (
+                    <button
+                      className="fb-link-btn"
+                      onClick={() => {
+                        setSaveFormNameMode('select')
+                        setSaveFormName(loadedFormName || '')
+                      }}
+                    >
+                      Back to list
+                    </button>
+                  )}
                 </div>
               )}
               {(() => {
@@ -4346,7 +4447,9 @@ export default function FormBuilder() {
                 )
               })()}
               <small className="fb-hint">
-                Select an existing form name or choose &ldquo;Add new...&rdquo; to create a new form name
+                {saveAsNewForm
+                  ? 'Your new form needs a name no other form uses with this PDF.'
+                  : 'Select an existing form name or choose “Add new...” to create a new form name'}
               </small>
             </div>
 
@@ -4415,7 +4518,7 @@ export default function FormBuilder() {
 
             <div className="fb-form-group">
               <label>Access (who may edit this form):</label>
-              {accessFormId ? (
+              {accessFormId && !saveAsNewForm ? (
                 <>
                   <p className="fb-hint">
                     {formCollaborators.length > 0
@@ -4436,9 +4539,9 @@ export default function FormBuilder() {
                     form never rewrites it.
                   </small>
                 </>
-              ) : formCollaborators.length > 0 ? (
+              ) : pickerCollaborators.length > 0 ? (
                 <div className="fb-collab-chips">
-                  {formCollaborators.map((c) => (
+                  {pickerCollaborators.map((c) => (
                     <span key={c.dbUserId || c.username} className="fb-collab-chip">
                       {c.displayName || c.username}
                       <button
@@ -4446,7 +4549,7 @@ export default function FormBuilder() {
                         className="fb-collab-chip-x"
                         title="Remove"
                         onClick={() =>
-                          setFormCollaborators((prev) =>
+                          setPickerCollaborators((prev) =>
                             prev.filter((x) => (x.dbUserId || x.username) !== (c.dbUserId || c.username)),
                           )
                         }
@@ -4461,7 +4564,7 @@ export default function FormBuilder() {
                   No collaborators yet — only you (the creator) can edit. Add people to let them edit too.
                 </p>
               )}
-              {!accessFormId && (
+              {(!accessFormId || saveAsNewForm) && (
                 <input
                   type="text"
                   value={collabSearch}
@@ -4469,7 +4572,7 @@ export default function FormBuilder() {
                   placeholder="Search users by name or username to add…"
                 />
               )}
-              {!accessFormId && collabResults.length > 0 && (
+              {(!accessFormId || saveAsNewForm) && collabResults.length > 0 && (
                 <ul className="fb-collab-results">
                   {collabResults.map((u) => (
                     <li key={u.dbUserId}>
@@ -4477,7 +4580,7 @@ export default function FormBuilder() {
                         type="button"
                         className="fb-collab-result-btn"
                         onClick={() => {
-                          setFormCollaborators((prev) =>
+                          setPickerCollaborators((prev) =>
                             prev.some((x) => x.dbUserId === u.dbUserId)
                               ? prev
                               : [...prev, { dbUserId: u.dbUserId, username: u.username, displayName: u.displayName }],
@@ -4511,40 +4614,6 @@ export default function FormBuilder() {
                   : 'This will be recorded in the audit trail for tracking changes'}
               </small>
             </div>
-
-            {saveSelectedFormId && (
-              <div className="fb-version-options">
-                <h4>Save Options:</h4>
-                <div className="fb-version-option">
-                  <label>
-                    <input
-                      type="radio"
-                      name="saveOption"
-                      checked={!saveCreateNewVersion}
-                      onChange={() => setSaveCreateNewVersion(false)}
-                    />
-                    Save as new version (recommended)
-                  </label>
-                  <div className="fb-version-option-desc">
-                    Creates a new minor version with audit trail.
-                  </div>
-                </div>
-                <div className="fb-version-option">
-                  <label>
-                    <input
-                      type="radio"
-                      name="saveOption"
-                      checked={saveCreateNewVersion}
-                      onChange={() => setSaveCreateNewVersion(true)}
-                    />
-                    Create new version explicitly
-                  </label>
-                  <div className="fb-version-option-desc">
-                    Explicitly create a new version
-                  </div>
-                </div>
-              </div>
-            )}
 
             <div className="fb-modal-actions">
               <button

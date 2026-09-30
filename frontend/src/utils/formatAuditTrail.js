@@ -9,6 +9,7 @@ const EVENT_TYPE_LABELS = {
   stage_modified: 'Stage updated',
   access_changed: 'Access updated',
   form_renamed: 'Form renamed',
+  form_created_from: 'Created from another form',
   pdf_changed: 'PDF changed',
   version_updated: 'Version saved',
 }
@@ -171,6 +172,14 @@ export function formatAuditEntryBlock(entry) {
     return {
       ...base,
       headline: `Form renamed: "${entry.oldName || '—'}" → "${entry.newName || '—'}"`,
+      bodyLines: [],
+    }
+  }
+
+  if (type === 'form_created_from') {
+    return {
+      ...base,
+      headline: `Created from "${entry.sourceName || '—'}"${entry.sourceVersion ? ` (Version ${entry.sourceVersion})` : ''}`,
       bodyLines: [],
     }
   }

@@ -55,10 +55,15 @@ function versionToDecimal($v)
     return round(floatval($v), 1);
 }
 
-$isUpdate = !empty($formData['formId']);
+// What a save with a formId does: 'version' (the default) adds the next version
+// of that form, so its history continues; 'newForm' starts a separate form of
+// the saver's own from the same PDF, and the form it was based on is untouched.
+// Anyone who can open a form may base a new one on it.
+$saveAsNewForm = ($formData['saveMode'] ?? 'version') === 'newForm';
+$sourceFormId = $saveAsNewForm ? trim((string) ($formData['formId'] ?? '')) : '';
+$isUpdate = !$saveAsNewForm && !empty($formData['formId']);
 $storageFilename = null;
 $formConfig = null;
-$isNewVersion = isset($formData['createNewVersion']) && $formData['createNewVersion'] === true;
 $oldFormConfig = null;
 $existingForm = null;
 
@@ -85,7 +90,7 @@ if ($isUpdate) {
         // was opened). Decided by comparing versions within the form rather than
         // by the stored is_latest flag, which older rows can carry incorrectly.
         $newerVersion = null;
-        if (!$isNewVersion && empty($formData['force'])) {
+        if (empty($formData['force'])) {
             try {
                 $editingVersion = round((float) ($existingForm['version'] ?? 1), 1);
                 $lineage = (string) ($existingForm['lineageId'] ?? $existingForm['id']);
@@ -434,11 +439,18 @@ try {
     exit;
 }
 
-if ($isUpdate && !$isNewVersion) {
+if ($isUpdate) {
     $formConfig = ebr_db_forms_fetch_by_id($formData['formId']);
     if (!$formConfig) {
         echo json_encode(['success' => false, 'message' => 'Form not found for update']);
         exit;
+    }
+    // Build on the form's newest version. Normally that is the one opened; after
+    // a forced save over someone else's newer version it is theirs, so their
+    // audit entries are kept and the diff shows what this save changes.
+    $latestInLineage = ebr_db_forms_lineage_latest((string) ($formConfig['lineageId'] ?? $formConfig['id']));
+    if ($latestInLineage !== null) {
+        $formConfig = $latestInLineage;
     }
     $oldFormConfig = json_decode(json_encode($formConfig), true);
 
@@ -574,6 +586,28 @@ if ($isUpdate && !$isNewVersion) {
 } else {
     $sanitizedName = preg_replace('/[^a-zA-Z0-9_-]/', '_', $formData['name']);
 
+    // A new form based on another one must have a name of its own. With the
+    // other form's name and PDF it would join that form's history below instead.
+    $sourceForm = null;
+    if ($saveAsNewForm) {
+        if (ebr_form_name_taken($allForms, (string) $formData['name'], (string) $formData['pdfFile'], '')) {
+            http_response_code(409);
+            echo json_encode([
+                'success' => false,
+                'code' => 'name_taken',
+                'message' => 'A form already uses this name with this PDF. Choose a different name for your new form.',
+            ]);
+            exit;
+        }
+        if ($sourceFormId !== '') {
+            try {
+                $sourceForm = ebr_db_forms_fetch_by_id($sourceFormId);
+            } catch (Throwable $e) {
+                $sourceForm = null;
+            }
+        }
+    }
+
     $version = 1.0;
     $sameNameAndPdf = [];
     $sameNameOnly = [];
@@ -626,7 +660,7 @@ if ($isUpdate && !$isNewVersion) {
             return versionToDecimal($f['version'] ?? 1.0);
         }, $sameNameAndPdf);
         $version = versionToDecimal(max($versions) + 0.1);
-    } elseif (!empty($sameNameOnly)) {
+    } elseif (!empty($sameNameOnly) && !$saveAsNewForm) {
         $versions = array_map(function ($f) {
             return versionToDecimal($f['version'] ?? 1.0);
         }, $sameNameOnly);
@@ -636,7 +670,19 @@ if ($isUpdate && !$isNewVersion) {
 
     $storageFilename = $sanitizedName . '_v' . number_format($version, 1) . '_' . time() . '.json';
 
-    $auditTrail = generateInitialAuditTrail($formData['fields'] ?? [], $actorName, number_format($version, 1));
+    $auditTrail = [];
+    if ($sourceForm !== null) {
+        $auditTrail[] = [
+            'type' => 'form_created_from',
+            'sourceFormId' => (string) $sourceForm['id'],
+            'sourceName' => (string) ($sourceForm['name'] ?? ''),
+            'sourceVersion' => number_format(versionToDecimal($sourceForm['version'] ?? 1.0), 1),
+            'user' => $actorName,
+            'timestamp' => date('c'),
+            'version' => number_format($version, 1),
+        ];
+    }
+    $auditTrail = array_merge($auditTrail, generateInitialAuditTrail($formData['fields'] ?? [], $actorName, number_format($version, 1)));
 
     $newFormId = uniqid('form_');
     $formConfig = [
@@ -679,7 +725,7 @@ if ($existingCreatorId > 0) {
 }
 
 try {
-    if ($isUpdate && !$isNewVersion) {
+    if ($isUpdate) {
         ebr_db_forms_update_api($oldFormConfig, $oldFormConfig['storageFilename'] ?? null);
         ebr_db_forms_insert_api($formConfig, $storageFilename);
     } else {
@@ -701,11 +747,12 @@ try {
 
 echo json_encode([
     'success' => true,
-    'message' => $isNewVersion ? 'New version created successfully' : ($isUpdate ? 'Form updated successfully' : 'Form saved successfully'),
+    'message' => $saveAsNewForm ? 'New form created successfully' : ($isUpdate ? 'Form updated successfully' : 'Form saved successfully'),
     'formId' => $formConfig['id'],
     'filename' => $storageFilename,
     'isUpdate' => $isUpdate,
-    'isNewVersion' => $isNewVersion,
+    'isNewForm' => $saveAsNewForm,
+    'lineageId' => (string) $formConfig['lineageId'],
     'version' => versionToDecimal($formConfig['version']),
     'collaborators' => $collaboratorsToStore,
     'savedBy' => $actorName,
