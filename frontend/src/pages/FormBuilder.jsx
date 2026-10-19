@@ -1042,6 +1042,21 @@ export default function FormBuilder() {
   const [draftStatus, setDraftStatus] = useState('idle')
   const draftTimerRef = useRef(null)
   const draftCheckedRef = useRef(false)
+  // The fields as last loaded from or saved to the server (JSON), or null for
+  // a form that has never been saved. A draft is only worth keeping when the
+  // fields differ from this — opening a form and leaving it is not a draft.
+  const draftBaselineRef = useRef(null)
+  // Set just before a form loaded from the server goes into `fields`; the
+  // auto-save effect takes that render's fields as the new baseline.
+  const pendingDraftBaselineRef = useRef(false)
+  // A draft found when the builder opened, held until the form it was made on
+  // has loaded so the two can be compared.
+  const foundDraftRef = useRef(null)
+  // Whether the version opened is the newest one of its form.
+  const loadedIsLatestRef = useRef(true)
+  // A formId put in the URL by Save: the form is already on screen, so the
+  // load-by-id effect skips it rather than reloading (and resetting undo).
+  const skipUrlLoadRef = useRef(null)
   // Form collaborators (who may edit) + whether the current user is allowed to.
   const [canEditForm, setCanEditForm] = useState(true)
   // Owners may also change who has access; the dialog handles that on its own,
@@ -1173,7 +1188,32 @@ export default function FormBuilder() {
     return urlFormId ? `ebr-fb-draft:form:${urlFormId}` : `ebr-fb-draft:pdf:${pdfFile}`
   }, [pdfFile, urlFormId])
 
-  // Look once for a saved draft when the builder opens; offer to restore it.
+  // Drop a stored draft without touching the on-screen state.
+  const removeStoredDraft = useCallback(() => {
+    if (!draftKey) return
+    try {
+      window.localStorage.removeItem(draftKey)
+    } catch {
+      /* ignore */
+    }
+  }, [draftKey])
+
+  // Offer a found draft only when it differs from the form as saved; one that
+  // matches is left over from opening the form and is quietly removed.
+  const offerFoundDraft = useCallback(() => {
+    const draft = foundDraftRef.current
+    if (!draft) return
+    foundDraftRef.current = null
+    if (draftBaselineRef.current != null && JSON.stringify(draft.fields) === draftBaselineRef.current) {
+      removeStoredDraft()
+      return
+    }
+    setDraftPrompt({ ...draft, newerVersionExists: urlFormId ? !loadedIsLatestRef.current : false })
+  }, [removeStoredDraft, urlFormId])
+
+  // Look once for a saved draft when the builder opens. For a saved form it is
+  // compared once the form has loaded (see the auto-save effect); a form that
+  // has never been saved has nothing to compare with, so it is offered now.
   useEffect(() => {
     if (!draftKey || draftCheckedRef.current) return
     draftCheckedRef.current = true
@@ -1182,21 +1222,35 @@ export default function FormBuilder() {
       if (!raw) return
       const parsed = JSON.parse(raw)
       if (parsed && Array.isArray(parsed.fields) && parsed.fields.length > 0) {
-        setDraftPrompt(parsed)
+        foundDraftRef.current = parsed
+        if (!urlFormId || draftBaselineRef.current != null) offerFoundDraft()
       }
     } catch {
       /* corrupt/absent draft — ignore */
     }
-  }, [draftKey])
+  }, [draftKey, urlFormId, offerFoundDraft])
 
   // Debounced write of the current layout to localStorage. Held off until the
   // restore choice is made, so it can't overwrite the draft before the user sees it.
   useEffect(() => {
+    // A form just loaded from the server: that is the baseline, not an edit.
+    if (pendingDraftBaselineRef.current) {
+      pendingDraftBaselineRef.current = false
+      draftBaselineRef.current = JSON.stringify(fields)
+      offerFoundDraft()
+      return
+    }
     if (!draftKey || draftPrompt) return
     if (fields.length === 0) return
     if (draftTimerRef.current) clearTimeout(draftTimerRef.current)
     draftTimerRef.current = setTimeout(() => {
       draftTimerRef.current = null
+      // Back to exactly what is saved (e.g. undone): nothing to recover.
+      if (draftBaselineRef.current != null && JSON.stringify(fields) === draftBaselineRef.current) {
+        removeStoredDraft()
+        setDraftStatus('idle')
+        return
+      }
       try {
         window.localStorage.setItem(
           draftKey,
@@ -1210,7 +1264,7 @@ export default function FormBuilder() {
     return () => {
       if (draftTimerRef.current) clearTimeout(draftTimerRef.current)
     }
-  }, [fields, draftKey, draftPrompt, loadedFormName])
+  }, [fields, draftKey, draftPrompt, loadedFormName, offerFoundDraft, removeStoredDraft])
 
   const clearDraft = useCallback(() => {
     if (draftTimerRef.current) {
@@ -1420,10 +1474,16 @@ export default function FormBuilder() {
 
   // If formId in URL, skip modal and load directly
   useEffect(() => {
+    if (urlFormId && skipUrlLoadRef.current === urlFormId) {
+      skipUrlLoadRef.current = null
+      return
+    }
     if (urlFormId && pdfFile) {
       setShowSelectionModal(false)
       loadFormById(urlFormId).then((data) => {
         if (data.success && data.form?.fields) {
+          loadedIsLatestRef.current = data.form.isLatest !== false
+          pendingDraftBaselineRef.current = true
           setLoadedFormName(data.form.name || null)
           setAccessFormId(urlFormId)
           setLoadedLineageId(data.form.lineageId || urlFormId)
@@ -2511,6 +2571,8 @@ export default function FormBuilder() {
     } else if (selectionMode === 'existing' && selectionFormId) {
       loadFormById(selectionFormId).then((data) => {
         if (data.success && data.form?.fields) {
+          loadedIsLatestRef.current = data.form.isLatest !== false
+          pendingDraftBaselineRef.current = true
           setLoadedFormName(data.form.name || null)
           setAccessFormId(selectionFormId)
           setLoadedLineageId(data.form.lineageId || selectionFormId)
@@ -2696,9 +2758,22 @@ export default function FormBuilder() {
         setLoadedFormName(finalName)
         setShowSaveModal(false)
         clearDraft()
+        // What is on screen is now what is saved.
+        draftBaselineRef.current = JSON.stringify(fields)
+        loadedIsLatestRef.current = true
         if (saveAsNewForm && result.formId) {
           // Carry on in the new form: reopening it by id loads its own access
           // and history, and a reload stays on it rather than the original.
+          const next = new URLSearchParams(searchParams)
+          next.set('formId', result.formId)
+          setSearchParams(next, { replace: true })
+        } else if (result.formId && result.formId !== urlFormId) {
+          // Point the page at the version just saved, so a reload opens it and
+          // not the one this session started from. Already on screen, so the
+          // load-by-id effect is told to skip it.
+          skipUrlLoadRef.current = result.formId
+          setAccessFormId(result.formId)
+          if (result.lineageId) setLoadedLineageId(result.lineageId)
           const next = new URLSearchParams(searchParams)
           next.set('formId', result.formId)
           setSearchParams(next, { replace: true })
@@ -3396,6 +3471,15 @@ export default function FormBuilder() {
             Unsaved draft found for this form
             {draftPrompt.savedAt ? ` (${new Date(draftPrompt.savedAt).toLocaleString()})` : ''} —
             {' '}{draftPrompt.fields.length} field{draftPrompt.fields.length === 1 ? '' : 's'}.
+            {draftPrompt.newerVersionExists && (
+              <>
+                {' '}
+                <strong>
+                  A newer version of this form has been saved since — restoring brings back this
+                  older copy with your unsaved changes.
+                </strong>
+              </>
+            )}
           </span>
           <button type="button" className="fb-btn fb-btn-success fb-draft-banner-btn" onClick={restoreDraft}>
             Restore draft
