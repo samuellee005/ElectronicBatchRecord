@@ -532,6 +532,7 @@ export default function FieldListTable({
                 <tr
                   key={f.id}
                   data-row={rowIndex}
+                  data-list-field-id={f.id}
                   className={`fb-list-row${selected ? ' is-selected' : ''}`}
                   onClick={() => focusRow(f)}
                   onFocusCapture={() => focusRow(f)}

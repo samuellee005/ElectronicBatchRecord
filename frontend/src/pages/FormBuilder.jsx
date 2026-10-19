@@ -1111,6 +1111,7 @@ export default function FormBuilder() {
   const [pillMenu, setPillMenu] = useState(null)
   const [marquee, setMarquee] = useState(null)
   const stagesScrollRef = useRef(null)
+  const componentsPanelRef = useRef(null)
   const {
     width: propertiesPanelWidth,
     resizing: propertiesPanelResizing,
@@ -1281,6 +1282,27 @@ export default function FormBuilder() {
   const selectedField = useMemo(
     () => fields.find((f) => f.id === selectedFieldId) || null,
     [fields, selectedFieldId],
+  )
+
+  // Clicking a field on the page brings its pill (Stages view) or row (List
+  // view) into sight in the left panel, opening Unassigned if it is hidden
+  // there. Waits two frames so the selection highlight and any newly opened
+  // group have rendered before scrolling.
+  const revealFieldInSidebar = useCallback(
+    (field) => {
+      if (!field || componentsPanelCollapsed) return
+      if (panelView === 'stages' && !stageKey(field) && unassignedCollapsed) setUnassignedCollapsed(false)
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          const id = CSS.escape(field.id)
+          const el = componentsPanelRef.current?.querySelector(
+            `[data-pill-id="${id}"], [data-list-field-id="${id}"]`,
+          )
+          el?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' })
+        }),
+      )
+    },
+    [componentsPanelCollapsed, panelView, unassignedCollapsed],
   )
 
   // Picking a calculation reference by clicking on the page:
@@ -2333,6 +2355,7 @@ export default function FormBuilder() {
       selectSingle(field.id)
       groupIds = [field.id]
     }
+    revealFieldInSidebar(field)
 
     const byId = new Map(fields.map((f) => [f.id, f]))
     const group = groupIds
@@ -3003,11 +3026,13 @@ export default function FormBuilder() {
   const renderStagePill = useCallback(
     (f, stageName) => {
       const selected = selectedPillIds.has(f.id)
+      // Selected on the page (as opposed to picked in the panel).
+      const active = selectedFieldIds.has(f.id)
       return (
         <li
           key={f.id}
           data-pill-id={f.id}
-          className={`fb-stage-field-item${selected ? ' is-selected' : ''}`}
+          className={`fb-stage-field-item${selected ? ' is-selected' : ''}${active ? ' is-active' : ''}`}
           onDragOver={(e) => {
             e.preventDefault()
             e.dataTransfer.dropEffect = 'move'
@@ -3030,7 +3055,7 @@ export default function FormBuilder() {
             clearPanelDragRefs()
           }}
         >
-          <span className={`fb-stage-field-pill${selected ? ' is-selected' : ''}`}>
+          <span className={`fb-stage-field-pill${selected ? ' is-selected' : ''}${active ? ' is-active' : ''}`}>
             <span
               className="fb-stage-field-pill-grip"
               draggable
@@ -3070,7 +3095,14 @@ export default function FormBuilder() {
         </li>
       )
     },
-    [selectedPillIds, handlePillClick, handlePillContextMenu, clearPanelDragRefs, moveFieldsToStage],
+    [
+      selectedPillIds,
+      selectedFieldIds,
+      handlePillClick,
+      handlePillContextMenu,
+      clearPanelDragRefs,
+      moveFieldsToStage,
+    ],
   )
 
   // Marquee (rubber-band) select over the stages panel background. Starts only on
@@ -3356,6 +3388,7 @@ export default function FormBuilder() {
       <div className="fb-main">
         {/* Components Panel - collapsible; vertical toggle on right edge */}
         <div
+          ref={componentsPanelRef}
           className={`fb-components-panel ${componentsPanelCollapsed ? 'fb-components-panel-collapsed' : ''}${
             stagesExpanded && !componentsPanelCollapsed ? ' fb-components-panel--expanded' : ''
           }${componentsPanelResizing ? ' fb-components-panel--resizing' : ''}`}

@@ -2081,6 +2081,42 @@
   font-weight: 600;
 }
 
+/* The field selected on the page: a solid accent pill, so it stands out from
+   pills picked in the panel for a bulk move */
+.fb-stage-field-pill.is-active {
+  border-color: #667eea;
+  background: #667eea;
+  box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.35);
+}
+
+.fb-stage-field-item.is-active .fb-stage-field-pill-label {
+  color: #fff;
+  font-weight: 600;
+}
+
+.fb-stage-field-item.is-active .fb-stage-field-pill-grip {
+  background: #5a6fd8;
+  border-right-color: #5a6fd8;
+  color: #e6e9fb;
+}
+
+.fb-stage-field-pill.is-active:hover {
+  background: #5a6fd8;
+}
+
+.fb-stage-field-item.is-active .fb-stage-field-pill-label:hover {
+  color: #fff;
+}
+
+.fb-stage-field-item.is-active .fb-stage-field-pill-page {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.fb-stage-field-item {
+  scroll-margin: 8px;   /* breathing room when scrolled into view */
+}
+
 /* Rubber-band marquee */
 .fb-marquee {
   position: fixed;
