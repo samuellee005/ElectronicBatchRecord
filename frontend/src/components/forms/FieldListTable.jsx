@@ -256,10 +256,30 @@ export default function FieldListTable({
     statusTimerRef.current = setTimeout(() => setStatus(null), 3500)
   }
 
+  // The table is grouped by stage, so giving a field a new stage would move its
+  // row to that stage's group — mid-paste that sends rows jumping about, and a
+  // second paste would land on the wrong rows. So once an edit here changes a
+  // stage, the rows hold the order they had (new fields go at the end) until
+  // Re-sort, a move in a position column, or the List view is reopened.
+  const [heldOrder, setHeldOrder] = useState(null)
+  const orderedRows = useMemo(() => {
+    if (!heldOrder) return rows
+    const byId = new Map(rows.map((f) => [f.id, f]))
+    const held = new Set(heldOrder)
+    return [
+      ...heldOrder.map((id) => byId.get(id)).filter(Boolean),
+      ...rows.filter((f) => !held.has(f.id)),
+    ]
+  }, [rows, heldOrder])
+  const orderIsHeld =
+    heldOrder != null && orderedRows.some((f, i) => rows[i]?.id !== f.id)
+  const holdOrder = () => setHeldOrder((cur) => cur ?? orderedRows.map((f) => f.id))
+  const releaseOrder = () => setHeldOrder(null)
+
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (!q) return rows
-    return rows.filter((f) => {
+    if (!q) return orderedRows
+    return orderedRows.filter((f) => {
       const stage = (f.stageInProcess || '').trim()
       return (
         String(f.label || '').toLowerCase().includes(q) ||
@@ -268,7 +288,7 @@ export default function FieldListTable({
         `page ${f.page || 1}`.includes(q)
       )
     })
-  }, [rows, query, typeLabelOf])
+  }, [orderedRows, query, typeLabelOf])
 
   // Clicking a row takes the canvas to that field. Skipped when it is already
   // the selected one, so typing in a cell does not keep re-scrolling.
@@ -322,6 +342,7 @@ export default function FieldListTable({
    * `startRow`. Returns the summary message.
    */
   const applyGrid = (grid, { startCol = 'name', startRow = 0, requireHeader = false } = {}) => {
+    holdOrder()
     let colMap = headerColumns(grid[0] || [])
     if (colMap) {
       grid = grid.slice(1)
@@ -429,6 +450,7 @@ export default function FieldListTable({
     setNewStageFor(null)
     setNewStageDraft('')
     if (name && name !== (f.stageInProcess || '').trim()) {
+      holdOrder()
       onUpdateField(f.id, { stageInProcess: name })
     }
   }
@@ -488,6 +510,15 @@ export default function FieldListTable({
             : `${visible.length} of ${rows.length}`}
         </span>
       </div>
+
+      {orderIsHeld && (
+        <div className="fb-list-held">
+          <span>Rows are kept where they were while you edit — some are no longer grouped by stage.</span>
+          <button type="button" className="fb-list-copy-btn" onClick={releaseOrder}>
+            Re-sort
+          </button>
+        </div>
+      )}
 
       <p className={`fb-list-hint${status ? ' is-status' : ''}`} role="status" aria-live="polite">
         {status ||
@@ -584,6 +615,7 @@ export default function FieldListTable({
                             setNewStageFor(f.id)
                             setNewStageDraft('')
                           } else if (v !== stage) {
+                            holdOrder()
                             onUpdateField(f.id, { stageInProcess: v })
                           }
                         }}
@@ -607,7 +639,10 @@ export default function FieldListTable({
                         label={`Order of stage ${stage}`}
                         title={`Moves the whole “${stage}” stage in the completion order (1–${existingStages.length}).`}
                         disabled={!canEdit}
-                        onCommit={(n) => onMoveStage(stage, n)}
+                        onCommit={(n) => {
+                          releaseOrder()
+                          onMoveStage(stage, n)
+                        }}
                       />
                     ) : (
                       <span className="fb-list-dash" title="Unassigned fields have no stage order">
@@ -623,7 +658,10 @@ export default function FieldListTable({
                       label={`Position of ${f.label || typeLabelOf(f.type)} in its list`}
                       title={`Position in ${stage ? `“${stage}”` : 'Unassigned'} (1–${groupSize}).`}
                       disabled={!canEdit}
-                      onCommit={(n) => onMoveFieldInGroup(f.id, n)}
+                      onCommit={(n) => {
+                        releaseOrder()
+                        onMoveFieldInGroup(f.id, n)
+                      }}
                     />
                   </td>
 

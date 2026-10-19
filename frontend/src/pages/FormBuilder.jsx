@@ -1692,6 +1692,27 @@ export default function FormBuilder() {
     })
   }, [])
 
+  // Like updateField, but a field given a new stage goes where it falls on the
+  // page among that stage's fields, not at the end. Used by the List view, where
+  // a pasted column of stages would otherwise pile its fields up at the end of
+  // each stage in whatever order the rows happened to be in.
+  const updateFieldInPageOrder = useCallback((id, updates) => {
+    setFields((prev) => {
+      const f0 = prev.find((f) => f.id === id)
+      if (!f0) return prev
+      const newStage = updates.stageInProcess === undefined ? null : (updates.stageInProcess || '').trim()
+      if (newStage === null || stageKey(f0) === newStage) {
+        return prev.map((f) => (f.id === id ? { ...f, ...updates } : f))
+      }
+      // The first field of the new stage that comes after this one on the page
+      // is the one to insert before; none means it belongs at the end.
+      const members = prev.filter((f) => f.id !== id && stageKey(f) === newStage)
+      const ordered = readingOrderSort([...members, f0])
+      const after = ordered[ordered.findIndex((f) => f.id === id) + 1]
+      return placeFieldInGroupOrder(prev, id, newStage, after?.id ?? null, true, stageKey(f0), updates)
+    })
+  }, [])
+
   const deleteField = useCallback((id) => {
     setFields((prev) => normalizeFieldGroupOrder(prev.filter((f) => f.id !== id)))
     setSelectedFieldIds((prev) => {
@@ -3763,7 +3784,7 @@ export default function FormBuilder() {
                         stageSizes={stageSizes}
                         typeLabelOf={getComponentTypeLabel}
                         onFocusField={focusFieldOnCanvas}
-                        onUpdateField={updateField}
+                        onUpdateField={updateFieldInPageOrder}
                         onMoveStage={moveStageToPosition}
                         onMoveFieldInGroup={moveFieldToGroupPosition}
                         canEdit={canEditForm}
