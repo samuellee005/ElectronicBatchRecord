@@ -479,7 +479,9 @@ if ($isUpdate) {
 
         $storageFilename = $sanitizedName . '_v' . number_format($newVersion, 1) . '_' . time() . '.json';
 
-        $auditTrail = $formConfig['auditTrail'] ?? [];
+        // Only what this save changes. Earlier changes stay on the versions
+        // that made them, so a version's trail is that save's changes alone.
+        $auditTrail = [];
         $auditTrail[] = [
             'type' => 'pdf_changed',
             'oldPdf' => $formConfig['pdfFile'],
@@ -539,7 +541,8 @@ if ($isUpdate) {
         $newFields = $formData['fields'] ?? [];
         $fieldChanges = compareFields($oldFields, $newFields, $actorName, number_format($newVersion, 1));
 
-        $auditTrail = $formConfig['auditTrail'] ?? [];
+        // Only what this save changes; see the pdf-changed path above.
+        $auditTrail = [];
         if ($renamed) {
             $auditTrail[] = [
                 'type' => 'form_renamed',

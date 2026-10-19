@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import PdfViewer from '../components/PdfViewer'
 import PdfPageScrubber from '../components/PdfPageScrubber'
 import PdfZoomControls from '../components/PdfZoomControls'
-import { loadFormById } from '../api/client'
+import { listForms, loadFormById } from '../api/client'
 import { formatAuditEntryBlock } from '../utils/formatAuditTrail'
 import './FormAudit.css'
 
@@ -41,7 +41,7 @@ export default function FormAudit() {
     }
     setLoading(true)
     setError(null)
-    loadFormById(formId)
+    loadFormById(formId, { audit: true })
       .then((res) => {
         if (!res.success || !res.form) throw new Error(res.message || 'Form not found')
         setForm(res.form)
@@ -49,6 +49,27 @@ export default function FormAudit() {
       .catch((err) => setError(err.message || 'Failed to load form'))
       .finally(() => setLoading(false))
   }, [formId])
+
+  // Every version of this form, oldest first. Each version's trail holds only
+  // the changes that save made, so the earlier ones are a click away.
+  const [versions, setVersions] = useState([])
+  const lineageId = form?.lineageId
+  useEffect(() => {
+    if (!lineageId) return
+    let cancelled = false
+    listForms()
+      .then((res) => {
+        if (cancelled || !res.success) return
+        const rows = (res.forms || [])
+          .filter((f) => f.lineageId === lineageId)
+          .sort((a, b) => (Number(a.version) || 0) - (Number(b.version) || 0))
+        setVersions(rows)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [lineageId])
 
   const onPageRendered = useCallback(({ page, totalPages: n }) => {
     setCurrentPage(page)
@@ -179,8 +200,32 @@ export default function FormAudit() {
 
       <section className="form-audit-section form-audit-section--notes">
         <h2 className="form-audit-section-title">Audit trail</h2>
+        <p className="form-audit-hint">
+          What was added, edited or deleted when Version {form.version ?? 1} was saved. Changes
+          made in earlier saves are in those versions' audit trails.
+        </p>
+        {versions.length > 1 && (
+          <nav className="form-audit-versions" aria-label="Versions of this form">
+            <span className="form-audit-versions-label">Versions:</span>
+            {versions.map((v) =>
+              v.id === form.id ? (
+                <span key={v.id} className="form-audit-version is-current" aria-current="page">
+                  v{Number(v.version || 1).toFixed(1)}
+                </span>
+              ) : (
+                <Link
+                  key={v.id}
+                  className="form-audit-version"
+                  to={`/forms/audit?form=${encodeURIComponent(v.id)}`}
+                >
+                  v{Number(v.version || 1).toFixed(1)}
+                </Link>
+              ),
+            )}
+          </nav>
+        )}
         {auditBlocks.length === 0 ? (
-          <p className="form-audit-empty">No audit entries for this version.</p>
+          <p className="form-audit-empty">No changes were recorded for this version.</p>
         ) : (
           <div className="form-audit-table-wrap">
             <table className="form-audit-table">

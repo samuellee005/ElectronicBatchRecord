@@ -309,12 +309,10 @@ try {
     $lineageId = (string) ($form['lineageId'] ?? $form['id']);
     $written = ebr_db_forms_set_collaborators_in_lineage($lineageId, $stored);
 
-    // Record it against the latest version, where the form audit page reads.
+    // Record it on the latest version, alongside that version's other changes.
     $target = ebr_db_forms_lineage_latest($lineageId) ?? $form;
-    $trail = is_array($target['auditTrail'] ?? null) ? $target['auditTrail'] : [];
     $auditEntry['version'] = number_format((float) ($target['version'] ?? 1), 1);
-    $trail[] = $auditEntry;
-    ebr_db_forms_set_audit_trail((string) $target['id'], $trail);
+    ebr_db_forms_append_audit_entry((string) $target['id'], $auditEntry);
 
     $form = ebr_db_forms_fetch_by_id($formId) ?? $form;
 } catch (Throwable $e) {

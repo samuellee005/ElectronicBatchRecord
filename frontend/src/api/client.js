@@ -164,8 +164,9 @@ export async function loadFormByPdf(pdf) {
   return request(`/includes/load-form.php?pdf=${encodeURIComponent(pdf)}`)
 }
 
-export async function loadFormById(id) {
-  return request(`/includes/load-form-by-id.php?id=${encodeURIComponent(id)}`)
+/** `audit: true` also returns the version's audit trail (the form audit page). */
+export async function loadFormById(id, { audit = false } = {}) {
+  return request(`/includes/load-form-by-id.php?id=${encodeURIComponent(id)}${audit ? '&audit=1' : ''}`)
 }
 
 /**

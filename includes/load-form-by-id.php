@@ -29,6 +29,17 @@ if ($foundForm) {
         $foundForm['version'] = 1.0;
     }
     $foundForm['version'] = round(floatval($foundForm['version']), 1);
+    // The audit trail is left out unless asked for (?audit=1, the form audit
+    // page): the builder and data entry never use it.
+    if (($_GET['audit'] ?? '') === '1') {
+        try {
+            $foundForm['auditTrail'] = ebr_db_forms_fetch_audit_trail((string) $foundForm['id']);
+        } catch (Throwable $e) {
+            $foundForm['auditTrail'] = [];
+        }
+    } else {
+        unset($foundForm['auditTrail']);
+    }
     if (!isset($foundForm['isLatest'])) {
         $foundForm['isLatest'] = true;
     }

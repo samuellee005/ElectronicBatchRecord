@@ -190,3 +190,38 @@
 .form-audit-details-empty {
   color: #9ca3af;
 }
+
+/* Links to the form's other versions; each holds only its own changes */
+.form-audit-versions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 14px;
+  font-size: 0.82rem;
+}
+
+.form-audit-versions-label {
+  color: #666;
+  margin-right: 2px;
+}
+
+.form-audit-version {
+  padding: 2px 8px;
+  border: 1px solid #c7d0f5;
+  border-radius: 999px;
+  background: #eef1fb;
+  color: #3f4bb0;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.form-audit-version:hover {
+  background: #e0e5fa;
+}
+
+.form-audit-version.is-current {
+  background: #667eea;
+  border-color: #667eea;
+  color: #fff;
+}

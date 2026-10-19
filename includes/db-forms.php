@@ -123,19 +123,14 @@ const EBR_FORMS_SUMMARY_COLUMNS = 'id, lineage_id, name, description, pdf_file, 
     department, program, form_type, jsonb_array_length(fields) AS field_count';
 
 /**
- * @return list<array<string, mixed>>
+ * A whole version row except its audit trail, which only the form audit page
+ * needs (ebr_db_forms_fetch_audit_trail). Rows read this way have `auditTrail`
+ * as [].
  */
-function ebr_db_forms_all_api(): array
-{
-    $pdo = ebr_pg_pdo();
-    $st = $pdo->query('SELECT * FROM ebr_forms');
-    $out = [];
-    while ($row = $st->fetch(PDO::FETCH_ASSOC)) {
-        $out[] = ebr_db_form_row_to_api($row);
-    }
-
-    return $out;
-}
+const EBR_FORMS_ROW_COLUMNS = 'id, lineage_id, name, description, pdf_file, fields, version, is_latest,
+    source_form_ids, is_combined, created_at, updated_at, created_by, updated_by,
+    created_by_user_id, updated_by_user_id, collaborators, storage_filename,
+    department, program, form_type';
 
 /**
  * Every row without its fields or audit trail (see EBR_FORMS_SUMMARY_COLUMNS):
@@ -155,10 +150,42 @@ function ebr_db_forms_all_summary_api(): array
     return $out;
 }
 
+/**
+ * One version's audit trail: the changes that save made (plus any access
+ * changes recorded on it while it was the latest version).
+ *
+ * @return list<array<string, mixed>>
+ */
+function ebr_db_forms_fetch_audit_trail(string $id): array
+{
+    $pdo = ebr_pg_pdo();
+    $st = $pdo->prepare('SELECT audit_trail FROM ebr_forms WHERE id = :id');
+    $st->execute(['id' => $id]);
+    $raw = $st->fetchColumn();
+    $d = is_string($raw) ? json_decode($raw, true) : null;
+
+    return is_array($d) ? $d : [];
+}
+
+/**
+ * Add one entry to the end of a version's audit trail, in the database, without
+ * reading the trail back.
+ *
+ * @param array<string, mixed> $entry
+ */
+function ebr_db_forms_append_audit_entry(string $id, array $entry): void
+{
+    $pdo = ebr_pg_pdo();
+    $st = $pdo->prepare(
+        "UPDATE ebr_forms SET audit_trail = audit_trail || jsonb_build_array(CAST(:e AS jsonb)) WHERE id = :id"
+    );
+    $st->execute(['e' => ebr_db_forms_json_enc($entry), 'id' => $id]);
+}
+
 function ebr_db_forms_fetch_by_id(string $id): ?array
 {
     $pdo = ebr_pg_pdo();
-    $st = $pdo->prepare('SELECT * FROM ebr_forms WHERE id = :id LIMIT 1');
+    $st = $pdo->prepare('SELECT ' . EBR_FORMS_ROW_COLUMNS . ' FROM ebr_forms WHERE id = :id LIMIT 1');
     $st->execute(['id' => $id]);
     $row = $st->fetch(PDO::FETCH_ASSOC);
     if (!$row) {
@@ -242,7 +269,9 @@ SQL;
 }
 
 /**
- * Full replace of row by id (same shape as insert).
+ * Full replace of row by id (same shape as insert), except audit_trail: a
+ * version's trail is written when it is created and only ever appended to
+ * (ebr_db_forms_append_audit_entry).
  *
  * @param array<string, mixed> $form
  */
@@ -260,7 +289,6 @@ UPDATE ebr_forms SET
     is_latest = :is_latest,
     source_form_ids = CAST(:source_form_ids AS jsonb),
     is_combined = :is_combined,
-    audit_trail = CAST(:audit_trail AS jsonb),
     created_at = :created_at,
     updated_at = :updated_at,
     created_by = :created_by,
@@ -286,7 +314,6 @@ SQL;
         'is_latest' => ebr_db_pg_bool_param(!empty($form['isLatest'])),
         'source_form_ids' => ebr_db_forms_json_enc($form['sourceFormIds'] ?? []),
         'is_combined' => ebr_db_pg_bool_param(!empty($form['isCombined'])),
-        'audit_trail' => ebr_db_forms_json_enc($form['auditTrail'] ?? []),
         'created_at' => ebr_db_forms_ts_param($form['createdAt'] ?? null),
         'updated_at' => ebr_db_forms_ts_param($form['updatedAt'] ?? null),
         'created_by' => $form['createdBy'] ?? null,
@@ -336,8 +363,9 @@ function ebr_db_forms_lineage_latest(string $lineageId): ?array
 {
     $pdo = ebr_pg_pdo();
     $st = $pdo->prepare(
-        'SELECT * FROM ebr_forms WHERE lineage_id = :l OR (lineage_id IS NULL AND id = :l)
-         ORDER BY version DESC, created_at DESC LIMIT 1'
+        'SELECT ' . EBR_FORMS_ROW_COLUMNS . ' FROM ebr_forms
+         WHERE lineage_id = :l OR (lineage_id IS NULL AND id = :l)
+         ORDER BY version DESC, updated_at DESC LIMIT 1'
     );
     $st->execute(['l' => $lineageId]);
     $row = $st->fetch(PDO::FETCH_ASSOC);
@@ -364,19 +392,6 @@ function ebr_db_forms_set_collaborators_in_lineage(string $lineageId, array $col
     $st->execute(['c' => ebr_db_forms_json_enc($collaborators), 'l' => $lineageId]);
 
     return $st->rowCount();
-}
-
-/**
- * Replace one form row's audit trail (used when an access change is recorded
- * against the latest version).
- *
- * @param list<array<string, mixed>> $auditTrail
- */
-function ebr_db_forms_set_audit_trail(string $formId, array $auditTrail): void
-{
-    $pdo = ebr_pg_pdo();
-    $st = $pdo->prepare('UPDATE ebr_forms SET audit_trail = CAST(:a AS JSONB) WHERE id = :i');
-    $st->execute(['a' => ebr_db_forms_json_enc($auditTrail), 'i' => $formId]);
 }
 
 /**
