@@ -70,7 +70,26 @@ async function request(path, options = {}) {
       ...fetchOpts.headers,
     },
   })
-  const data = await res.json().catch(() => ({}))
+  // A reply that is not JSON (a PHP warning printed ahead of it, a proxy error
+  // page, an HTML login page) used to collapse to {} and surface as "Unknown
+  // error". Keep what the server actually sent so the message says what failed.
+  const raw = await res.text().catch(() => '')
+  let data
+  try {
+    data = raw ? JSON.parse(raw) : {}
+  } catch {
+    const snippet = raw
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 300)
+    console.error(`[EBR API] ${path} returned HTTP ${res.status} with a non-JSON body:`, raw)
+    data = {
+      success: false,
+      code: 'bad_response',
+      message: `The server sent an unexpected reply (HTTP ${res.status})${snippet ? `: ${snippet}` : ''}`,
+    }
+  }
 
   if (
     res.status === 401 &&
@@ -104,7 +123,14 @@ async function request(path, options = {}) {
     console.debug(`[EBR API] ${debugLabel} response ←`, line)
   }
 
-  if (!res.ok) throw new Error(data.message || res.statusText || 'Request failed')
+  if (!res.ok) {
+    const err = new Error(data.message || res.statusText || `Request failed (HTTP ${res.status})`)
+    // Callers that handle specific failures (a save conflict, no access) read
+    // the server's reply from here.
+    err.data = data
+    err.status = res.status
+    throw err
+  }
   return data
 }
 
@@ -162,7 +188,14 @@ export async function updateFormCollaborators(body) {
 }
 
 export async function saveForm(body) {
-  return request('/includes/save-form.php', { method: 'POST', body: JSON.stringify(body) })
+  try {
+    return await request('/includes/save-form.php', { method: 'POST', body: JSON.stringify(body) })
+  } catch (err) {
+    // A conflict (409), no access (403) or a taken name come back as replies the
+    // builder handles itself, not as a generic failure.
+    if (err.data?.code) return err.data
+    throw err
+  }
 }
 
 // Data entry & batch
