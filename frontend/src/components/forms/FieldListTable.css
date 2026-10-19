@@ -9,13 +9,14 @@
 
 .fb-list-toolbar {
   display: flex;
+  flex-wrap: wrap;      /* buttons drop below the search in a narrow panel */
   align-items: center;
-  gap: 8px;
+  gap: 6px 8px;
   flex-shrink: 0;
 }
 
 .fb-list-search {
-  flex: 1 1 auto;
+  flex: 1 1 140px;
   min-width: 0;
   font-size: 0.78rem;
   padding: 4px 8px;
@@ -28,6 +29,40 @@
 .fb-list-search:focus {
   outline: none;
   border-color: #667eea;
+}
+
+.fb-list-copy-btn {
+  flex-shrink: 0;
+  border: 1px solid #c7d0f5;
+  background: #eef1fb;
+  color: #3f4bb0;
+  border-radius: 6px;
+  padding: 3px 10px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.fb-list-copy-btn:hover:not(:disabled) {
+  background: #e0e5fa;
+}
+
+.fb-list-copy-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.fb-list-hint {
+  margin: 0;
+  flex-shrink: 0;
+  min-height: 1.1em;
+  font-size: 0.7rem;
+  color: #8a93a3;
+}
+
+.fb-list-hint.is-status {
+  color: #1e7a44;
+  font-weight: 600;
 }
 
 .fb-list-count {

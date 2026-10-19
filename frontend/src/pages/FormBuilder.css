@@ -137,6 +137,10 @@
   min-height: 0;
 }
 
+.fb-components-panel.fb-components-panel--resizing {
+  transition: none;
+}
+
 .fb-components-panel-collapsed {
   width: 28px;
   min-width: 28px;
@@ -918,10 +922,11 @@
   transition: none;
 }
 
-/* Drag left to widen the panel (toward the canvas) */
-.fb-properties-panel-resize {
+/* Drag handle on the canvas-facing edge of either sidebar. A faint grip shows
+   it is there; it highlights on hover, focus and while dragging. */
+.fb-panel-resize {
   flex-shrink: 0;
-  width: 6px;
+  width: 8px;
   cursor: col-resize;
   touch-action: none;
   align-self: stretch;
@@ -930,13 +935,36 @@
   box-sizing: border-box;
   position: relative;
   z-index: 2;
+  outline: none;
+  transition: background 0.15s;
 }
 
-.fb-properties-panel-resize:hover {
+.fb-panel-resize::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px;
+  height: 32px;
+  transform: translate(-50%, -50%);
+  border-left: 1px solid #c4c8d4;
+  border-right: 1px solid #c4c8d4;
+  box-sizing: content-box;
+  pointer-events: none;
+}
+
+.fb-panel-resize:hover,
+.fb-panel-resize:focus-visible {
   background: rgba(102, 126, 234, 0.12);
 }
 
-.fb-properties-panel--resizing .fb-properties-panel-resize {
+.fb-panel-resize:hover::after,
+.fb-panel-resize:focus-visible::after {
+  border-color: #667eea;
+}
+
+.fb-properties-panel--resizing .fb-panel-resize,
+.fb-components-panel--resizing .fb-panel-resize {
   background: rgba(102, 126, 234, 0.22);
 }
 
@@ -2131,12 +2159,13 @@
 .fb-stages-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;      /* a narrow panel wraps the buttons rather than clipping them */
   gap: 6px;
   margin: 6px 0 12px;   /* padding between the action buttons and the stages list */
 }
 
 .fb-stages-actions > button {
-  flex: 1 1 auto;       /* share the row evenly so both fit on one line */
+  flex: 1 1 auto;       /* share the row evenly */
   justify-content: center;
 }
 
@@ -2165,11 +2194,6 @@
 }
 
 /* Expanded panel: wider, and the field/palette grids flow into more columns */
-.fb-components-panel--expanded {
-  width: 620px;
-  min-width: 620px;
-}
-
 .fb-components-panel--expanded .fb-stage-field-list {
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
 }
@@ -2550,4 +2574,80 @@
   background: #fff;
   color: #2d3250;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+/* Picking a calculation reference by clicking on the page */
+.fb-ref-pick-banner {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: calc(100% - 32px);
+  padding: 8px 10px 8px 14px;
+  border-radius: 8px;
+  background: #667eea;
+  color: white;
+  font-size: 0.85rem;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+}
+
+.fb-ref-pick-banner button {
+  flex-shrink: 0;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  background: transparent;
+  color: white;
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.fb-ref-pick-banner button:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.fb-ref-pick-banner kbd {
+  font: inherit;
+  opacity: 0.75;
+  margin-left: 4px;
+}
+
+.fb-overlay--ref-pick {
+  cursor: default;
+}
+
+/* Clicks go to the field box, not the inputs drawn inside it */
+.fb-overlay--ref-pick .fb-field > * {
+  pointer-events: none;
+}
+
+.fb-field.fb-field--pick-eligible {
+  cursor: crosshair;
+  outline: 2px dashed #667eea;
+  outline-offset: 1px;
+  background-color: rgba(102, 126, 234, 0.08);
+}
+
+.fb-field.fb-field--pick-eligible:hover {
+  outline-style: solid;
+  background-color: rgba(102, 126, 234, 0.22);
+}
+
+.fb-field.fb-field--pick-ineligible {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+.fb-field.fb-field--pick-self {
+  cursor: not-allowed;
+}
+
+.fb-calc-ref-row select.fb-calc-ref-picking,
+.fb-calc-ref-opt select.fb-calc-ref-picking {
+  border-color: #667eea;
+  box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.25);
 }

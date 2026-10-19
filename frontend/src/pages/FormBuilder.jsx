@@ -21,6 +21,7 @@ import {
   ArrowsPointingInIcon,
   ArrowDownOnSquareIcon,
   TagIcon,
+  BarsArrowDownIcon,
 } from '@heroicons/react/24/outline'
 import PdfViewer from '../components/PdfViewer'
 import PdfPageScrubber from '../components/PdfPageScrubber'
@@ -34,6 +35,7 @@ import {
   listDbUsers,
 } from '../api/client'
 import { useUserPrefs } from '../context/UserPrefsContext'
+import useResizablePanel from '../hooks/useResizablePanel'
 import { useAuth } from '../context/AuthContext'
 import ManageFormAccess from '../components/ManageFormAccess'
 import FieldListTable from '../components/forms/FieldListTable'
@@ -90,8 +92,15 @@ const MIN_FIELD_H = 12
 
 const PROPERTIES_PANEL_DEFAULT_W = 320
 const PROPERTIES_PANEL_MIN_W = 260
-const PROPERTIES_PANEL_MAX_W = 640
+const PROPERTIES_PANEL_MAX_W = 1200
 const PROPERTIES_PANEL_WIDTH_STORAGE_KEY = 'fb-properties-panel-width'
+
+// Left sidebar. The Expand button jumps to EXPANDED_W; dragging sets any width.
+const COMPONENTS_PANEL_DEFAULT_W = 280
+const COMPONENTS_PANEL_MIN_W = 240
+const COMPONENTS_PANEL_MAX_W = 1200
+const COMPONENTS_PANEL_EXPANDED_W = 620
+const COMPONENTS_PANEL_WIDTH_STORAGE_KEY = 'fb-components-panel-width'
 
 function newTablePartId() {
   return 't_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8)
@@ -156,13 +165,14 @@ function baseLabelWithoutIndex(label) {
 }
 
 /**
- * Compute the Auto-name result for `fields`: each stage's fields ordered by PDF
- * reading order (top→bottom, left→right), and fields that share a base label
- * within a stage given "Base #n" labels plus matching "base_n" slugs. Returns
- * the new array (or the original ref if nothing changed) and the count of
- * fields whose label/name actually changed (reorder-only fields don't count).
+ * Compute the Auto-sort / Auto-name result for `fields`. With `sort`, each
+ * stage's fields are ordered by PDF reading order (top→bottom, left→right).
+ * With `rename`, fields that share a base label within a stage get "Base #n"
+ * labels plus matching "base_n" slugs, numbered in reading order. Returns the
+ * new array (or the original ref if nothing changed), the count of fields whose
+ * label/name changed and the count whose order changed.
  */
-function planAutoName(fields) {
+function planAutoName(fields, { sort = true, rename = true } = {}) {
   const byKey = new Map()
   for (const f of fields) {
     const k = stageKey(f)
@@ -173,7 +183,8 @@ function planAutoName(fields) {
   const patch = new Map()
   for (const arr of byKey.values()) {
     const ordered = readingOrderSort(arr)
-    ordered.forEach((f, i) => orderById.set(f.id, i + 1))
+    if (sort) ordered.forEach((f, i) => orderById.set(f.id, i + 1))
+    if (!rename) continue
     const groups = new Map()
     for (const f of ordered) {
       const base = baseLabelWithoutIndex(f.label)
@@ -192,6 +203,7 @@ function planAutoName(fields) {
   }
   let changed = false
   let renamedCount = 0
+  let reorderedCount = 0
   const next = fields.map((f) => {
     const o = orderById.get(f.id)
     const p = patch.get(f.id)
@@ -199,11 +211,12 @@ function planAutoName(fields) {
     const nextLabel = p ? p.label : f.label
     const nextName = p ? p.name : f.name
     if (p && (f.label !== nextLabel || f.name !== nextName)) renamedCount += 1
+    if (f.orderInGroup !== nextOrder) reorderedCount += 1
     if (f.orderInGroup === nextOrder && f.label === nextLabel && f.name === nextName) return f
     changed = true
     return { ...f, orderInGroup: nextOrder, label: nextLabel, name: nextName }
   })
-  return { next: changed ? next : fields, renamedCount }
+  return { next: changed ? next : fields, renamedCount, reorderedCount }
 }
 
 /**
@@ -1013,8 +1026,8 @@ export default function FormBuilder() {
   const [pasteTargetPages, setPasteTargetPages] = useState(() => new Set())
   const [copyToastVisible, setCopyToastVisible] = useState(false)
   const copyToastTimerRef = useRef(null)
-  const [autoNameToastVisible, setAutoNameToastVisible] = useState(false)
-  const [autoNameCount, setAutoNameCount] = useState(0)
+  // Result message from Auto-sort / Auto-name, shown briefly as a toast.
+  const [autoNameToast, setAutoNameToast] = useState(null)
   const autoNameToastTimerRef = useRef(null)
   const [scale, setScale] = useState(1.5)
   const [currentPage, setCurrentPage] = useState(1)
@@ -1075,8 +1088,6 @@ export default function FormBuilder() {
   const [componentsPanelCollapsed, setComponentsPanelCollapsed] = useState(false)
   const [propertiesPanelCollapsed, setPropertiesPanelCollapsed] = useState(false)
   const [unassignedCollapsed, setUnassignedCollapsed] = useState(false)
-  // Widen the stages/components sidebar for easier organizing.
-  const [stagesExpanded, setStagesExpanded] = useState(false)
   // Left panel view: 'stages' (grouped blocks, drag to organize) or 'list' (one
   // editable row per field).
   const [panelView, setPanelView] = useState('stages')
@@ -1100,10 +1111,40 @@ export default function FormBuilder() {
   const [pillMenu, setPillMenu] = useState(null)
   const [marquee, setMarquee] = useState(null)
   const stagesScrollRef = useRef(null)
-  const [propertiesPanelWidth, setPropertiesPanelWidth] = useState(PROPERTIES_PANEL_DEFAULT_W)
-  const [propertiesPanelResizing, setPropertiesPanelResizing] = useState(false)
-  const propertiesPanelWidthRef = useRef(PROPERTIES_PANEL_DEFAULT_W)
-  const propertiesResizeRef = useRef({ active: false, startX: 0, startW: PROPERTIES_PANEL_DEFAULT_W })
+  const {
+    width: propertiesPanelWidth,
+    resizing: propertiesPanelResizing,
+    onResizeStart: onPropertiesResizePointerDown,
+    onResizeKeyDown: onPropertiesResizeKeyDown,
+  } = useResizablePanel({
+    side: 'right',
+    defaultW: PROPERTIES_PANEL_DEFAULT_W,
+    minW: PROPERTIES_PANEL_MIN_W,
+    maxW: PROPERTIES_PANEL_MAX_W,
+    prefKey: PROPERTIES_PANEL_WIDTH_STORAGE_KEY,
+    prefs,
+    updatePrefs,
+    disabled: propertiesPanelCollapsed,
+  })
+  // Left sidebar (stages / components): drag its right edge, or use Expand.
+  const {
+    width: componentsPanelWidth,
+    setWidth: setComponentsPanelWidth,
+    resizing: componentsPanelResizing,
+    onResizeStart: onComponentsResizePointerDown,
+    onResizeKeyDown: onComponentsResizeKeyDown,
+  } = useResizablePanel({
+    side: 'left',
+    defaultW: COMPONENTS_PANEL_DEFAULT_W,
+    minW: COMPONENTS_PANEL_MIN_W,
+    maxW: COMPONENTS_PANEL_MAX_W,
+    prefKey: COMPONENTS_PANEL_WIDTH_STORAGE_KEY,
+    prefs,
+    updatePrefs,
+    disabled: componentsPanelCollapsed,
+  })
+  // "Expanded" is just a wide panel: the grids flow into more columns.
+  const stagesExpanded = componentsPanelWidth >= COMPONENTS_PANEL_EXPANDED_W
 
   // Drag/resize state via refs to avoid re-renders during drag
   const dragState = useRef({ active: false, fieldId: null, offsetX: 0, offsetY: 0 })
@@ -1242,6 +1283,14 @@ export default function FormBuilder() {
     [fields, selectedFieldId],
   )
 
+  // Picking a calculation reference by clicking on the page:
+  // { calcFieldId, refIndex, slot: 'field' | 'time', token, eligibleIds }.
+  // While set, a click on an eligible field fills that reference instead of
+  // selecting the field. Ends when the calc field is no longer the one open.
+  const [refPick, setRefPick] = useState(null)
+  const refPickEligible = useMemo(() => new Set(refPick?.eligibleIds || []), [refPick])
+  if (refPick && refPick.calcFieldId !== selectedFieldId) setRefPick(null)
+
   // Replace the current selection with a single id (or clear when null).
   const selectSingle = useCallback((id) => {
     setSelectedFieldIds(id == null ? new Set() : new Set([id]))
@@ -1266,84 +1315,6 @@ export default function FormBuilder() {
       else selectSingle(id)
     },
     [selectSingle, toggleSelect],
-  )
-
-  useEffect(() => {
-    propertiesPanelWidthRef.current = propertiesPanelWidth
-  }, [propertiesPanelWidth])
-
-  const storedPanelW = prefs[PROPERTIES_PANEL_WIDTH_STORAGE_KEY]
-  useEffect(() => {
-    if (propertiesResizeRef.current.active) return
-    const raw = storedPanelW
-    const n = parseInt(typeof raw === 'string' ? raw : String(raw || ''), 10)
-    if (!Number.isFinite(n)) return
-    const w = Math.min(PROPERTIES_PANEL_MAX_W, Math.max(PROPERTIES_PANEL_MIN_W, n))
-    propertiesPanelWidthRef.current = w
-    setPropertiesPanelWidth(w)
-  }, [storedPanelW])
-
-  const endPropertiesResize = useCallback(() => {
-    if (!propertiesResizeRef.current.active) return
-    propertiesResizeRef.current.active = false
-    setPropertiesPanelResizing(false)
-    document.body.style.cursor = ''
-    document.body.style.userSelect = ''
-    updatePrefs({ [PROPERTIES_PANEL_WIDTH_STORAGE_KEY]: String(propertiesPanelWidthRef.current) })
-  }, [updatePrefs])
-
-  useEffect(() => {
-    const move = (e) => {
-      if (!propertiesResizeRef.current.active) return
-      const clientX =
-        'touches' in e && e.touches && e.touches.length > 0 ? e.touches[0].clientX : e.clientX
-      if (e.type === 'touchmove' && e.cancelable) e.preventDefault()
-      const { startX, startW } = propertiesResizeRef.current
-      const dx = startX - clientX
-      const next = Math.min(
-        PROPERTIES_PANEL_MAX_W,
-        Math.max(PROPERTIES_PANEL_MIN_W, startW + dx),
-      )
-      propertiesPanelWidthRef.current = next
-      setPropertiesPanelWidth(next)
-    }
-    const up = () => endPropertiesResize()
-
-    window.addEventListener('mousemove', move)
-    window.addEventListener('mouseup', up)
-    window.addEventListener('touchmove', move, { passive: false })
-    window.addEventListener('touchend', up)
-
-    return () => {
-      window.removeEventListener('mousemove', move)
-      window.removeEventListener('mouseup', up)
-      window.removeEventListener('touchmove', move)
-      window.removeEventListener('touchend', up)
-      document.body.style.cursor = ''
-      document.body.style.userSelect = ''
-      if (propertiesResizeRef.current.active) {
-        propertiesResizeRef.current.active = false
-        setPropertiesPanelResizing(false)
-      }
-    }
-  }, [endPropertiesResize])
-
-  const onPropertiesResizePointerDown = useCallback(
-    (e) => {
-      if (propertiesPanelCollapsed) return
-      e.preventDefault()
-      const clientX =
-        'touches' in e && e.touches && e.touches.length > 0 ? e.touches[0].clientX : e.clientX
-      propertiesResizeRef.current = {
-        active: true,
-        startX: clientX,
-        startW: propertiesPanelWidthRef.current,
-      }
-      setPropertiesPanelResizing(true)
-      document.body.style.cursor = 'col-resize'
-      document.body.style.userSelect = 'none'
-    },
-    [propertiesPanelCollapsed],
   )
 
   const scaleFactor = scale / DESIGN_SCALE
@@ -2317,6 +2288,19 @@ export default function FormBuilder() {
   // -- Field mousedown for dragging --
 
   const handleFieldMouseDown = (e, field) => {
+    if (refPick) {
+      e.preventDefault()
+      e.stopPropagation()
+      if (!refPickEligible.has(field.id)) return
+      const calcField = fields.find((f) => f.id === refPick.calcFieldId)
+      if (calcField) {
+        updateField(calcField.id, {
+          calc: applyCalcRefPick(calcField.calc, refPick.refIndex, refPick.slot, field),
+        })
+      }
+      setRefPick(null)
+      return
+    }
     if (
       e.target.classList.contains('fb-field-resize') ||
       e.target.classList.contains('fb-field-delete') ||
@@ -2387,6 +2371,10 @@ export default function FormBuilder() {
   // edges, and Ctrl/Shift adds to the current selection.
   const handleCanvasMarqueeStart = useCallback((e) => {
     if (e.button !== 0) return
+    if (refPick) {
+      if (e.target === overlayRef.current) setRefPick(null)
+      return
+    }
     if (e.target !== overlayRef.current) return // only start on empty canvas
     const container = canvasScrollRef.current
     const overlay = overlayRef.current
@@ -2457,7 +2445,7 @@ export default function FormBuilder() {
     window.addEventListener('mouseup', onUp)
     container.addEventListener('scroll', onScroll)
     rafId = requestAnimationFrame(tick)
-  }, [])
+  }, [refPick])
 
   // -- Form Selection Modal Logic --
 
@@ -2933,18 +2921,36 @@ export default function FormBuilder() {
   // prior index and re-derives from the current layout, so fixing a field's
   // position and clicking again corrects the numbers. Singletons keep their
   // label untouched. One undo step.
-  const autoNameDuplicates = useCallback(() => {
-    const { next, renamedCount } = planAutoName(fields)
-    if (next !== fields) setFields(next)
-    setAutoNameCount(renamedCount)
-    setAutoNameToastVisible(true)
+  const showAutoToast = useCallback((message) => {
+    setAutoNameToast(message)
     if (autoNameToastTimerRef.current) clearTimeout(autoNameToastTimerRef.current)
     autoNameToastTimerRef.current = setTimeout(() => {
-      setAutoNameToastVisible(false)
+      setAutoNameToast(null)
       autoNameToastTimerRef.current = null
     }, 2200)
-  }, [fields])
+  }, [])
 
+  // Auto-sort: order each stage's fields by where they sit on the PDF.
+  const autoSortFields = useCallback(() => {
+    const { next, reorderedCount } = planAutoName(fields, { sort: true, rename: false })
+    if (next !== fields) setFields(next)
+    showAutoToast(
+      reorderedCount === 0
+        ? 'Fields are already in page order'
+        : `Reordered ${reorderedCount} field${reorderedCount === 1 ? '' : 's'}`,
+    )
+  }, [fields, showAutoToast])
+
+  // Auto-name: number fields that share a label in the same stage.
+  const autoNameDuplicates = useCallback(() => {
+    const { next, renamedCount } = planAutoName(fields, { sort: false, rename: true })
+    if (next !== fields) setFields(next)
+    showAutoToast(
+      renamedCount === 0
+        ? 'No duplicate labels to number'
+        : `Renamed ${renamedCount} field${renamedCount === 1 ? '' : 's'}`,
+    )
+  }, [fields, showAutoToast])
   const handlePillClick = useCallback(
     (e, f) => {
       if (e.metaKey || e.ctrlKey) {
@@ -3158,6 +3164,16 @@ export default function FormBuilder() {
     rafId = requestAnimationFrame(tick)
   }, [])
 
+  // Escape leaves "pick a reference on the page" without changing anything.
+  useEffect(() => {
+    if (!refPick) return
+    const onKey = (e) => {
+      if (e.key === 'Escape') setRefPick(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [refPick])
+
   // Close the pill context menu on Escape (and clear the selection); Escape with
   // no menu open just clears the selection.
   useEffect(() => {
@@ -3308,11 +3324,9 @@ export default function FormBuilder() {
           Copied {clipboardCount} field{clipboardCount === 1 ? '' : 's'}
         </div>
       )}
-      {autoNameToastVisible && (
+      {autoNameToast && (
         <div className="fb-copy-toast" role="status" aria-live="polite">
-          {autoNameCount === 0
-            ? 'No duplicate labels to number'
-            : `Renamed ${autoNameCount} field${autoNameCount === 1 ? '' : 's'}`}
+          {autoNameToast}
         </div>
       )}
 
@@ -3344,7 +3358,12 @@ export default function FormBuilder() {
         <div
           className={`fb-components-panel ${componentsPanelCollapsed ? 'fb-components-panel-collapsed' : ''}${
             stagesExpanded && !componentsPanelCollapsed ? ' fb-components-panel--expanded' : ''
-          }`}
+          }${componentsPanelResizing ? ' fb-components-panel--resizing' : ''}`}
+          style={
+            componentsPanelCollapsed
+              ? undefined
+              : { width: componentsPanelWidth, minWidth: componentsPanelWidth, flexShrink: 0 }
+          }
         >
           {!componentsPanelCollapsed && (
             <div className="fb-components-panel-content">
@@ -3374,7 +3393,7 @@ export default function FormBuilder() {
                           onClick={() => {
                             setPanelView('list')
                             // The table needs the room; the user can still collapse.
-                            setStagesExpanded(true)
+                            if (!stagesExpanded) setComponentsPanelWidth(COMPONENTS_PANEL_EXPANDED_W)
                           }}
                           title="Every field as one editable row — click a row to find it on the document"
                         >
@@ -3385,8 +3404,17 @@ export default function FormBuilder() {
                         <button
                           type="button"
                           className="fb-stages-autoorder-btn"
+                          onClick={autoSortFields}
+                          title="Order every stage's fields by their position on the PDF — top to bottom, then left to right. Re-run after moving a field to fix the order."
+                        >
+                          <BarsArrowDownIcon className="fb-stages-expand-icon" />
+                          <span>Auto-sort</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="fb-stages-autoorder-btn"
                           onClick={autoNameDuplicates}
-                          title="Order every field by its position on the PDF — top to bottom, then left to right — and number fields that share a label in the same stage: “Date #1”, “Date #2”. Re-run after moving a field to fix the order and numbers."
+                          title="Number fields that share a label in the same stage, in page order: “Date #1”, “Date #2”. Field order is left as it is."
                         >
                           <TagIcon className="fb-stages-expand-icon" />
                           <span>Auto-name</span>
@@ -3394,7 +3422,11 @@ export default function FormBuilder() {
                         <button
                           type="button"
                           className="fb-stages-expand-btn"
-                          onClick={() => setStagesExpanded((v) => !v)}
+                          onClick={() =>
+                            setComponentsPanelWidth(
+                              stagesExpanded ? COMPONENTS_PANEL_DEFAULT_W : COMPONENTS_PANEL_EXPANDED_W,
+                            )
+                          }
                           title={stagesExpanded ? 'Collapse the panel' : 'Expand the panel for more room to organize'}
                           aria-pressed={stagesExpanded}
                         >
@@ -3692,6 +3724,7 @@ export default function FormBuilder() {
                     ) : (
                       <FieldListTable
                         rows={listRows}
+                        exportName={loadedFormName}
                         existingStages={existingStages}
                         selectedFieldIds={selectedFieldIds}
                         stageSizes={stageSizes}
@@ -3738,6 +3771,22 @@ export default function FormBuilder() {
               </div>
             </div>
           )}
+          {!componentsPanelCollapsed && (
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize components panel"
+              aria-valuenow={componentsPanelWidth}
+              aria-valuemin={COMPONENTS_PANEL_MIN_W}
+              aria-valuemax={COMPONENTS_PANEL_MAX_W}
+              tabIndex={0}
+              title="Drag to resize"
+              className="fb-panel-resize fb-components-panel-resize"
+              onMouseDown={onComponentsResizePointerDown}
+              onTouchStart={onComponentsResizePointerDown}
+              onKeyDown={onComponentsResizeKeyDown}
+            />
+          )}
           <button
             type="button"
             className="fb-components-panel-toggle"
@@ -3758,6 +3807,19 @@ export default function FormBuilder() {
 
         {/* Canvas Area */}
         <div className="fb-canvas-area" onWheel={handleCanvasWheel}>
+          {refPick && (
+            <div className="fb-ref-pick-banner" role="status">
+              <span>
+                Click a {refPick.slot === 'time' ? 'time field' : 'highlighted field'} on the page for
+                reference <strong>{refPick.token}</strong>
+                {refPick.slot === 'time' ? ' (its time)' : ''}.
+                {refPickEligible.size === 0 && ' No fields can be used here.'}
+              </span>
+              <button type="button" onClick={() => setRefPick(null)}>
+                Cancel <kbd>Esc</kbd>
+              </button>
+            </div>
+          )}
           <div className="fb-canvas-scroll" ref={canvasScrollRef}>
           <div className="fb-rulers-and-canvas">
             {/* Top ruler (sticky when scrolling down) */}
@@ -3839,7 +3901,7 @@ export default function FormBuilder() {
             {/* Overlay */}
             <div
               ref={overlayRef}
-              className="fb-overlay"
+              className={`fb-overlay${refPick ? ' fb-overlay--ref-pick' : ''}`}
               style={{ width: canvasSize.width, height: canvasSize.height }}
               onDragEnter={handleOverlayDragEnter}
               onDragOver={handleOverlayDragOver}
@@ -3891,6 +3953,15 @@ export default function FormBuilder() {
                   key={field.id}
                   field={field}
                   selected={selectedFieldIds.has(field.id)}
+                  refPickState={
+                    refPick
+                      ? field.id === refPick.calcFieldId
+                        ? 'self'
+                        : refPickEligible.has(field.id)
+                          ? 'eligible'
+                          : 'ineligible'
+                      : null
+                  }
                   scaleFactor={scaleFactor}
                   onFieldUpdate={(updates) => updateField(field.id, updates)}
                   onMouseDown={(e) => handleFieldMouseDown(e, field)}
@@ -3950,9 +4021,14 @@ export default function FormBuilder() {
                   aria-orientation="vertical"
                   aria-label="Resize properties panel"
                   title="Drag to resize"
-                  className="fb-properties-panel-resize"
+                  aria-valuenow={propertiesPanelWidth}
+                  aria-valuemin={PROPERTIES_PANEL_MIN_W}
+                  aria-valuemax={PROPERTIES_PANEL_MAX_W}
+                  tabIndex={0}
+                  className="fb-panel-resize fb-properties-panel-resize"
                   onMouseDown={onPropertiesResizePointerDown}
                   onTouchStart={onPropertiesResizePointerDown}
+                  onKeyDown={onPropertiesResizeKeyDown}
                 />
                 <div className="fb-properties-panel-content">
                   {selectedField ? (
@@ -3965,6 +4041,9 @@ export default function FormBuilder() {
                         onRenameStage={renameStage}
                         onOpenStage={selectStage}
                         onUpdate={(updates) => updateField(selectedField.id, updates)}
+                        refPick={refPick}
+                        onStartRefPick={setRefPick}
+                        onCancelRefPick={() => setRefPick(null)}
                       />
                     </>
                   ) : (
@@ -4728,13 +4807,24 @@ function formFieldFontPx(field) {
   return DEFAULT_INPUT_FONT_PX
 }
 
-function FormField({ field, selected, scaleFactor = 1, onFieldUpdate, onMouseDown, onResizeMouseDown, onDelete, onClick }) {
+function FormField({
+  field,
+  selected,
+  refPickState = null,
+  scaleFactor = 1,
+  onFieldUpdate,
+  onMouseDown,
+  onResizeMouseDown,
+  onDelete,
+  onClick,
+}) {
   const fontPx = formFieldFontPx(field)
   return (
     <div
-      className={`fb-field ${selected ? 'selected' : ''}`}
+      className={`fb-field ${selected ? 'selected' : ''}${refPickState ? ` fb-field--pick-${refPickState}` : ''}`}
       data-fb-field-id={field.id}
       aria-label={field.label || 'Field'}
+      title={refPickState === 'eligible' ? `Use “${field.label || 'Field'}”` : undefined}
       style={{
         left: field.x * scaleFactor,
         top: field.y * scaleFactor,
@@ -5045,6 +5135,30 @@ function FormulaHelp({ tokens, numberTokens = [], timeTokens = [], onClose }) {
   )
 }
 
+/** Select value for the "pick on the page" option in a reference dropdown. */
+const CALC_PICK_ON_PAGE = '__pick_on_page__'
+
+/**
+ * `calc` with reference `refIndex` pointed at `pickedField`. `slot` 'field' sets
+ * the reference itself — resetting its unit and paired time, so it never keeps
+ * settings that make no sense for the new type — and 'time' sets the time paired
+ * with a date reference. Shared by the dropdowns and by clicking on the page.
+ */
+function applyCalcRefPick(calc, refIndex, slot, pickedField) {
+  const refs = Array.isArray(calc?.refs) ? calc.refs : []
+  return {
+    ...calc,
+    refs: refs.map((r, idx) => {
+      if (idx !== refIndex) return r
+      if (slot === 'time') return { ...r, timeFieldId: pickedField?.id || undefined }
+      const kind = calcRefKind(pickedField)
+      const next = { fieldId: pickedField?.id || '', token: r.token }
+      if (kind === 'date' || kind === 'time') next.unit = defaultCalcUnit(kind)
+      return next
+    }),
+  }
+}
+
 /** Token (A, B, … Z, A1, …) for a reference slot; stable per ref once assigned. */
 function calcTokenForIndex(i) {
   const letter = String.fromCharCode(65 + (i % 26))
@@ -5064,7 +5178,7 @@ function calcTokenForIndex(i) {
  * field (`timeFieldId`) so the pair names one instant — which is what makes an
  * elapsed time that crosses midnight come out right.
  */
-function NumberCalcEditor({ field, fields, onUpdate }) {
+function NumberCalcEditor({ field, fields, onUpdate, refPick, onStartRefPick, onCancelRefPick }) {
   const [showHelp, setShowHelp] = useState(false)
   const calc = field.calc || { enabled: false, refs: [], formula: '' }
   const refs = Array.isArray(calc.refs) ? calc.refs : []
@@ -5107,17 +5221,19 @@ function NumberCalcEditor({ field, fields, onUpdate }) {
   }
   // Picking a field resets the unit and pairing, so a reference never keeps a
   // unit that makes no sense for its new type (or a stale paired time field).
-  const pickRefField = (i, fieldId) => {
-    const kind = calcRefKind(fieldById(fieldId))
-    setCalc({
-      refs: refs.map((r, idx) => {
-        if (idx !== i) return r
-        const next = { fieldId, token: r.token }
-        if (kind === 'date' || kind === 'time') next.unit = defaultCalcUnit(kind)
-        return next
-      }),
+  const pickRefField = (i, fieldId) =>
+    onUpdate({ calc: applyCalcRefPick(calc, i, 'field', fieldById(fieldId)) })
+  // "Pick on the page…": the next click on an eligible field fills this slot.
+  const isPicking = (i, slot) =>
+    refPick?.calcFieldId === field.id && refPick.refIndex === i && refPick.slot === slot
+  const startPick = (i, slot) =>
+    onStartRefPick?.({
+      calcFieldId: field.id,
+      refIndex: i,
+      slot,
+      token: refs[i]?.token,
+      eligibleIds: (slot === 'time' ? timeFields : sourceFields).map((f) => f.id),
     })
-  }
   const patchRef = (i, patch) =>
     setCalc({ refs: refs.map((r, idx) => (idx === i ? { ...r, ...patch } : r)) })
   const removeRef = (i) => setCalc({ refs: refs.filter((_, idx) => idx !== i) })
@@ -5167,8 +5283,23 @@ function NumberCalcEditor({ field, fields, onUpdate }) {
                   <span className={`fb-calc-token${isDateTime ? ' fb-calc-token--time' : ''}`}>
                     {r.token}
                   </span>
-                  <select value={r.fieldId || ''} onChange={(e) => pickRefField(i, e.target.value)}>
+                  <select
+                    value={isPicking(i, 'field') ? CALC_PICK_ON_PAGE : r.fieldId || ''}
+                    className={isPicking(i, 'field') ? 'fb-calc-ref-picking' : undefined}
+                    onChange={(e) => {
+                      if (e.target.value === CALC_PICK_ON_PAGE) startPick(i, 'field')
+                      else {
+                        if (isPicking(i, 'field')) onCancelRefPick?.()
+                        pickRefField(i, e.target.value)
+                      }
+                    }}
+                  >
                     <option value="">— Select a field —</option>
+                    {onStartRefPick && (
+                      <option value={CALC_PICK_ON_PAGE}>
+                        {isPicking(i, 'field') ? 'Click a field on the page…' : '◎ Pick on the page…'}
+                      </option>
+                    )}
                     {groupedSources.map((g) => (
                       <optgroup key={g.kind} label={g.label}>
                         {g.items.map((f) => (
@@ -5182,7 +5313,10 @@ function NumberCalcEditor({ field, fields, onUpdate }) {
                   <button
                     type="button"
                     className="fb-calc-remove"
-                    onClick={() => removeRef(i)}
+                    onClick={() => {
+                      if (refPick?.calcFieldId === field.id) onCancelRefPick?.()
+                      removeRef(i)
+                    }}
                     aria-label={`Remove reference ${r.token}`}
                   >
                     ×
@@ -5194,15 +5328,25 @@ function NumberCalcEditor({ field, fields, onUpdate }) {
                       <label className="fb-calc-ref-opt">
                         <span>with time</span>
                         <select
-                          value={r.timeFieldId || ''}
-                          onChange={(e) =>
-                            patchRef(i, { timeFieldId: e.target.value || undefined })
-                          }
+                          value={isPicking(i, 'time') ? CALC_PICK_ON_PAGE : r.timeFieldId || ''}
+                          className={isPicking(i, 'time') ? 'fb-calc-ref-picking' : undefined}
+                          onChange={(e) => {
+                            if (e.target.value === CALC_PICK_ON_PAGE) startPick(i, 'time')
+                            else {
+                              if (isPicking(i, 'time')) onCancelRefPick?.()
+                              patchRef(i, { timeFieldId: e.target.value || undefined })
+                            }
+                          }}
                           disabled={timeFields.length === 0}
                         >
                           <option value="">
                             {timeFields.length === 0 ? 'no time fields' : 'midnight'}
                           </option>
+                          {onStartRefPick && timeFields.length > 0 && (
+                            <option value={CALC_PICK_ON_PAGE}>
+                              {isPicking(i, 'time') ? 'Click a time field…' : '◎ Pick on the page…'}
+                            </option>
+                          )}
                           {timeFields.map((f) => (
                             <option key={f.id} value={f.id}>
                               {labelForField(f.id)}
@@ -5404,7 +5548,17 @@ function StagePropertiesForm({ stageName, existingStages, fields, onRename, onMo
   )
 }
 
-function PropertiesForm({ field, existingStages, fields, onRenameStage, onOpenStage, onUpdate }) {
+function PropertiesForm({
+  field,
+  existingStages,
+  fields,
+  onRenameStage,
+  onOpenStage,
+  onUpdate,
+  refPick,
+  onStartRefPick,
+  onCancelRefPick,
+}) {
   const [stageMode, setStageMode] = useState(
     field.stageInProcess && !existingStages.includes(field.stageInProcess) ? 'new' : 'select',
   )
@@ -5767,7 +5921,14 @@ function PropertiesForm({ field, existingStages, fields, onRenameStage, onOpenSt
       )}
 
       {field.type === 'number' && (
-        <NumberCalcEditor field={field} fields={fields} onUpdate={onUpdate} />
+        <NumberCalcEditor
+          field={field}
+          fields={fields}
+          onUpdate={onUpdate}
+          refPick={refPick}
+          onStartRefPick={onStartRefPick}
+          onCancelRefPick={onCancelRefPick}
+        />
       )}
 
       {(field.type === 'dropdown' || field.type === 'radio' || field.type === 'multiselect') && (
