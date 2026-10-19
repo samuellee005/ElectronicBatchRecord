@@ -11,7 +11,7 @@ require_once __DIR__ . '/form-permissions.php';
 header('Content-Type: application/json');
 
 try {
-    $all = ebr_db_forms_all_api();
+    $all = ebr_db_forms_all_summary_api();
 } catch (Throwable $e) {
     echo json_encode(['success' => false, 'forms' => [], 'groupedForms' => [], 'message' => 'Could not load forms']);
     exit;
@@ -30,7 +30,7 @@ foreach ($all as $formData) {
         'name' => $formData['name'] ?? 'Unnamed Form',
         'description' => $formData['description'] ?? '',
         'pdfFile' => $formData['pdfFile'] ?? '',
-        'fieldCount' => count($formData['fields'] ?? []),
+        'fieldCount' => $formData['fieldCount'] ?? 0,
         'version' => round(floatval($formData['version'] ?? 1), 1),
         'isLatest' => $formData['isLatest'] ?? true,
         'isCombined' => isset($formData['isCombined']) && $formData['isCombined'] === true,

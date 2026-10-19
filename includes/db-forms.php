@@ -107,8 +107,20 @@ function ebr_db_form_row_to_api(array $row): array
         'department' => $row['department'] ?? '',
         'program' => $row['program'] ?? '',
         'formType' => $row['form_type'] ?? '',
-    ];
+    ] + (array_key_exists('field_count', $row) ? ['fieldCount' => (int) $row['field_count']] : []);
 }
+
+/**
+ * Every column except the two large JSON ones (fields, audit_trail), plus the
+ * field count. Each saved version keeps its own copy of the form's fields and
+ * of the audit trail up to that point, so loading those for every row ran PHP
+ * out of memory once forms had been saved enough times. Rows read this way
+ * have `fields` and `auditTrail` as [] — fetch a row by id for those.
+ */
+const EBR_FORMS_SUMMARY_COLUMNS = 'id, lineage_id, name, description, pdf_file, version, is_latest,
+    source_form_ids, is_combined, created_at, updated_at, created_by, updated_by,
+    created_by_user_id, updated_by_user_id, collaborators, storage_filename,
+    department, program, form_type, jsonb_array_length(fields) AS field_count';
 
 /**
  * @return list<array<string, mixed>>
@@ -117,6 +129,24 @@ function ebr_db_forms_all_api(): array
 {
     $pdo = ebr_pg_pdo();
     $st = $pdo->query('SELECT * FROM ebr_forms');
+    $out = [];
+    while ($row = $st->fetch(PDO::FETCH_ASSOC)) {
+        $out[] = ebr_db_form_row_to_api($row);
+    }
+
+    return $out;
+}
+
+/**
+ * Every row without its fields or audit trail (see EBR_FORMS_SUMMARY_COLUMNS):
+ * what listing, name checks and version numbering need.
+ *
+ * @return list<array<string, mixed>>
+ */
+function ebr_db_forms_all_summary_api(): array
+{
+    $pdo = ebr_pg_pdo();
+    $st = $pdo->query('SELECT ' . EBR_FORMS_SUMMARY_COLUMNS . ' FROM ebr_forms');
     $out = [];
     while ($row = $st->fetch(PDO::FETCH_ASSOC)) {
         $out[] = ebr_db_form_row_to_api($row);
@@ -283,9 +313,12 @@ SQL;
  */
 function ebr_db_forms_lineage_rows(string $lineageId): array
 {
+    // Summary columns only: a form with many versions would otherwise load
+    // every version's fields and audit trail. Fetch a row by id for those.
     $pdo = ebr_pg_pdo();
     $st = $pdo->prepare(
-        'SELECT * FROM ebr_forms WHERE lineage_id = :l OR (lineage_id IS NULL AND id = :l)
+        'SELECT ' . EBR_FORMS_SUMMARY_COLUMNS . ' FROM ebr_forms
+         WHERE lineage_id = :l OR (lineage_id IS NULL AND id = :l)
          ORDER BY version ASC, created_at ASC'
     );
     $st->execute(['l' => $lineageId]);
@@ -298,12 +331,18 @@ function ebr_db_forms_lineage_rows(string $lineageId): array
     return $out;
 }
 
-/** The newest version of a form, or null when the lineage has no rows. */
+/** The newest version of a form (full row), or null when the lineage has no rows. */
 function ebr_db_forms_lineage_latest(string $lineageId): ?array
 {
-    $rows = ebr_db_forms_lineage_rows($lineageId);
+    $pdo = ebr_pg_pdo();
+    $st = $pdo->prepare(
+        'SELECT * FROM ebr_forms WHERE lineage_id = :l OR (lineage_id IS NULL AND id = :l)
+         ORDER BY version DESC, created_at DESC LIMIT 1'
+    );
+    $st->execute(['l' => $lineageId]);
+    $row = $st->fetch(PDO::FETCH_ASSOC);
 
-    return $rows === [] ? null : $rows[count($rows) - 1];
+    return $row ? ebr_db_form_row_to_api($row) : null;
 }
 
 /**

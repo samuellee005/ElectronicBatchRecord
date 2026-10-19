@@ -16,7 +16,7 @@ if (!isset($_GET['pdf'])) {
 $pdfFile = basename($_GET['pdf']);
 
 try {
-    $all = ebr_db_forms_all_api();
+    $all = ebr_db_forms_all_summary_api();
 } catch (Throwable $e) {
     echo json_encode(['success' => false, 'message' => 'Could not load forms']);
     exit;
@@ -41,6 +41,15 @@ foreach ($all as $formData) {
             $latestTime = $formTime;
             $latestForm = $formData;
         }
+    }
+}
+
+// The scan above used summary rows; the reply needs the whole form.
+if ($latestForm) {
+    try {
+        $latestForm = ebr_db_forms_fetch_by_id((string) $latestForm['id']);
+    } catch (Throwable $e) {
+        $latestForm = null;
     }
 }
 

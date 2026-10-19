@@ -433,7 +433,8 @@ function generateInitialAuditTrail($fields, $userName, $version = null)
 }
 
 try {
-    $allForms = ebr_db_forms_all_api();
+    // Names, PDFs, versions and access only — no fields or audit trails.
+    $allForms = ebr_db_forms_all_summary_api();
 } catch (Throwable $e) {
     echo json_encode(['success' => false, 'message' => 'Failed to load forms from database.']);
     exit;
